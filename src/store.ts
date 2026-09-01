@@ -1,0 +1,108 @@
+import type {
+  AgentEntry,
+  AgentMode,
+  AppInfo,
+  Man,
+  PendingAction,
+  Profile,
+  SecurityLevel,
+  Settings,
+} from "./types";
+
+export interface UiEntry extends AgentEntry {
+  /** transient rows (live tool steps) are not persisted in the agent log */
+  transient?: boolean;
+}
+
+export interface AppStore {
+  info: AppInfo | null;
+  settings: Settings | null;
+  profiles: Profile[];
+  men: Man[];
+  entries: UiEntry[];
+  pending: PendingAction[];
+  activeModelId: string | null;
+  activeManId: string | null;
+  mode: AgentMode;
+  security: SecurityLevel;
+  channel: "chat" | "letter";
+  logIncoming: boolean;
+  menFilter: string;
+  profileFilter: string;
+  busy: boolean;
+}
+
+export const store: AppStore = {
+  info: null,
+  settings: null,
+  profiles: [],
+  men: [],
+  entries: [],
+  pending: [],
+  activeModelId: null,
+  activeManId: null,
+  mode: "auto",
+  security: "safe",
+  channel: "chat",
+  logIncoming: false,
+  menFilter: "",
+  profileFilter: "",
+  busy: false,
+};
+
+export function activeProfile(): Profile | null {
+  return store.profiles.find((p) => p.id === store.activeModelId) ?? null;
+}
+
+export function activeMan(): Man | null {
+  return store.men.find((m) => m.id === store.activeManId) ?? null;
+}
+
+export function visibleMen(): Man[] {
+  const query = store.menFilter.trim().toLowerCase();
+  if (!query) return store.men;
+  return store.men.filter((man) => {
+    const hay = [
+      man.name,
+      man.id,
+      man.location,
+      man.country,
+      man.status,
+      man.stage,
+      ...man.tags,
+      ...man.facts.map((f) => `${f.key} ${f.value}`),
+    ]
+      .join(" ")
+      .toLowerCase();
+    return hay.includes(query);
+  });
+}
+
+export function visibleProfiles(): Profile[] {
+  const query = store.profileFilter.trim().toLowerCase();
+  if (!query) return store.profiles;
+  return store.profiles.filter((p) =>
+    `${p.name} ${p.id} ${p.site}`.toLowerCase().includes(query),
+  );
+}
+
+export function pushEntry(entry: UiEntry) {
+  store.entries.push(entry);
+  if (store.entries.length > 400) store.entries.splice(0, store.entries.length - 400);
+}
+
+export function makeEntry(
+  sender: UiEntry["sender"],
+  text: string,
+  meta: Record<string, unknown> | null = null,
+  transient = false,
+): UiEntry {
+  return {
+    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    sender,
+    text,
+    meta,
+    ts: new Date().toISOString(),
+    transient,
+  };
+}

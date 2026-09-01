@@ -1,0 +1,144 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish (e.g. v0.1.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  desktop:
+    name: ${{ matrix.label }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: linux-x86_64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - label: windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - label: macos-aarch64
+            os: macos-latest
+            target: aarch64-apple-darwin
+          - label: macos-x86_64
+            os: macos-latest
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: release-${{ matrix.target }}
+
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev \
+            patchelf libxdo-dev libssl-dev build-essential file
+
+      - run: npm ci
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.event.inputs.tag || github.ref_name }}
+          releaseName: "VelvetDesk AI ${{ github.event.inputs.tag || github.ref_name }}"
+          releaseBody: "Автосборки для Windows, macOS, Linux и Android. Артефакт Android лежит в задании android-apk."
+          releaseDraft: false
+          prerelease: false
+          args: --target ${{ matrix.target }}
+
+  android:
+    name: android-apk
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install NDK
+        run: |
+          sdkmanager --install "ndk;27.1.12297006" "platforms;android-34" "build-tools;34.0.0"
+          echo "NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.1.12297006" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: release-android
+
+      - run: npm ci
+      - run: npx tauri android init --ci
+
+      - name: Build unsigned release APK
+        run: npx tauri android build --apk --target aarch64 armv7
+
+      - name: Sign APKs
+        id: sign
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          mkdir -p out
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "no keystore secret, falling back to a throwaway debug key"
+            keytool -genkeypair -v -keystore ci.keystore -storepass velvetdesk \
+              -keypass velvetdesk -alias ci -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=VelvetDesk CI, OU=CI, O=VelvetDesk, C=DE"
+            KEYSTORE=ci.keystore; KEYSTORE_PASSWORD=velvetdesk; KEY_ALIAS=ci; KEY_PASSWORD=velvetdesk
+          else
+            echo "$KEYSTORE_B64" | base64 -d > release.keystore
+            KEYSTORE=release.keystore
+          fi
+          APKSIGNER=$(find "$ANDROID_SDK_ROOT/build-tools" -name apksigner | sort | tail -1)
+          for apk in $(find src-tauri/gen/android -name "*-unsigned.apk"); do
+            signed="out/$(basename "${apk%-unsigned.apk}").apk"
+            "$APKSIGNER" sign --ks "$KEYSTORE" --ks-pass "pass:$KEYSTORE_PASSWORD" \
+              --ks-key-alias "$KEY_ALIAS" --key-pass "pass:$KEY_PASSWORD" \
+              --out "$signed" "$apk"
+          done
+          find src-tauri/gen/android -name "*.apk" ! -name "*-unsigned.apk" -exec cp -n {} out/ \; || true
+          ls -la out
+
+      - name: Attach APKs to the release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: gh release upload "$TAG" out/*.apk --clobber --repo "$GITHUB_REPOSITORY"

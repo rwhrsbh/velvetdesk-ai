@@ -1,0 +1,179 @@
+name: build
+
+on:
+  push:
+    branches: ["**"]
+    tags-ignore: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: lint + tests
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev \
+            patchelf libxdo-dev libssl-dev build-essential file
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: cargo fmt
+        working-directory: src-tauri
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: cargo test
+        working-directory: src-tauri
+        run: cargo test --all-features
+
+  desktop:
+    name: ${{ matrix.label }}
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: linux-x86_64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - label: windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - label: macos-aarch64
+            os: macos-latest
+            target: aarch64-apple-darwin
+          - label: macos-x86_64
+            os: macos-latest
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.target }}
+
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev \
+            patchelf libxdo-dev libssl-dev build-essential file
+
+      - run: npm ci
+
+      - name: Build bundles
+        run: npx tauri build --target ${{ matrix.target }} --ci
+
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          mkdir -p out
+          base="src-tauri/target/${{ matrix.target }}/release/bundle"
+          find "$base" -maxdepth 3 -type f \
+            \( -name "*.deb" -o -name "*.AppImage" -o -name "*.rpm" \
+               -o -name "*.dmg" -o -name "*.app.tar.gz" \
+               -o -name "*.msi" -o -name "*.exe" \) \
+            -exec cp {} out/ \; || true
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: velvetdesk-${{ matrix.label }}
+          path: out/*
+          if-no-files-found: warn
+          retention-days: 30
+
+  android:
+    name: android-apk
+    needs: check
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install NDK
+        run: |
+          sdkmanager --install "ndk;27.1.12297006" "platforms;android-34" "build-tools;34.0.0"
+          echo "NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.1.12297006" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: android
+
+      - run: npm ci
+
+      - name: Initialise Android project
+        run: npx tauri android init --ci
+
+      - name: Build APK (debug-signed, installable)
+        run: npx tauri android build --debug --apk --target aarch64 armv7
+
+      - name: Collect APKs
+        shell: bash
+        run: |
+          mkdir -p out
+          find src-tauri/gen/android -name "*.apk" -exec cp {} out/ \; || true
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: velvetdesk-android-apk
+          path: out/*.apk
+          if-no-files-found: warn
+          retention-days: 30

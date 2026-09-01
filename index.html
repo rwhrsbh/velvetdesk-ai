@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>VelvetDesk AI Studio</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <div class="topbar">
+      <div class="topbar-left">
+        <div class="app-title"><span class="mark">✦</span> VelvetDesk</div>
+        <div class="badge" id="providerBadge">провайдер не настроен</div>
+        <div class="badge green" id="keyBadge">ключей: 0</div>
+      </div>
+
+      <div class="topbar-center">
+        <div class="segmented-control" id="modeControl">
+          <button class="segmented-btn active" data-mode="auto">Auto</button>
+          <button class="segmented-btn" data-mode="act">Act</button>
+          <button class="segmented-btn" data-mode="memorize">Memorize</button>
+        </div>
+        <div class="segmented-control" id="securityControl">
+          <button class="segmented-btn" data-security="ask">Ask</button>
+          <button class="segmented-btn active" data-security="safe">Safe</button>
+          <button class="segmented-btn" data-security="yolo">Full</button>
+        </div>
+      </div>
+
+      <div class="topbar-right">
+        <button class="btn-icon" id="btnPending" title="Очередь подтверждений">🛡 <span id="pendingCount">0</span></button>
+        <button class="btn-icon" id="btnDoctor" title="Доктор">🩺</button>
+        <button class="btn-icon" id="btnKeys" title="Ключи и провайдеры">🔑</button>
+        <button class="btn-icon" id="btnMaster" title="Мастер-агент">🌐</button>
+      </div>
+    </div>
+
+    <div class="workspace" id="workspace">
+      <aside class="sidebar-left" id="paneProfiles">
+        <div class="panel-header">
+          <span class="panel-title">Модели</span>
+          <button class="btn-icon" id="btnAddProfile" title="Добавить модель">＋</button>
+        </div>
+        <div class="panel-search">
+          <input class="search-input" id="profileSearch" placeholder="Поиск модели…" />
+        </div>
+        <div class="profile-list" id="profileList"></div>
+        <div class="panel-footer">
+          <button class="btn-ghost" id="btnEditProfile">Настроить персону</button>
+        </div>
+      </aside>
+
+      <main class="chat-center" id="paneChat">
+        <div class="chat-header">
+          <div class="scope-pill">
+            <span class="status-dot" id="scopeDot"></span>
+            <span id="activeScopeLabel">Профиль не выбран</span>
+          </div>
+          <div class="scope-path">sandbox: <code id="scopePath">—</code></div>
+        </div>
+
+        <div class="chat-messages" id="chatMessages"></div>
+
+        <div class="chat-input-container">
+          <div class="input-bar">
+            <textarea
+              id="chatInput"
+              class="chat-textarea"
+              rows="3"
+              placeholder="Вставь входящее письмо, опиши задачу или надиктуй факты… (Ctrl+Enter — выполнить)"
+            ></textarea>
+            <div class="input-toolbar">
+              <div class="input-flags">
+                <span class="mini-pill">Режим: <b id="currentModeLabel">AUTO</b></span>
+                <span class="mini-pill">Доступ: <b id="currentSecLabel">SAFE</b></span>
+                <label class="mini-pill checkbox">
+                  <input type="checkbox" id="logIncoming" /> писать в историю
+                </label>
+                <select class="mini-select" id="channelSelect">
+                  <option value="chat">чат</option>
+                  <option value="letter">письмо</option>
+                </select>
+              </div>
+              <button class="btn-send" id="btnSend">Выполнить ↵</button>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      <aside class="sidebar-right" id="paneMen">
+        <div class="panel-header">
+          <span class="panel-title">Мужчины в работе</span>
+          <button class="btn-icon" id="btnAddMan" title="Добавить мужчину">＋</button>
+        </div>
+        <div class="panel-search">
+          <input class="search-input" id="menSearch" placeholder="🔍 Имя, ID, страна, метка…" />
+        </div>
+        <div class="men-list" id="menList"></div>
+        <div class="panel-footer">
+          <button class="btn-ghost" id="btnManCard">Карточка мужчины</button>
+        </div>
+      </aside>
+    </div>
+
+    <nav class="mobile-tabs" id="mobileTabs">
+      <button class="tab-btn" data-pane="paneProfiles">Модели</button>
+      <button class="tab-btn active" data-pane="paneChat">Копилот</button>
+      <button class="tab-btn" data-pane="paneMen">CRM</button>
+    </nav>
+
+    <div class="modal-overlay" id="modalOverlay">
+      <div class="modal-card" id="modalCard"></div>
+    </div>
+
+    <div class="toast-stack" id="toastStack"></div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
