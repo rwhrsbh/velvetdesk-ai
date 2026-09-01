@@ -68,12 +68,9 @@ pub fn repair_json_text(raw: &str) -> Option<String> {
     }
 
     // Drop anything before the first opening brace/bracket.
-    if let Some(pos) = text.find(['{', '[']) {
-        if pos > 0 {
-            text = text[pos..].to_string();
-        }
-    } else {
-        return None;
+    let start = text.find(['{', '['])?;
+    if start > 0 {
+        text = text[start..].to_string();
     }
 
     let mut out = String::with_capacity(text.len() + 8);
