@@ -143,6 +143,13 @@ const NOT_AUDIO_INPUT: &[&str] = &[
     "veo",
     "tts",
     "vision-only",
+    // These do serve generateContent but take no audio: a robotics reasoner,
+    // the computer-use agent, music generation and the research agents.
+    "robotics",
+    "computer-use",
+    "lyria",
+    "deep-research",
+    "antigravity",
 ];
 
 pub fn accepts_audio(id: &str) -> bool {
@@ -160,9 +167,13 @@ pub fn accepts_audio(id: &str) -> bool {
     if id.contains("transcribe") {
         return true;
     }
-    // Everything else in the Gemini multimodal line accepts audio parts;
-    // 1.0-era models did not.
-    id.starts_with("gemini-") && !id.starts_with("gemini-1.0") && !id.starts_with("gemini-pro-")
+    // Everything else in the Gemini multimodal line accepts audio parts.
+    // Only the 1.0-era models did not — and the exclusion must be exact, or it
+    // also swallows current aliases such as `gemini-pro-latest`.
+    id.starts_with("gemini-")
+        && !id.starts_with("gemini-1.0")
+        && id != "gemini-pro"
+        && !id.starts_with("gemini-pro-vision")
 }
 
 /// True when the model must go through the Interactions API instead of
@@ -494,6 +505,12 @@ async fn interactions_transcribe(
         serde_json::from_str(&text).map_err(|e| CallError::Parse(format!("{e}: {text}")))?;
     let transcript = extract_transcript(&value);
     if transcript.is_empty() {
+        // A finished interaction with no text means the clip held no speech —
+        // silence or background noise. That is an empty result, not a failure.
+        let completed = value.get("status").and_then(|s| s.as_str()) == Some("completed");
+        if completed {
+            return Ok(String::new());
+        }
         return Err(CallError::Parse(format!("empty transcript: {text}")));
     }
     Ok(transcript)
@@ -655,9 +672,15 @@ mod tests {
             "gemini-2.5-flash",
             "gemini-3.5-flash",
             "gemini-1.5-pro",
+            // Current aliases must survive the legacy 1.0 exclusion.
+            "gemini-pro-latest",
+            "gemini-flash-latest",
         ] {
             assert!(accepts_audio(id), "{id} should accept audio input");
         }
+        // The 1.0-era models genuinely took no audio.
+        assert!(!accepts_audio("gemini-pro"));
+        assert!(!accepts_audio("gemini-pro-vision"));
     }
 
     #[test]
@@ -681,6 +704,167 @@ mod tests {
         assert_eq!(models[0].id, "gemini-2.5-pro");
         assert_eq!(models[1].id, "gemini-3.5-transcribe");
         assert!(models[1].audio);
+    }
+
+    /// The real catalogue served by the Gemini API in September 2026, with the
+    /// generation methods each model advertises. Guards the dictation filter
+    /// against actual provider data instead of invented names.
+    const LIVE_CATALOGUE: &[(&str, &str)] = &[
+        ("gemini-2.5-flash", "generateContent"),
+        ("gemini-2.5-pro", "generateContent"),
+        ("gemini-2.5-flash-preview-tts", "generateContent"),
+        ("gemini-2.5-pro-preview-tts", "generateContent"),
+        ("gemma-4-26b-a4b-it", "generateContent"),
+        ("gemma-4-31b-it", "generateContent"),
+        ("gemini-flash-latest", "generateContent"),
+        ("gemini-flash-lite-latest", "generateContent"),
+        ("gemini-pro-latest", "generateContent"),
+        ("gemini-2.5-flash-lite", "generateContent"),
+        ("gemini-2.5-flash-image", "generateContent"),
+        ("gemini-3-flash-preview", "generateContent"),
+        ("gemini-3.1-pro-preview", "generateContent"),
+        ("gemini-3.1-pro-preview-customtools", "generateContent"),
+        ("gemini-3.1-flash-lite-preview", "generateContent"),
+        ("gemini-3.1-flash-lite", "generateContent"),
+        ("gemini-3-pro-image-preview", "generateContent"),
+        ("gemini-3-pro-image", "generateContent"),
+        ("nano-banana-pro-preview", "generateContent"),
+        ("gemini-3.1-flash-image-preview", "generateContent"),
+        ("gemini-3.1-flash-image", "generateContent"),
+        ("gemini-3.1-flash-lite-image", "generateContent"),
+        ("gemini-3.5-flash", "generateContent"),
+        ("gemini-3.5-flash-lite", "generateContent"),
+        ("gemini-omni-flash-preview", "generateContent"),
+        ("gemini-omni-1.1-flash", "generateContent"),
+        ("gemini-3.5-transcribe", "generateContent"),
+        ("gemini-3.6-flash", "generateContent"),
+        ("gemini-3.7-flash", "generateContent"),
+        ("lyria-3-clip-preview", "generateContent"),
+        ("lyria-3-pro-preview", "generateContent"),
+        ("gemini-3.1-flash-tts-preview", "generateContent"),
+        ("gemini-robotics-er-2-preview", "generateContent"),
+        ("gemini-2.5-computer-use-preview-10-2025", "generateContent"),
+        ("antigravity-preview-05-2026", "generateContent"),
+        ("deep-research-max-preview-04-2026", "generateContent"),
+        ("deep-research-preview-04-2026", "generateContent"),
+        ("deep-research-pro-preview-12-2025", "generateContent"),
+        ("gemini-embedding-001", "embedContent"),
+        ("gemini-embedding-2-preview", "embedContent"),
+        ("gemini-embedding-2", "embedContent"),
+        ("aqa", "generateAnswer"),
+        ("veo-3.1-generate-preview", "predictLongRunning"),
+        ("gemini-3.5-transcribe-live", "bidiGenerateContent"),
+        (
+            "gemini-2.5-flash-native-audio-latest",
+            "bidiGenerateContent",
+        ),
+        (
+            "gemini-2.5-flash-native-audio-preview-12-2025",
+            "bidiGenerateContent",
+        ),
+        ("gemini-3.1-flash-live-preview", "bidiGenerateContent"),
+        (
+            "gemini-robotics-er-2-streaming-preview",
+            "bidiGenerateContent",
+        ),
+        ("gemini-3.5-live-translate-preview", "bidiGenerateContent"),
+    ];
+
+    fn live_catalogue_json() -> Value {
+        json!({
+            "models": LIVE_CATALOGUE
+                .iter()
+                .map(|(name, method)| json!({
+                    "name": format!("models/{name}"),
+                    "displayName": name,
+                    "supportedGenerationMethods": [method],
+                }))
+                .collect::<Vec<_>>()
+        })
+    }
+
+    #[test]
+    fn dictation_list_matches_the_real_catalogue() {
+        let models = parse_gemini_models(&live_catalogue_json());
+        let mut audio: Vec<&str> = models
+            .iter()
+            .filter(|m| m.audio)
+            .map(|m| m.id.as_str())
+            .collect();
+        audio.sort_unstable();
+
+        let mut expected = vec![
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-2.5-pro",
+            "gemini-3-flash-preview",
+            "gemini-3.1-flash-lite",
+            "gemini-3.1-flash-lite-preview",
+            "gemini-3.1-pro-preview",
+            "gemini-3.1-pro-preview-customtools",
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.5-transcribe",
+            "gemini-3.6-flash",
+            "gemini-3.7-flash",
+            "gemini-flash-latest",
+            "gemini-flash-lite-latest",
+            "gemini-omni-1.1-flash",
+            "gemini-omni-flash-preview",
+            "gemini-pro-latest",
+        ];
+        expected.sort_unstable();
+        assert_eq!(audio, expected);
+    }
+
+    #[test]
+    fn live_only_models_never_reach_the_chat_list() {
+        let models = parse_gemini_models(&live_catalogue_json());
+        for id in [
+            "gemini-3.5-transcribe-live",
+            "gemini-3.1-flash-live-preview",
+            "gemini-3.5-live-translate-preview",
+            "gemini-2.5-flash-native-audio-latest",
+        ] {
+            assert!(
+                !models.iter().any(|m| m.id == id),
+                "{id} only serves bidiGenerateContent and must be dropped"
+            );
+        }
+    }
+
+    #[test]
+    fn silent_clip_yields_an_empty_transcript_not_an_error() {
+        // Shape returned by the Interactions API for a clip without speech.
+        let raw = json!({
+            "status": "completed",
+            "usage": { "total_tokens": 26 },
+            "object": "interaction"
+        });
+        assert_eq!(extract_transcript(&raw), "");
+    }
+
+    #[test]
+    fn reads_transcript_from_real_interactions_response() {
+        // Captured from gemini-3.5-transcribe on a real recording.
+        let raw = json!({
+            "id": "v1_Chdld3FYYXRp",
+            "status": "completed",
+            "usage": { "total_tokens": 144 },
+            "steps": [{
+                "content": [{
+                    "text": "Привет. Это проверка распознавания речи в приложении Velvet Desk.",
+                    "type": "text"
+                }],
+                "type": "model_output"
+            }],
+            "object": "interaction",
+            "model": "gemini-3.5-transcribe"
+        });
+        assert_eq!(
+            extract_transcript(&raw),
+            "Привет. Это проверка распознавания речи в приложении Velvet Desk."
+        );
     }
 
     #[test]

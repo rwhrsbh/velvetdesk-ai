@@ -82,6 +82,72 @@ fn clip_base64() -> String {
     base64::engine::general_purpose::STANDARD.encode(tone_wav())
 }
 
+/// Phrase the synthesised sample says, and a word every engine must return.
+const SPOKEN_PHRASE: &str = "Привет! Это проверка распознавания речи в приложении VelvetDesk.";
+const EXPECTED_WORD: &str = "проверка";
+
+/// Build a real speech sample with Gemini TTS so the transcription tests
+/// assert on words instead of on "the request did not fail".
+async fn speech_base64(http: &reqwest::Client, api_key: &str) -> Option<String> {
+    let url = "https://generativelanguage.googleapis.com/v1beta/models/\
+               gemini-2.5-flash-preview-tts:generateContent";
+    let body = serde_json::json!({
+        "contents": [{ "parts": [{ "text": format!("Скажи спокойным голосом: {SPOKEN_PHRASE}") }] }],
+        "generationConfig": {
+            "responseModalities": ["AUDIO"],
+            "speechConfig": {
+                "voiceConfig": { "prebuiltVoiceConfig": { "voiceName": "Kore" } }
+            }
+        }
+    });
+
+    let response = http
+        .post(url)
+        .header("x-goog-api-key", api_key)
+        .json(&body)
+        .send()
+        .await
+        .ok()?;
+    if !response.status().is_success() {
+        eprintln!("tts failed: {}", response.status());
+        return None;
+    }
+    let value: serde_json::Value = response.json().await.ok()?;
+    let part = value
+        .pointer("/candidates/0/content/parts/0/inlineData")
+        .cloned()?;
+    let mime = part.get("mimeType")?.as_str()?.to_string();
+    let pcm = base64::engine::general_purpose::STANDARD
+        .decode(part.get("data")?.as_str()?)
+        .ok()?;
+
+    // TTS returns headerless L16 PCM; wrap it so providers see a normal WAV.
+    let rate: u32 = mime
+        .split(';')
+        .find_map(|chunk| chunk.trim().strip_prefix("rate=")?.parse().ok())
+        .unwrap_or(24_000);
+    Some(base64::engine::general_purpose::STANDARD.encode(wrap_pcm(&pcm, rate)))
+}
+
+fn wrap_pcm(pcm: &[u8], rate: u32) -> Vec<u8> {
+    let data_len = pcm.len() as u32;
+    let mut wav = Vec::with_capacity(44 + pcm.len());
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&(36 + data_len).to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes());
+    wav.extend_from_slice(&rate.to_le_bytes());
+    wav.extend_from_slice(&(rate * 2).to_le_bytes());
+    wav.extend_from_slice(&2u16.to_le_bytes());
+    wav.extend_from_slice(&16u16.to_le_bytes());
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&data_len.to_le_bytes());
+    wav.extend_from_slice(pcm);
+    wav
+}
+
 fn key(var: &str) -> Option<String> {
     std::env::var(var).ok().filter(|k| !k.trim().is_empty())
 }
@@ -123,34 +189,69 @@ async fn gemini_lists_models_and_flags_speech_capable_ones() {
 
 #[tokio::test]
 #[ignore = "needs GEMINI_API_KEY"]
-async fn gemini_transcribes_through_generate_content() {
+async fn gemini_transcribes_speech_through_generate_content() {
     let Some(api_key) = key("GEMINI_API_KEY") else {
         eprintln!("skipped: no GEMINI_API_KEY");
         return;
     };
     let http = reqwest::Client::new();
+    let clip = speech_base64(&http, &api_key)
+        .await
+        .expect("tts sample for the transcription test");
+
     let provider = gemini("gemini-2.5-flash", "gemini-2.5-flash");
-    let result = catalog::transcribe(&http, &provider, &api_key, &clip_base64(), "audio/wav").await;
-    match result {
-        Ok(text) => println!("inline transcript: {text:?}"),
-        Err(err) => panic!("inline transcription failed: {}", err.message()),
-    }
+    let text = catalog::transcribe(&http, &provider, &api_key, &clip, "audio/wav")
+        .await
+        .unwrap_or_else(|err| panic!("inline transcription failed: {}", err.message()));
+
+    println!("inline transcript: {text}");
+    assert!(
+        text.to_lowercase().contains(EXPECTED_WORD),
+        "transcript should carry the spoken phrase, got {text:?}"
+    );
 }
 
 #[tokio::test]
 #[ignore = "needs GEMINI_API_KEY"]
-async fn gemini_transcribes_through_interactions_api() {
+async fn gemini_transcribes_speech_through_interactions_api() {
     let Some(api_key) = key("GEMINI_API_KEY") else {
         eprintln!("skipped: no GEMINI_API_KEY");
         return;
     };
     let http = reqwest::Client::new();
+    let clip = speech_base64(&http, &api_key)
+        .await
+        .expect("tts sample for the transcription test");
+
     // Dedicated speech model: uploads via Files API, then Interactions.
     let provider = gemini("gemini-2.5-flash", "gemini-3.5-transcribe");
-    match catalog::transcribe(&http, &provider, &api_key, &clip_base64(), "audio/wav").await {
-        Ok(text) => println!("transcribe-model transcript: {text:?}"),
-        Err(err) => panic!("interactions transcription failed: {}", err.message()),
-    }
+    let text = catalog::transcribe(&http, &provider, &api_key, &clip, "audio/wav")
+        .await
+        .unwrap_or_else(|err| panic!("interactions transcription failed: {}", err.message()));
+
+    println!("transcribe-model transcript: {text}");
+    assert!(
+        text.to_lowercase().contains(EXPECTED_WORD),
+        "transcript should carry the spoken phrase, got {text:?}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs GEMINI_API_KEY"]
+async fn silence_is_reported_as_an_empty_transcript() {
+    let Some(api_key) = key("GEMINI_API_KEY") else {
+        eprintln!("skipped: no GEMINI_API_KEY");
+        return;
+    };
+    let http = reqwest::Client::new();
+    // A pure tone carries no speech: the app must show "nothing recognised"
+    // rather than an error.
+    let provider = gemini("gemini-2.5-flash", "gemini-3.5-transcribe");
+    let text = catalog::transcribe(&http, &provider, &api_key, &clip_base64(), "audio/wav")
+        .await
+        .unwrap_or_else(|err| panic!("silent clip must not fail: {}", err.message()));
+    println!("silent clip transcript: {text:?}");
+    assert!(text.trim().is_empty());
 }
 
 #[tokio::test]
