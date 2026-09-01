@@ -193,6 +193,27 @@ export interface Settings {
   telemetry_disabled: boolean;
   ui_language: "ru" | "en";
   speech_provider: string | null;
+  speech_engine: "provider" | "local";
+  local_speech_model: string;
+}
+
+export interface LocalModel {
+  id: string;
+  repo: string;
+  label: string;
+  size_bytes: number;
+  note: string;
+  installed: boolean;
+  bytes_on_disk: number;
+}
+
+export interface ModelProgress {
+  model_id: string;
+  file: string;
+  file_index: number;
+  file_count: number;
+  received: number;
+  total: number;
 }
 
 export interface KeyStatus {

@@ -7,11 +7,16 @@ pub mod llm;
 pub mod models;
 pub mod state;
 pub mod storage;
+pub mod whisper;
 
 use tauri::Manager;
 
 use crate::state::AppState;
 use crate::storage::Paths;
+
+/// Private URI scheme the webview uses to read downloaded Whisper weights.
+/// Nothing else is reachable through it — see `whisper::resolve_asset`.
+pub const MODEL_SCHEME: &str = "vdmodels";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -27,6 +32,34 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        // Serves downloaded model files to the webview, and nothing else.
+        .register_uri_scheme_protocol(MODEL_SCHEME, |ctx, request| {
+            let Some(state) = ctx.app_handle().try_state::<AppState>() else {
+                return tauri::http::Response::builder()
+                    .status(503)
+                    .body(Vec::new())
+                    .unwrap();
+            };
+            let path = request.uri().path().to_string();
+            match whisper::resolve_asset(&state.paths, &path) {
+                Some(file) => match std::fs::read(&file) {
+                    Ok(bytes) => tauri::http::Response::builder()
+                        .status(200)
+                        .header("content-type", whisper::content_type(&file))
+                        .header("access-control-allow-origin", "*")
+                        .body(bytes)
+                        .unwrap(),
+                    Err(_) => tauri::http::Response::builder()
+                        .status(500)
+                        .body(Vec::new())
+                        .unwrap(),
+                },
+                None => tauri::http::Response::builder()
+                    .status(404)
+                    .body(Vec::new())
+                    .unwrap(),
+            }
+        })
         .setup(|app| {
             let base = app
                 .path()
@@ -73,6 +106,10 @@ pub fn run() {
             commands::remove_key,
             commands::list_provider_models,
             commands::transcribe,
+            commands::list_local_models,
+            commands::download_local_model,
+            commands::delete_local_model,
+            commands::local_models_base_url,
             commands::test_provider,
             commands::seed_demo,
         ])

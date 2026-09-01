@@ -4,6 +4,7 @@ import type { ModalDeps } from "./deps";
 import { $, bindModalDismiss, toast } from "./dom";
 import { openManForm, openProfileForm } from "./forms";
 import { openDoctorModal, openMasterModal, openPendingModal } from "./modals";
+import { transcribeLocally } from "./local-whisper";
 import { openKeysModal } from "./provider-modal";
 import { activeMan, activeProfile, makeEntry, pushEntry, store } from "./store";
 import type { AgentMode, RunStep, SecurityLevel, Settings } from "./types";
@@ -52,6 +53,7 @@ async function refresh() {
     store.men = await api.listMen(store.activeModelId);
   }
   await loadIndexCounts();
+  await refreshLocalModels();
   renderAll();
 }
 
@@ -178,6 +180,37 @@ async function sendMessage() {
 // voice dictation
 // ---------------------------------------------------------------------------
 
+/** Repository of the model chosen for offline dictation, if any. */
+function localModelRepo(): string | null {
+  const id = store.settings?.local_speech_model;
+  if (!id) return null;
+  return localRepos.get(id) ?? null;
+}
+
+const localRepos = new Map<string, string>();
+
+async function refreshLocalModels() {
+  try {
+    const models = await api.listLocalModels();
+    localRepos.clear();
+    models.filter((m) => m.installed).forEach((m) => localRepos.set(m.id, m.repo));
+  } catch (error) {
+    console.error("local models", error);
+  }
+}
+
+/** Run the clip through whichever engine the operator picked. */
+async function transcribeClip(blob: Blob, mime: string): Promise<string> {
+  if (store.settings?.speech_engine === "local") {
+    const repo = localModelRepo();
+    if (!repo) throw new Error(t("toast.localNoModel"));
+    $("micLabel").textContent = t("composer.loadingModel");
+    return transcribeLocally(repo, blob);
+  }
+  const base64 = await blobToBase64(blob);
+  return api.transcribe(base64, mime.split(";")[0]);
+}
+
 let recorder: MediaRecorder | null = null;
 let chunks: Blob[] = [];
 
@@ -203,7 +236,14 @@ async function toggleDictation() {
     recorder.stop();
     return;
   }
-  if (!activeProviderReady()) {
+  // On-device recognition needs a downloaded model, not a provider key.
+  if (store.settings?.speech_engine === "local") {
+    if (!localModelRepo()) {
+      toast(t("toast.localNoModel"), "error");
+      void openKeysModal(deps);
+      return;
+    }
+  } else if (!activeProviderReady()) {
     toast(t("toast.needKeyVoice"), "error");
     void openKeysModal(deps);
     return;
@@ -235,8 +275,7 @@ async function toggleDictation() {
       }
       setMicState("working");
       try {
-        const base64 = await blobToBase64(blob);
-        const text = await api.transcribe(base64, type.split(";")[0]);
+        const text = await transcribeClip(blob, type);
         if (text.trim()) {
           const input = $("composerInput") as HTMLTextAreaElement;
           input.value = input.value ? `${input.value.trim()} ${text.trim()}` : text.trim();

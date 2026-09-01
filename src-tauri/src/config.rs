@@ -111,6 +111,12 @@ pub struct Settings {
     /// dictate through Gemini, Groq or a local Whisper server.
     #[serde(default)]
     pub speech_provider: Option<String>,
+    /// "provider" (cloud) or "local" (downloaded Whisper, offline).
+    #[serde(default = "default_speech_engine")]
+    pub speech_engine: String,
+    /// Id of the downloaded model used when the engine is local.
+    #[serde(default)]
+    pub local_speech_model: String,
 }
 
 fn default_mode() -> AgentMode {
@@ -135,6 +141,10 @@ fn default_true() -> bool {
 
 fn default_language() -> String {
     "ru".to_string()
+}
+
+fn default_speech_engine() -> String {
+    "provider".to_string()
 }
 
 impl Default for Settings {
@@ -191,6 +201,8 @@ impl Default for Settings {
             telemetry_disabled: true,
             ui_language: default_language(),
             speech_provider: None,
+            speech_engine: default_speech_engine(),
+            local_speech_model: String::new(),
         }
     }
 }

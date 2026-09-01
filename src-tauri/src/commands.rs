@@ -512,6 +512,52 @@ pub async fn transcribe(
     }
 }
 
+// ---------------------------------------------------------------------------
+// On-device Whisper
+// ---------------------------------------------------------------------------
+
+pub const MODEL_EVENT: &str = "velvetdesk://model";
+
+#[tauri::command]
+pub fn list_local_models(state: State<'_, AppState>) -> Result<Vec<crate::whisper::LocalModel>> {
+    Ok(crate::whisper::list(&state.paths))
+}
+
+/// Base URL the webview uses to read downloaded weights. Custom schemes are
+/// served over http on Windows and Android, and as a real scheme elsewhere.
+#[tauri::command]
+pub fn local_models_base_url() -> Result<String> {
+    if cfg!(any(windows, target_os = "android")) {
+        Ok(format!("http://{}.localhost", crate::MODEL_SCHEME))
+    } else {
+        Ok(format!("{}://localhost", crate::MODEL_SCHEME))
+    }
+}
+
+#[tauri::command]
+pub async fn download_local_model(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    model_id: String,
+) -> Result<crate::whisper::LocalModel> {
+    let model = crate::whisper::find(&model_id)?;
+    let app_for_events = app.clone();
+    let report = move |progress: crate::whisper::DownloadProgress| {
+        let _ = app_for_events.emit(MODEL_EVENT, progress);
+    };
+    crate::whisper::download(&state.llm.http, &state.paths, &model, &report).await
+}
+
+#[tauri::command]
+pub fn delete_local_model(
+    state: State<'_, AppState>,
+    model_id: String,
+) -> Result<Vec<crate::whisper::LocalModel>> {
+    let model = crate::whisper::find(&model_id)?;
+    crate::whisper::remove(&state.paths, &model)?;
+    Ok(crate::whisper::list(&state.paths))
+}
+
 /// Cheap connectivity probe: one-token request through the pool.
 #[tauri::command]
 pub async fn test_provider(app: AppHandle, state: State<'_, AppState>) -> Result<Value> {

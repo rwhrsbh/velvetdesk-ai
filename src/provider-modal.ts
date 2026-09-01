@@ -1,9 +1,17 @@
-import { api, errorText } from "./api";
+import { api, errorText, onModelEvent } from "./api";
 import type { ModalDeps } from "./deps";
 import { closeModal, escapeHtml, openModal, toast } from "./dom";
 import { t } from "./i18n";
+import { unloadModel } from "./local-whisper";
 import { store } from "./store";
-import type { KeyStatus, ModelCatalog, ProviderConfig, Settings } from "./types";
+import type {
+  KeyStatus,
+  LocalModel,
+  ModelCatalog,
+  ModelProgress,
+  ProviderConfig,
+  Settings,
+} from "./types";
 
 /** Cached per provider so re-opening the dialog does not re-hit the API. */
 const catalogs = new Map<string, ModelCatalog>();
@@ -22,7 +30,30 @@ const BASE_URL_PRESETS = [
   "http://localhost:8000/v1",
 ];
 
+function formatSize(bytes: number): string {
+  return `${Math.round(bytes / 1_048_576)} MB`;
+}
+
+/** Live download progress, written straight into the open dialog. */
+function watchDownloads() {
+  void onModelEvent((payload) => {
+    const progress = payload as unknown as ModelProgress;
+    const line = document.querySelector<HTMLElement>(`[data-progress="${progress.model_id}"]`);
+    if (!line) return;
+    const pct = progress.total ? Math.round((progress.received / progress.total) * 100) : 0;
+    const done = formatSize(progress.received);
+    const size = progress.total ? ` / ${formatSize(progress.total)} · ${pct}%` : "";
+    line.textContent = `${progress.file_index + 1}/${progress.file_count} · ${done}${size}`;
+  });
+}
+
+let watching = false;
+
 export async function openKeysModal(deps: ModalDeps) {
+  if (!watching) {
+    watchDownloads();
+    watching = true;
+  }
   if (!store.settings) return;
   let settings: Settings = structuredClone(store.settings);
   let providerId = settings.active_provider ?? settings.providers[0]?.id ?? "";
@@ -64,6 +95,13 @@ export async function openKeysModal(deps: ModalDeps) {
       keys = await api.listKeys(p.id);
     } catch (error) {
       toast(errorText(error), "error");
+    }
+    const isLocal = settings.speech_engine === "local";
+    let localModels: LocalModel[] = [];
+    try {
+      localModels = await api.listLocalModels();
+    } catch (error) {
+      console.error("local models", error);
     }
     const catalog = catalogs.get(p.id) ?? null;
     const isGemini = p.kind === "gemini";
@@ -175,6 +213,17 @@ export async function openKeysModal(deps: ModalDeps) {
         <label>${t("keys.voice")}
           <span class="hint-inline">${t("keys.voiceWhere")}</span>
         </label>
+        <div class="segmented-control wide" id="speechEngine">
+          <button class="segmented-btn ${isLocal ? "" : "active"}" data-engine="provider">
+            ${t("keys.engineProvider")}
+          </button>
+          <button class="segmented-btn ${isLocal ? "active" : ""}" data-engine="local">
+            ${t("keys.engineLocal")}
+          </button>
+        </div>
+      </div>
+
+      <div class="field" ${isLocal ? 'style="display:none"' : ""} id="cloudSpeech">
         <select class="field-input" id="speechProvider">
           <option value="">${t("keys.voiceSameProvider")}</option>
           ${settings.providers
@@ -202,6 +251,37 @@ export async function openKeysModal(deps: ModalDeps) {
           }
         </div>
         <div class="hint-inline">${t("keys.voiceHelp")}</div>
+      </div>
+
+      <div class="field" ${isLocal ? "" : 'style="display:none"'} id="localSpeech">
+        <div class="hint-inline" style="margin-bottom:8px">${t("keys.localHelp")}</div>
+        ${localModels
+          .map(
+            (m) => `<div class="list-row" data-model-row="${escapeHtml(m.id)}">
+              <div>
+                <div>
+                  <label class="toggle">
+                    <input type="radio" name="localModel" value="${escapeHtml(m.id)}"
+                      ${m.id === settings.local_speech_model ? "checked" : ""}
+                      ${m.installed ? "" : "disabled"} />
+                    ${escapeHtml(m.label)}
+                  </label>
+                </div>
+                <div class="meta">${escapeHtml(m.note)} · ${formatSize(m.size_bytes)}</div>
+                <div class="meta" data-progress="${escapeHtml(m.id)}">${
+                  m.installed ? t("keys.modelReady") : ""
+                }</div>
+              </div>
+              <div style="display:flex;gap:6px">
+                ${
+                  m.installed
+                    ? `<button class="btn btn-danger" data-delete-model="${escapeHtml(m.id)}">${t("common.delete")}</button>`
+                    : `<button class="btn btn-secondary" data-download-model="${escapeHtml(m.id)}">${t("keys.download")}</button>`
+                }
+              </div>
+            </div>`,
+          )
+          .join("")}
       </div>
 
       <details class="advanced">
@@ -313,6 +393,64 @@ export async function openKeysModal(deps: ModalDeps) {
 
     card.querySelector<HTMLSelectElement>("#modelSelect")?.addEventListener("change", (event) => {
       void persist({ model: (event.target as HTMLSelectElement).value }, true);
+    });
+
+    card.querySelectorAll<HTMLButtonElement>("#speechEngine .segmented-btn").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        settings.speech_engine = btn.dataset.engine === "local" ? "local" : "provider";
+        settings = await api.saveSettings(settings);
+        store.settings = settings;
+        await draw();
+      });
+    });
+
+    card.querySelectorAll<HTMLInputElement>('input[name="localModel"]').forEach((radio) => {
+      radio.addEventListener("change", async () => {
+        settings.local_speech_model = radio.value;
+        settings = await api.saveSettings(settings);
+        store.settings = settings;
+      });
+    });
+
+    card.querySelectorAll<HTMLButtonElement>("[data-download-model]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const id = btn.dataset.downloadModel!;
+        const line = card.querySelector<HTMLElement>(`[data-progress="${id}"]`);
+        btn.disabled = true;
+        if (line) line.textContent = t("keys.downloading");
+        try {
+          const model = await api.downloadLocalModel(id);
+          toast(t("toast.modelReady", { name: model.label }), "success");
+          // First downloaded model becomes the active one.
+          if (!settings.local_speech_model) {
+            settings.local_speech_model = model.id;
+            settings = await api.saveSettings(settings);
+            store.settings = settings;
+          }
+          await draw();
+        } catch (error) {
+          if (line) line.textContent = "";
+          btn.disabled = false;
+          toast(errorText(error), "error");
+        }
+      });
+    });
+
+    card.querySelectorAll<HTMLButtonElement>("[data-delete-model]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        try {
+          await api.deleteLocalModel(btn.dataset.deleteModel!);
+          if (settings.local_speech_model === btn.dataset.deleteModel) {
+            settings.local_speech_model = "";
+            settings = await api.saveSettings(settings);
+            store.settings = settings;
+          }
+          unloadModel();
+          await draw();
+        } catch (error) {
+          toast(errorText(error), "error");
+        }
+      });
     });
 
     card.querySelector<HTMLSelectElement>("#speechProvider")?.addEventListener("change", async (event) => {

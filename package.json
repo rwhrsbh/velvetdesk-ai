@@ -5,8 +5,8 @@
   "type": "module",
   "description": "VelvetDesk AI — cross-platform agency copilot built on Tauri 2",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "dev": "node scripts/copy-ort.mjs && vite",
+    "build": "node scripts/copy-ort.mjs && tsc --noEmit && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
     "desktop:dev": "tauri dev",
@@ -21,6 +21,7 @@
     "@tauri-apps/plugin-opener": "^2.2.0"
   },
   "devDependencies": {
+    "@huggingface/transformers": "^4.2.0",
     "@tauri-apps/cli": "^2.1.0",
     "typescript": "^5.6.3",
     "vite": "^5.4.10"

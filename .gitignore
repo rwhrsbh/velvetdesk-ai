@@ -9,3 +9,5 @@ src-tauri/WixTools/
 .idea/
 *.local
 secrets.json
+public/ort/
+public/vendor/

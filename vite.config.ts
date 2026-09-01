@@ -13,8 +13,10 @@ export default defineConfig({
     watch: { ignored: ["**/src-tauri/**"] },
   },
   build: {
+    // ONNX Runtime (on-device Whisper) emits BigInt literals, which need
+    // Safari 14+ / Chromium 67+ — both below Tauri v2's own webview minimum.
     target:
-      process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome105" : "safari13",
+      process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome105" : "safari14",
     minify: !process.env.TAURI_ENV_DEBUG ? "esbuild" : false,
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
   },

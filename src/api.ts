@@ -7,6 +7,7 @@ import type {
   DoctorReport,
   GlobalIndex,
   KeyStatus,
+  LocalModel,
   Man,
   ModelCatalog,
   MasterDecision,
@@ -18,6 +19,7 @@ import type {
 } from "./types";
 
 export const AGENT_EVENT = "velvetdesk://agent";
+export const MODEL_EVENT = "velvetdesk://model";
 
 export interface RunInput {
   model_id: string;
@@ -95,6 +97,10 @@ export const api = {
     invoke<ModelCatalog>("list_provider_models", { providerId }),
   transcribe: (audioBase64: string, mime: string) =>
     invoke<string>("transcribe", { audioBase64, mime }),
+  listLocalModels: () => invoke<LocalModel[]>("list_local_models"),
+  downloadLocalModel: (modelId: string) => invoke<LocalModel>("download_local_model", { modelId }),
+  deleteLocalModel: (modelId: string) => invoke<LocalModel[]>("delete_local_model", { modelId }),
+  localModelsBaseUrl: () => invoke<string>("local_models_base_url"),
   testProvider: () => invoke<Record<string, unknown>>("test_provider"),
 
   seedDemo: () => invoke<Profile[]>("seed_demo"),
@@ -102,6 +108,10 @@ export const api = {
 
 export function onAgentEvent(handler: (payload: Record<string, unknown>) => void) {
   return listen<Record<string, unknown>>(AGENT_EVENT, (event) => handler(event.payload));
+}
+
+export function onModelEvent(handler: (payload: Record<string, unknown>) => void) {
+  return listen<Record<string, unknown>>(MODEL_EVENT, (event) => handler(event.payload));
 }
 
 export function errorText(error: unknown): string {
