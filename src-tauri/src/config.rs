@@ -106,6 +106,11 @@ pub struct Settings {
     /// UI language: "ru" or "en".
     #[serde(default = "default_language")]
     pub ui_language: String,
+    /// Provider used for voice dictation. None means "same as the chat one",
+    /// which lets an operator chat through a text-only endpoint and still
+    /// dictate through Gemini, Groq or a local Whisper server.
+    #[serde(default)]
+    pub speech_provider: Option<String>,
 }
 
 fn default_mode() -> AgentMode {
@@ -162,6 +167,19 @@ impl Default for Settings {
                     transcribe_model: String::new(),
                     key_count: 0,
                 },
+                ProviderConfig {
+                    id: "groq".into(),
+                    label: "Groq / Whisper".into(),
+                    kind: ProviderKind::OpenaiCompatible,
+                    base_url: "https://api.groq.com/openai/v1".into(),
+                    api_version: "v1".into(),
+                    model: "llama-3.3-70b-versatile".into(),
+                    extra_headers: vec![],
+                    temperature: 0.85,
+                    max_output_tokens: None,
+                    transcribe_model: "whisper-large-v3-turbo".into(),
+                    key_count: 0,
+                },
             ],
             active_provider: Some("gemini".into()),
             agent_mode: AgentMode::Auto,
@@ -172,6 +190,7 @@ impl Default for Settings {
             global_style_rules: String::new(),
             telemetry_disabled: true,
             ui_language: default_language(),
+            speech_provider: None,
         }
     }
 }
@@ -187,6 +206,15 @@ impl Settings {
 
     pub fn provider(&self, id: &str) -> Option<&ProviderConfig> {
         self.providers.iter().find(|p| p.id == id)
+    }
+
+    /// Provider that handles dictation: the dedicated one when set, else the
+    /// chat provider.
+    pub fn speech(&self) -> Option<&ProviderConfig> {
+        match &self.speech_provider {
+            Some(id) => self.provider(id).or_else(|| self.active()),
+            None => self.active(),
+        }
     }
 
     pub fn active(&self) -> Option<&ProviderConfig> {

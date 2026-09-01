@@ -214,6 +214,12 @@ const ru: Dict = {
   "keys.reload": "Обновить список",
   "keys.modelPlaceholder": "например gemini-2.5-pro",
   "keys.voice": "Голосовая диктовка",
+  "keys.voiceWhere": "через какой сервис распознавать",
+  "keys.voiceSameProvider": "тот же провайдер, что и для чата",
+  "keys.voiceNoKey": " — без ключа",
+  "keys.voiceHelp":
+    "Gemini: модель gemini-3.5-transcribe или любая мультимодальная. Без Gemini: Groq (whisper-large-v3-turbo, бесплатный лимит), OpenAI (whisper-1) или локальный сервер whisper.cpp — впиши его адрес в Base URL и ключ local.",
+
   "keys.sameModel": "та же модель, что и основная",
   "keys.voiceHintGemini": "пусто = основная модель",
   "keys.voiceHintOpenai": "например whisper-1",
@@ -469,6 +475,12 @@ const en: Dict = {
   "keys.reload": "Refresh list",
   "keys.modelPlaceholder": "e.g. gemini-2.5-pro",
   "keys.voice": "Voice dictation",
+  "keys.voiceWhere": "which service does the recognition",
+  "keys.voiceSameProvider": "same provider as chat",
+  "keys.voiceNoKey": " — no key",
+  "keys.voiceHelp":
+    "Gemini: gemini-3.5-transcribe or any multimodal model. Without Gemini: Groq (whisper-large-v3-turbo, free tier), OpenAI (whisper-1) or a local whisper.cpp server — put its address in Base URL and use the key local.",
+
   "keys.sameModel": "same model as the main one",
   "keys.voiceHintGemini": "empty = main model",
   "keys.voiceHintOpenai": "e.g. whisper-1",

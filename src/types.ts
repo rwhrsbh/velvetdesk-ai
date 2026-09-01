@@ -192,6 +192,7 @@ export interface Settings {
   global_style_rules: string;
   telemetry_disabled: boolean;
   ui_language: "ru" | "en";
+  speech_provider: string | null;
 }
 
 export interface KeyStatus {

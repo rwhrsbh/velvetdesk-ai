@@ -9,13 +9,17 @@ import type { KeyStatus, ModelCatalog, ProviderConfig, Settings } from "./types"
 const catalogs = new Map<string, ModelCatalog>();
 
 const BASE_URL_PRESETS = [
+  "https://api.groq.com/openai/v1",
   "https://openrouter.ai/api/v1",
   "https://api.openai.com/v1",
   "https://api.deepseek.com/v1",
-  "https://api.groq.com/openai/v1",
   "https://api.together.xyz/v1",
+  "https://api.mistral.ai/v1",
+  // Local servers: Ollama, LM Studio, whisper.cpp server, faster-whisper-server.
   "http://localhost:11434/v1",
   "http://localhost:1234/v1",
+  "http://localhost:8080/v1",
+  "http://localhost:8000/v1",
 ];
 
 export async function openKeysModal(deps: ModalDeps) {
@@ -75,13 +79,18 @@ export async function openKeysModal(deps: ModalDeps) {
           .join("")
       : "";
 
-    const audioOptions = catalog
-      ? catalog.models
+    // Dictation may run through a different provider than the chat one, so an
+    // operator on a text-only endpoint can still dictate via Gemini or Groq.
+    const speechProvider =
+      settings.providers.find((item) => item.id === settings.speech_provider) ?? p;
+    const speechCatalog = catalogs.get(speechProvider.id) ?? null;
+    const audioOptions = speechCatalog
+      ? speechCatalog.models
           .filter((m) => m.audio)
           .map(
             (m) =>
               `<option value="${escapeHtml(m.id)}" ${
-                m.id === p.transcribe_model ? "selected" : ""
+                m.id === speechProvider.transcribe_model ? "selected" : ""
               }>${escapeHtml(m.label)}</option>`,
           )
           .join("")
@@ -163,18 +172,36 @@ export async function openKeysModal(deps: ModalDeps) {
       </div>
 
       <div class="field">
-        <label>${t("keys.voice")}</label>
-        ${
-          audioOptions
-            ? `<select class="field-input" id="speechSelect">
-                 <option value="">${t("keys.sameModel")}</option>${audioOptions}
-               </select>`
-            : `<input class="field-input" id="speechManual" value="${escapeHtml(
-                p.transcribe_model,
-              )}" placeholder="${
-                isGemini ? t("keys.voiceHintGemini") : t("keys.voiceHintOpenai")
-              }" />`
-        }
+        <label>${t("keys.voice")}
+          <span class="hint-inline">${t("keys.voiceWhere")}</span>
+        </label>
+        <select class="field-input" id="speechProvider">
+          <option value="">${t("keys.voiceSameProvider")}</option>
+          ${settings.providers
+            .map(
+              (item) =>
+                `<option value="${escapeHtml(item.id)}" ${
+                  item.id === settings.speech_provider ? "selected" : ""
+                }>${escapeHtml(item.label)}${item.key_count ? "" : t("keys.voiceNoKey")}</option>`,
+            )
+            .join("")}
+        </select>
+        <div class="row-inline">
+          ${
+            audioOptions
+              ? `<select class="field-input" id="speechSelect">
+                   <option value="">${t("keys.sameModel")}</option>${audioOptions}
+                 </select>`
+              : `<input class="field-input" id="speechManual" value="${escapeHtml(
+                  speechProvider.transcribe_model,
+                )}" placeholder="${
+                  speechProvider.kind === "gemini"
+                    ? t("keys.voiceHintGemini")
+                    : t("keys.voiceHintOpenai")
+                }" />`
+          }
+        </div>
+        <div class="hint-inline">${t("keys.voiceHelp")}</div>
       </div>
 
       <details class="advanced">
@@ -288,6 +315,23 @@ export async function openKeysModal(deps: ModalDeps) {
       void persist({ model: (event.target as HTMLSelectElement).value }, true);
     });
 
+    card.querySelector<HTMLSelectElement>("#speechProvider")?.addEventListener("change", async (event) => {
+      const chosen = (event.target as HTMLSelectElement).value;
+      settings.speech_provider = chosen || null;
+      settings = await api.saveSettings(settings);
+      store.settings = settings;
+      // Fetch the model list of the speech provider so its picker is usable.
+      const target = settings.providers.find((item) => item.id === (chosen || providerId));
+      if (target && target.key_count > 0 && !catalogs.has(target.id)) {
+        try {
+          catalogs.set(target.id, await api.listProviderModels(target.id));
+        } catch (error) {
+          toast(errorText(error), "error");
+        }
+      }
+      await draw();
+    });
+
     const tempInput = card.querySelector<HTMLInputElement>("#temperature");
     tempInput?.addEventListener("input", () => {
       const label = card.querySelector<HTMLElement>("#tempValue");
@@ -321,6 +365,13 @@ export async function openKeysModal(deps: ModalDeps) {
         card.querySelector<HTMLSelectElement>("#speechSelect")?.value ??
         card.querySelector<HTMLInputElement>("#speechManual")?.value.trim() ??
         "";
+      const speechProviderId =
+        card.querySelector<HTMLSelectElement>("#speechProvider")?.value ?? "";
+      settings.speech_provider = speechProviderId || null;
+      // The dictation model belongs to whichever provider handles speech.
+      const speechTarget =
+        settings.providers.find((item) => item.id === (speechProviderId || providerId)) ?? null;
+      if (speechTarget) speechTarget.transcribe_model = speech;
 
       settings.global_style_rules =
         card.querySelector<HTMLTextAreaElement>("#globalRules")?.value ?? settings.global_style_rules;
@@ -331,7 +382,6 @@ export async function openKeysModal(deps: ModalDeps) {
 
       await persist({
         model,
-        transcribe_model: speech,
         base_url: card.querySelector<HTMLInputElement>("#baseUrl")?.value.trim() ?? p.base_url,
         api_version: card.querySelector<HTMLInputElement>("#apiVersion")?.value.trim() ?? p.api_version,
         temperature: Number(card.querySelector<HTMLInputElement>("#temperature")?.value ?? p.temperature),

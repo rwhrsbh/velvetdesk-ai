@@ -480,7 +480,13 @@ pub async fn transcribe(
     if audio_base64.trim().is_empty() {
         return Err(AppError::Invalid("пустая запись".into()));
     }
-    let provider = state.active_provider()?;
+    let provider = {
+        let settings = state.settings.read();
+        settings
+            .speech()
+            .cloned()
+            .ok_or_else(|| AppError::Invalid("no speech provider configured".into()))?
+    };
     let pool = state.pool(&provider.id);
     let lease = pool.acquire().ok_or_else(|| {
         AppError::NoKeys(format!("у провайдера {} нет рабочего ключа", provider.id))
