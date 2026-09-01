@@ -1,3 +1,4 @@
+pub mod catalog;
 pub mod gemini;
 pub mod keypool;
 pub mod openai;

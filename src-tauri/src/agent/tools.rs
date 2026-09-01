@@ -485,6 +485,11 @@ pub fn plan_mutation(scope: &Scope, tool: &str, args: &Value) -> Result<Mutation
             man.location = arg_str(args, "location").unwrap_or_default();
             man.country = arg_str(args, "country").unwrap_or_default();
             man.tags = arg_vec(args, "tags");
+            man.avatar = arg_str(args, "avatar").unwrap_or_default();
+            man.stage = arg_str(args, "stage").unwrap_or_else(|| "new".into());
+            man.next_action = arg_str(args, "next_action").unwrap_or_default();
+            man.triggers = arg_vec(args, "triggers");
+            man.boundaries = arg_vec(args, "boundaries");
             man.status = arg_str(args, "status").unwrap_or_else(|| "Новый контакт".into());
             Ok(MutationPlan {
                 summary: format!("создать досье {name} ({id})"),

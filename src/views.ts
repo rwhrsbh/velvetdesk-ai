@@ -1,29 +1,36 @@
 import { $, avatarHtml, escapeHtml, formatDate } from "./dom";
+import { contactWord, keyWord, t } from "./i18n";
 import { activeMan, activeProfile, store, visibleMen, visibleProfiles } from "./store";
 import type { RunStep, Usage } from "./types";
 
 export function renderTopbar() {
   const settings = store.settings;
-  const providerBadge = $("providerBadge");
-  const keyBadge = $("keyBadge");
+  const label = $("providerLabel");
+  const dot = $("providerDot");
 
   if (!settings) {
-    providerBadge.textContent = "загрузка…";
+    label.textContent = t("provider.loading");
     return;
   }
-  const provider = settings.providers.find((p) => p.id === settings.active_provider) ?? settings.providers[0];
+  const provider =
+    settings.providers.find((p) => p.id === settings.active_provider) ?? settings.providers[0];
   if (provider) {
-    providerBadge.textContent = `${provider.label} · ${provider.model}`;
-    keyBadge.textContent = `ключей: ${provider.key_count}`;
-    keyBadge.className = provider.key_count > 0 ? "badge green" : "badge red";
+    label.textContent = provider.key_count
+      ? t("provider.keys", {
+          model: provider.model,
+          count: provider.key_count,
+          word: keyWord(provider.key_count),
+        })
+      : t("provider.noKey", { label: provider.label });
+    dot.className = provider.key_count ? "dot" : "dot off";
   } else {
-    providerBadge.textContent = "провайдер не настроен";
-    keyBadge.className = "badge red";
+    label.textContent = t("provider.unset");
+    dot.className = "dot off";
   }
 
-  $("pendingCount").textContent = String(store.pending.length);
-  $("currentModeLabel").textContent = store.mode.toUpperCase();
-  $("currentSecLabel").textContent = store.security.toUpperCase();
+  const count = $("pendingCount");
+  count.textContent = String(store.pending.length);
+  count.className = store.pending.length ? "count" : "count zero";
 
   document.querySelectorAll<HTMLButtonElement>("#modeControl .segmented-btn").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.mode === store.mode);
@@ -33,31 +40,6 @@ export function renderTopbar() {
   });
 }
 
-export function renderProfiles() {
-  const container = $("profileList");
-  const profiles = visibleProfiles();
-  if (profiles.length === 0) {
-    container.innerHTML = `<div class="empty-hint">
-      Нет профилей.<br />Нажми ＋ или <a href="#" data-act="seed" style="color:var(--accent-blue)">загрузи демо-профиль</a>.
-    </div>`;
-    return;
-  }
-  container.innerHTML = profiles
-    .map((p) => {
-      const count = p.id === store.activeModelId ? store.men.length : countFromIndex(p.id);
-      return `<div class="profile-card ${p.id === store.activeModelId ? "active" : ""}" data-profile="${escapeHtml(
-        p.id,
-      )}">
-        ${avatarHtml(p.name, p.avatar)}
-        <div class="profile-info">
-          <div class="profile-name">${escapeHtml(p.name)}${p.age ? `, ${p.age}` : ""}</div>
-          <div class="profile-meta">${escapeHtml(p.site || "без сайта")} · ${count} контактов</div>
-        </div>
-      </div>`;
-    })
-    .join("");
-}
-
 const indexCounts = new Map<string, number>();
 
 export function setIndexCounts(pairs: Array<[string, number]>) {
@@ -65,96 +47,120 @@ export function setIndexCounts(pairs: Array<[string, number]>) {
   pairs.forEach(([id, count]) => indexCounts.set(id, count));
 }
 
-function countFromIndex(modelId: string): number {
-  return indexCounts.get(modelId) ?? 0;
-}
-
-export function renderScope() {
-  const profile = activeProfile();
-  const dot = $("scopeDot");
-  dot.className = `status-dot ${store.busy ? "busy" : profile ? "" : "idle"}`;
-
-  if (!profile) {
-    $("activeScopeLabel").textContent = "Профиль не выбран";
-    $("scopePath").textContent = "—";
+export function renderProfiles() {
+  const container = $("profileList");
+  const profiles = visibleProfiles();
+  if (profiles.length === 0) {
+    container.innerHTML = `<div class="empty-hint">
+      ${t("empty.noProfiles")}<br />${t("empty.createOrSeed")}
+    </div>`;
     return;
   }
-  const man = activeMan();
-  $("activeScopeLabel").textContent = man
-    ? `${profile.name} → ${man.name}`
-    : `${profile.name} (ID: ${profile.id})`;
-  $("scopePath").textContent = `profiles/${profile.id}/`;
-}
-
-export function renderMen() {
-  const container = $("menList");
-  if (!store.activeModelId) {
-    container.innerHTML = `<div class="empty-hint">Выбери модель слева.</div>`;
-    return;
-  }
-  const men = visibleMen();
-  if (men.length === 0) {
-    container.innerHTML = `<div class="empty-hint">Нет мужчин в работе.<br />Нажми ＋ или вставь письмо в мастер-агент.</div>`;
-    return;
-  }
-  container.innerHTML = men
-    .map((m) => {
-      const gifts = m.gifts
-        .slice(-3)
-        .map((g) => `<span class="mini-pill gift">🎁 ${escapeHtml(g.title)}</span>`)
-        .join("");
-      const tags = m.tags
-        .slice(0, 5)
-        .map((t) => `<span class="mini-pill">${escapeHtml(t)}</span>`)
-        .join("");
-      return `<div class="man-card ${m.id === store.activeManId ? "active" : ""}" data-man="${escapeHtml(m.id)}">
-        <div class="man-card-top">
-          ${avatarHtml(m.name, m.avatar, "small")}
-          <div class="man-details">
-            <div class="man-name">${escapeHtml(m.name)}${m.age ? ` (${m.age})` : ""}</div>
-            <div class="man-tag">${escapeHtml(m.location || "—")} · ID: ${escapeHtml(m.id)}</div>
+  container.innerHTML = profiles
+    .map((p) => {
+      const men = p.id === store.activeModelId ? store.men.length : (indexCounts.get(p.id) ?? 0);
+      const meta = [
+        p.site || t("common.noSite"),
+        t("profile.contacts", { n: men, word: contactWord(men) }),
+      ];
+      return `<div class="row-card ${p.id === store.activeModelId ? "active" : ""}" data-profile="${escapeHtml(p.id)}">
+        <div class="row-main">
+          ${avatarHtml(p.name, p.avatar)}
+          <div class="row-text">
+            <div class="row-title">${escapeHtml(p.name)}${p.age ? `, ${p.age}` : ""}</div>
+            <div class="row-sub">${escapeHtml(meta.join(" · "))}</div>
           </div>
-        </div>
-        ${m.status ? `<div class="man-status">${escapeHtml(m.status)}</div>` : ""}
-        <div class="tags-row">
-          ${m.stage ? `<span class="mini-pill stage">${escapeHtml(m.stage)}</span>` : ""}
-          ${tags}${gifts}
-          <span class="mini-pill">⏱ ${formatDate(m.last_contact)}</span>
         </div>
       </div>`;
     })
     .join("");
 }
 
-function usageLine(usage: Usage | undefined, extra: string[] = []): string {
+export function renderScope() {
+  const profile = activeProfile();
+  const dot = $("scopeDot");
+  dot.className = `dot ${store.busy ? "busy" : profile ? "" : "idle"}`;
+
+  if (!profile) {
+    $("scopeLabel").textContent = t("scope.none");
+    $("scopePath").textContent = "—";
+    return;
+  }
+  const man = activeMan();
+  $("scopeLabel").textContent = man ? `${profile.name} → ${man.name}` : profile.name;
+  $("scopePath").textContent = `profiles/${profile.id}/`;
+}
+
+export function renderMen() {
+  const container = $("menList");
+  if (!store.activeModelId) {
+    container.innerHTML = `<div class="empty-hint">${t("empty.pickProfile")}</div>`;
+    return;
+  }
+  const men = visibleMen();
+  if (men.length === 0) {
+    container.innerHTML = `<div class="empty-hint">${t("empty.noMen")}<br />${t("empty.addMan")}</div>`;
+    return;
+  }
+  container.innerHTML = men
+    .map((m) => {
+      const tags = m.tags
+        .slice(0, 4)
+        .map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`)
+        .join("");
+      const gifts = m.gifts.length
+        ? `<span class="tag gift">${escapeHtml(t("man.gifts.short", { n: m.gifts.length }))}</span>`
+        : "";
+      const sub = [m.location, `ID ${m.id}`, m.age ? t("man.years", { n: m.age }) : ""]
+        .filter(Boolean)
+        .join(" · ");
+      return `<div class="row-card ${m.id === store.activeManId ? "active" : ""}" data-man="${escapeHtml(m.id)}">
+        <div class="row-main">
+          ${avatarHtml(m.name, m.avatar)}
+          <div class="row-text">
+            <div class="row-title">${escapeHtml(m.name)}</div>
+            <div class="row-sub">${escapeHtml(sub)}</div>
+          </div>
+        </div>
+        ${m.status ? `<div class="row-note">${escapeHtml(m.status)}</div>` : ""}
+        <div class="tags-row">
+          ${m.stage ? `<span class="tag stage">${escapeHtml(m.stage)}</span>` : ""}
+          ${tags}${gifts}
+          ${m.last_contact ? `<span class="tag">${formatDate(m.last_contact)}</span>` : ""}
+        </div>
+      </div>`;
+    })
+    .join("");
+}
+
+function usageLine(usage: Usage | undefined, extra: string[]): string {
   if (!usage) return "";
-  const bits = [
-    `tokens ${usage.total_tokens || usage.prompt_tokens + usage.completion_tokens}`,
-    ...extra,
-  ];
-  return `<div class="usage-line">${escapeHtml(bits.join(" · "))}</div>`;
+  const total = usage.total_tokens || usage.prompt_tokens + usage.completion_tokens;
+  const bits = [t("chat.tokens", { n: total }), ...extra].filter(Boolean);
+  return `<div class="usage">${escapeHtml(bits.join(" · "))}</div>`;
 }
 
 function stepHtml(step: RunStep): string {
-  const cls =
-    step.kind.includes("error") ? "error" : step.kind.includes("pending") ? "pending" : "";
-  const badge = step.kind.includes("pending")
-    ? "ожидает подтверждения"
+  const cls = step.kind.includes("error")
+    ? "error"
+    : step.kind.includes("pending")
+      ? "pending"
+      : "";
+  const state = step.kind.includes("pending")
+    ? t("chat.pending")
     : step.kind.includes("error")
-      ? "ошибка"
-      : "выполнено";
-  return `<div class="tool-call-box ${cls}">
-    <div class="tool-header"><span>⚡ ${escapeHtml(step.tool ?? step.kind)}</span><span>${badge}</span></div>
+      ? t("chat.failed")
+      : t("chat.done");
+  return `<div class="step ${cls}">
+    <div class="step-head"><span>${escapeHtml(step.tool ?? step.kind)}</span><span>${escapeHtml(state)}</span></div>
     <div>${escapeHtml(step.summary)}</div>
   </div>`;
 }
 
 export function renderChat() {
-  const container = $("chatMessages");
+  const container = $("messages");
   if (!store.activeModelId) {
-    container.innerHTML = `<div class="message-row system"><div class="msg-bubble">
-      VelvetDesk запущен. Создай профиль модели, чтобы включить изолированный агент.
-    </div></div>`;
+    container.innerHTML = `<div class="msg system"><div class="bubble">${t("empty.needProfile")}</div></div>`;
     return;
   }
 
@@ -164,26 +170,26 @@ export function renderChat() {
         steps?: RunStep[];
         usage?: Usage;
         mode?: string;
-        pending?: number;
         key_index?: number;
         turns?: number;
       };
       const steps = Array.isArray(meta.steps) ? meta.steps.map(stepHtml).join("") : "";
       const extras: string[] = [];
       if (meta.mode) extras.push(String(meta.mode).toUpperCase());
-      if (typeof meta.key_index === "number") extras.push(`key #${meta.key_index + 1}`);
-      if (typeof meta.turns === "number" && meta.turns > 1) extras.push(`${meta.turns} turns`);
+      if (typeof meta.key_index === "number") extras.push(t("chat.key", { n: meta.key_index + 1 }));
+      if (typeof meta.turns === "number" && meta.turns > 1)
+        extras.push(t("chat.turns", { n: meta.turns }));
 
       const actions =
         entry.sender === "assistant" && !entry.transient
           ? `<div class="msg-actions">
-               <button data-act="copy" data-entry="${escapeHtml(entry.id)}">Копировать</button>
-               <button data-act="send-as-outgoing" data-entry="${escapeHtml(entry.id)}">В историю как отправленное</button>
+               <button data-act="copy" data-entry="${escapeHtml(entry.id)}">${t("chat.copy")}</button>
+               <button data-act="send-as-outgoing" data-entry="${escapeHtml(entry.id)}">${t("chat.asOutgoing")}</button>
              </div>`
           : "";
 
-      return `<div class="message-row ${entry.sender}">
-        <div class="msg-bubble">${escapeHtml(entry.text)}${steps}${usageLine(meta.usage, extras)}${actions}</div>
+      return `<div class="msg ${entry.sender}">
+        <div class="bubble">${escapeHtml(entry.text)}${steps}${usageLine(meta.usage, extras)}${actions}</div>
       </div>`;
     })
     .join("");

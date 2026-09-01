@@ -103,6 +103,7 @@ jobs:
 
       - run: npm ci
       - run: npx tauri android init --ci
+      - run: node scripts/patch-android.mjs
 
       - name: Build unsigned release APK
         run: npx tauri android build --apk --target aarch64 armv7

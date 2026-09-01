@@ -162,6 +162,11 @@ fn sanitize_schema(schema: &Value) -> Value {
     }
 }
 
+/// Parse a raw generateContent payload (used by the transcription path too).
+pub fn parse_public(value: &Value) -> Result<ChatResponse, CallError> {
+    parse_response(value)
+}
+
 fn parse_response(value: &Value) -> Result<ChatResponse, CallError> {
     if let Some(err) = value.get("error") {
         return Err(CallError::Parse(err.to_string()));
@@ -256,6 +261,7 @@ mod tests {
             extra_headers: vec![],
             temperature: 0.8,
             max_output_tokens: None,
+            transcribe_model: String::new(),
             key_count: 1,
         }
     }

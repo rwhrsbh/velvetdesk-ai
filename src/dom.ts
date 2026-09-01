@@ -1,3 +1,4 @@
+import { lang, t } from "./i18n";
 export function $<T extends HTMLElement = HTMLElement>(id: string): T {
   const el = document.getElementById(id);
   if (!el) throw new Error(`missing element #${id}`);
@@ -33,7 +34,7 @@ export function formatDate(value: string | null | undefined): string {
   if (!value) return "—";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleString("ru-RU", {
+  return date.toLocaleString(lang() === "en" ? "en-GB" : "ru-RU", {
     day: "2-digit",
     month: "2-digit",
     hour: "2-digit",
@@ -100,9 +101,9 @@ export function confirmDialog(options: {
       `<h3>${escapeHtml(options.title)}</h3>
        <div class="modal-sub">${options.body}</div>
        <div class="modal-actions">
-         <button class="btn-send secondary" data-act="cancel">Отмена</button>
-         <button class="btn-send ${options.danger ? "danger" : ""}" data-act="ok">${escapeHtml(
-           options.confirmLabel ?? "Подтвердить",
+         <button class="btn btn-secondary" data-act="cancel">${t("common.cancel")}</button>
+         <button class="btn ${options.danger ? "btn-danger" : "btn-primary"}" data-act="ok">${escapeHtml(
+           options.confirmLabel ?? t("common.confirm"),
          )}</button>
        </div>`,
       () => done(false),
@@ -144,8 +145,8 @@ export function promptDialog(options: {
       `<h3>${escapeHtml(options.title)}</h3>
        <div class="field"><label>${escapeHtml(options.label)}</label>${input}</div>
        <div class="modal-actions">
-         <button class="btn-send secondary" data-act="cancel">Отмена</button>
-         <button class="btn-send" data-act="ok">Ок</button>
+         <button class="btn btn-secondary" data-act="cancel">${t("common.cancel")}</button>
+         <button class="btn btn-primary" data-act="ok">${t("common.ok")}</button>
        </div>`,
       () => done(null),
     );

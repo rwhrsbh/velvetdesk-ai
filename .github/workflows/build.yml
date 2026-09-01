@@ -159,7 +159,9 @@ jobs:
       - run: npm ci
 
       - name: Initialise Android project
-        run: npx tauri android init --ci
+        run: |
+          npx tauri android init --ci
+          node scripts/patch-android.mjs
 
       - name: Build release APK
         run: npx tauri android build --apk --target aarch64 armv7

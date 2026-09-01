@@ -1,20 +1,24 @@
+import { applyStatic, lang, setLang, t, type Lang } from "./i18n";
 import { api, errorText, onAgentEvent } from "./api";
-import { $, bindModalDismiss, promptDialog, toast } from "./dom";
+import type { ModalDeps } from "./deps";
+import { $, bindModalDismiss, toast } from "./dom";
+import { openManForm, openProfileForm } from "./forms";
+import { openDoctorModal, openMasterModal, openPendingModal } from "./modals";
+import { openKeysModal } from "./provider-modal";
+import { activeMan, activeProfile, makeEntry, pushEntry, store } from "./store";
+import type { AgentMode, RunStep, SecurityLevel, Settings } from "./types";
 import {
-  openDoctorModal,
-  openKeysModal,
-  openManEditor,
-  openMasterModal,
-  openPendingModal,
-  openProfileEditor,
-  type ModalDeps,
-} from "./modals";
-import { activeProfile, makeEntry, pushEntry, store } from "./store";
-import type { AgentMode, RunStep, SecurityLevel } from "./types";
-import { renderAll, renderChat, renderMen, renderProfiles, renderScope, renderTopbar, setIndexCounts } from "./views";
+  renderAll,
+  renderChat,
+  renderMen,
+  renderProfiles,
+  renderScope,
+  renderTopbar,
+  setIndexCounts,
+} from "./views";
 
 // ---------------------------------------------------------------------------
-// data loading
+// data
 // ---------------------------------------------------------------------------
 
 async function loadIndexCounts() {
@@ -73,9 +77,9 @@ async function selectProfile(modelId: string, redraw = true) {
 
 async function selectMan(manId: string | null) {
   store.activeManId = manId;
-  if (manId) {
+  if (manId && store.activeModelId) {
     try {
-      const man = await api.getMan(store.activeModelId!, manId);
+      const man = await api.getMan(store.activeModelId, manId);
       store.men = store.men.map((m) => (m.id === man.id ? man : m));
     } catch (error) {
       toast(errorText(error), "error");
@@ -85,7 +89,7 @@ async function selectMan(manId: string | null) {
   renderScope();
 }
 
-async function persistSettings(patch: Partial<NonNullable<typeof store.settings>>) {
+async function persistSettings(patch: Partial<Settings>) {
   if (!store.settings) return;
   const next = { ...store.settings, ...patch };
   store.settings = next;
@@ -102,25 +106,32 @@ const deps: ModalDeps = { refresh, selectProfile: (id) => selectProfile(id), sel
 // agent run
 // ---------------------------------------------------------------------------
 
+function activeProviderReady(): boolean {
+  const provider = store.settings?.providers.find(
+    (p) => p.id === store.settings?.active_provider,
+  );
+  return Boolean(provider && provider.key_count > 0);
+}
+
 async function sendMessage() {
-  const input = $("chatInput") as HTMLTextAreaElement;
+  const input = $("composerInput") as HTMLTextAreaElement;
   const text = input.value.trim();
   if (!text) return;
   if (!store.activeModelId) {
-    toast("Сначала выбери модель", "error");
+    toast(t("toast.pickProfile"), "error");
+    return;
+  }
+  if (!activeProviderReady()) {
+    toast(t("toast.needKey"), "error");
+    void openKeysModal(deps);
     return;
   }
   if (store.busy) return;
 
-  const provider = store.settings?.providers.find((p) => p.id === store.settings?.active_provider);
-  if (!provider || provider.key_count === 0) {
-    toast("Добавь API-ключ в 🔑 перед запуском агента", "error");
-    return;
-  }
-
   store.busy = true;
   ($("btnSend") as HTMLButtonElement).disabled = true;
   input.value = "";
+  input.style.height = "auto";
   pushEntry(makeEntry("user", text));
   renderChat();
   renderScope();
@@ -136,7 +147,6 @@ async function sendMessage() {
       log_incoming: store.logIncoming,
     });
 
-    // Drop the live step rows; the persisted entry carries the full trace.
     store.entries = store.entries.filter((e) => !e.transient);
     pushEntry(
       makeEntry("assistant", output.reply, {
@@ -149,7 +159,7 @@ async function sendMessage() {
     );
 
     if (output.pending.length > 0) {
-      toast(`${output.pending.length} действий ждут подтверждения`, "info");
+      toast(t("toast.pendingCount", { n: output.pending.length }), "info");
     }
     store.men = await api.listMen(store.activeModelId);
     store.pending = await api.pendingList();
@@ -162,6 +172,109 @@ async function sendMessage() {
     ($("btnSend") as HTMLButtonElement).disabled = false;
     renderAll();
   }
+}
+
+// ---------------------------------------------------------------------------
+// voice dictation
+// ---------------------------------------------------------------------------
+
+let recorder: MediaRecorder | null = null;
+let chunks: Blob[] = [];
+
+function micButton() {
+  return $("btnMic") as HTMLButtonElement;
+}
+
+function setMicState(state: "idle" | "recording" | "working") {
+  const btn = micButton();
+  const label = $("micLabel");
+  btn.classList.toggle("recording", state === "recording");
+  btn.disabled = state === "working";
+  label.textContent =
+    state === "recording"
+      ? t("composer.stop")
+      : state === "working"
+        ? t("composer.transcribing")
+        : t("composer.dictate");
+}
+
+async function toggleDictation() {
+  if (recorder && recorder.state === "recording") {
+    recorder.stop();
+    return;
+  }
+  if (!activeProviderReady()) {
+    toast(t("toast.needKeyVoice"), "error");
+    void openKeysModal(deps);
+    return;
+  }
+  if (!navigator.mediaDevices?.getUserMedia) {
+    toast(t("toast.noMic"), "error");
+    return;
+  }
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mime = pickMime();
+    recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+    chunks = [];
+
+    recorder.ondataavailable = (event) => {
+      if (event.data.size > 0) chunks.push(event.data);
+    };
+
+    recorder.onstop = async () => {
+      stream.getTracks().forEach((track) => track.stop());
+      const type = recorder?.mimeType || mime || "audio/webm";
+      const blob = new Blob(chunks, { type });
+      recorder = null;
+      if (blob.size < 1200) {
+        setMicState("idle");
+        toast(t("toast.tooShort"), "error");
+        return;
+      }
+      setMicState("working");
+      try {
+        const base64 = await blobToBase64(blob);
+        const text = await api.transcribe(base64, type.split(";")[0]);
+        if (text.trim()) {
+          const input = $("composerInput") as HTMLTextAreaElement;
+          input.value = input.value ? `${input.value.trim()} ${text.trim()}` : text.trim();
+          input.dispatchEvent(new Event("input"));
+          input.focus();
+        } else {
+          toast(t("toast.nothingHeard"), "error");
+        }
+      } catch (error) {
+        toast(errorText(error), "error");
+      } finally {
+        setMicState("idle");
+      }
+    };
+
+    recorder.start();
+    setMicState("recording");
+  } catch (error) {
+    setMicState("idle");
+    toast(t("toast.micDenied", { error: errorText(error) }), "error");
+  }
+}
+
+function pickMime(): string | undefined {
+  const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg"];
+  return candidates.find((type) => MediaRecorder.isTypeSupported?.(type));
+}
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("read failed"));
+    reader.onload = () => {
+      const result = String(reader.result);
+      resolve(result.slice(result.indexOf(",") + 1));
+    };
+    reader.readAsDataURL(blob);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -186,9 +299,20 @@ function bindTopbar() {
   });
 
   $("btnKeys").addEventListener("click", () => void openKeysModal(deps));
+  $("providerChip").addEventListener("click", () => void openKeysModal(deps));
   $("btnDoctor").addEventListener("click", () => void openDoctorModal(deps));
   $("btnMaster").addEventListener("click", () => void openMasterModal(deps));
   $("btnPending").addEventListener("click", () => void openPendingModal(deps));
+  $("btnLang").addEventListener("click", () => applyLanguage(lang() === "ru" ? "en" : "ru", true));
+}
+
+/** Switch UI language, redraw everything and remember the choice. */
+function applyLanguage(next: Lang, persist = false) {
+  setLang(next);
+  applyStatic();
+  $("langLabel").textContent = next.toUpperCase();
+  if (store.settings) renderAll();
+  if (persist) void persistSettings({ ui_language: next });
 }
 
 function bindPanels() {
@@ -199,25 +323,30 @@ function bindPanels() {
       void api
         .seedDemo()
         .then(refresh)
-        .then(() => toast("Демо-профиль создан", "success"))
+        .then(() => toast(t("toast.demoCreated"), "success"))
         .catch((error) => toast(errorText(error), "error"));
       return;
     }
     const card = target.closest<HTMLElement>("[data-profile]");
-    if (card?.dataset.profile) void selectProfile(card.dataset.profile);
+    if (!card?.dataset.profile) return;
+    if (card.dataset.profile === store.activeModelId) {
+      void openProfileForm(deps, activeProfile());
+    } else {
+      void selectProfile(card.dataset.profile);
+    }
   });
 
   $("menList").addEventListener("click", (event) => {
     const card = (event.target as HTMLElement).closest<HTMLElement>("[data-man]");
     if (!card?.dataset.man) return;
     if (card.dataset.man === store.activeManId) {
-      void openManEditor(deps, card.dataset.man);
+      void openManForm(deps, activeMan());
     } else {
       void selectMan(card.dataset.man);
     }
   });
 
-  $("chatMessages").addEventListener("click", async (event) => {
+  $("messages").addEventListener("click", async (event) => {
     const btn = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-act]");
     if (!btn) return;
     const entry = store.entries.find((e) => e.id === btn.dataset.entry);
@@ -225,12 +354,12 @@ function bindPanels() {
 
     if (btn.dataset.act === "copy") {
       await navigator.clipboard.writeText(entry.text);
-      toast("Скопировано", "success");
+      toast(t("chat.copied"), "success");
     }
 
     if (btn.dataset.act === "send-as-outgoing") {
       if (!store.activeModelId || !store.activeManId) {
-        toast("Выбери мужчину, чтобы записать сообщение в историю", "error");
+        toast(t("toast.pickMan"), "error");
         return;
       }
       try {
@@ -241,7 +370,7 @@ function bindPanels() {
           channel: store.channel,
           text: entry.text,
         });
-        toast("Записано в переписку", "success");
+        toast(t("chat.logged"), "success");
       } catch (error) {
         toast(errorText(error), "error");
       }
@@ -258,44 +387,38 @@ function bindPanels() {
     renderMen();
   });
 
-  $("btnAddProfile").addEventListener("click", async () => {
-    const name = await promptDialog({ title: "Новая модель", label: "Имя модели" });
-    if (!name) return;
-    try {
-      const profile = await api.createProfile({ name });
-      await refresh();
-      await selectProfile(profile.id);
-      toast(`Профиль ${profile.name} создан`, "success");
-    } catch (error) {
-      toast(errorText(error), "error");
-    }
-  });
-
-  $("btnAddMan").addEventListener("click", async () => {
-    if (!store.activeModelId) {
-      toast("Сначала выбери модель", "error");
+  $("btnAddProfile").addEventListener("click", () => void openProfileForm(deps, null));
+  $("btnEditProfile").addEventListener("click", () => {
+    const profile = activeProfile();
+    if (!profile) {
+      toast(t("toast.pickProfile"), "error");
       return;
     }
-    const name = await promptDialog({ title: "Новый мужчина", label: "Имя" });
-    if (!name) return;
-    try {
-      const man = await api.createMan(store.activeModelId, { name });
-      store.men = await api.listMen(store.activeModelId);
-      await selectMan(man.id);
-      await loadIndexCounts();
-      renderAll();
-    } catch (error) {
-      toast(errorText(error), "error");
-    }
+    void openProfileForm(deps, profile);
   });
 
-  $("btnEditProfile").addEventListener("click", () => void openProfileEditor(deps));
-  $("btnManCard").addEventListener("click", () => void openManEditor(deps));
+  $("btnAddMan").addEventListener("click", () => {
+    if (!store.activeModelId) {
+      toast(t("toast.pickProfile"), "error");
+      return;
+    }
+    void openManForm(deps, null);
+  });
+  $("btnManCard").addEventListener("click", () => {
+    const man = activeMan();
+    if (!man) {
+      toast(t("toast.pickMan"), "error");
+      return;
+    }
+    void openManForm(deps, man);
+  });
 }
 
 function bindComposer() {
-  const input = $("chatInput") as HTMLTextAreaElement;
+  const input = $("composerInput") as HTMLTextAreaElement;
   $("btnSend").addEventListener("click", () => void sendMessage());
+  micButton().addEventListener("click", () => void toggleDictation());
+
   input.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
       event.preventDefault();
@@ -315,7 +438,7 @@ function bindComposer() {
   });
 }
 
-function bindMobileTabs() {
+function bindTabs() {
   const tabs = document.querySelectorAll<HTMLButtonElement>(".tab-btn");
   const apply = (paneId: string) => {
     ["paneProfiles", "paneChat", "paneMen"].forEach((id) => {
@@ -339,14 +462,14 @@ function bindAgentEvents() {
       pushEntry(
         makeEntry(
           "system",
-          `Ключ #${Number(payload.key_index ?? 0) + 1} отвалился (${payload.verdict}), пробую следующий…`,
+          `${t("chat.key", { n: Number(payload.key_index ?? 0) + 1 })}: ${payload.verdict}`,
           null,
           true,
         ),
       );
       renderChat();
     } else if (kind === "llm_wait") {
-      pushEntry(makeEntry("system", String(payload.message ?? "жду ключи…"), null, true));
+      pushEntry(makeEntry("system", String(payload.message ?? ""), null, true));
       renderChat();
     }
   });
@@ -357,7 +480,7 @@ async function boot() {
   bindTopbar();
   bindPanels();
   bindComposer();
-  bindMobileTabs();
+  bindTabs();
   bindAgentEvents();
 
   try {
@@ -368,6 +491,7 @@ async function boot() {
     store.pending = data.pending;
     store.mode = data.settings.agent_mode;
     store.security = data.settings.security_level;
+    applyLanguage(data.settings.ui_language === "en" ? "en" : "ru");
     setIndexCounts(data.index.models.map((m) => [m.id, m.men.length] as [string, number]));
 
     const preferred = data.settings.active_model_id ?? data.profiles[0]?.id ?? null;
@@ -379,14 +503,16 @@ async function boot() {
       pushEntry(
         makeEntry(
           "system",
-          "Профилей пока нет. Создай модель слева или загрузи демо-профиль, чтобы посмотреть, как это работает.",
+          t("hint.firstRun"),
         ),
       );
       renderChat();
+    } else if (!activeProviderReady()) {
+      pushEntry(makeEntry("system", t("hint.noKey")));
+      renderChat();
     }
-    if (!activeProfile()) renderScope();
   } catch (error) {
-    toast(`Не удалось запустить ядро: ${errorText(error)}`, "error");
+    toast(t("toast.bootFailed", { error: errorText(error) }), "error");
   }
 }
 

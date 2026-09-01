@@ -3,113 +3,183 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>VelvetDesk AI Studio</title>
+    <title>VelvetDesk</title>
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body>
-    <div class="topbar">
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <defs>
+        <g id="i-spark" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M8 1.5 9.6 6.4 14.5 8 9.6 9.6 8 14.5 6.4 9.6 1.5 8 6.4 6.4Z" />
+        </g>
+        <g id="i-plus" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round">
+          <path d="M8 3.5v9M3.5 8h9" />
+        </g>
+        <g id="i-key" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="5.5" cy="10.5" r="2.8" />
+          <path d="m7.6 8.6 5.4-5.4M11 5.2l1.6 1.6M9.4 6.8 11 8.4" />
+        </g>
+        <g id="i-shield" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M8 1.8 13 3.6v4c0 3.3-2.1 5.7-5 6.7-2.9-1-5-3.4-5-6.7v-4Z" />
+        </g>
+        <g id="i-stethoscope" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 2v3.5a2.6 2.6 0 0 0 5.2 0V2" />
+          <path d="M6.6 8.1v1.6a3.4 3.4 0 0 0 6.8 0V8.6" />
+          <circle cx="13.4" cy="7.2" r="1.4" />
+        </g>
+        <g id="i-globe" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="8" cy="8" r="6.2" />
+          <path d="M1.8 8h12.4M8 1.8c1.7 1.8 2.6 4 2.6 6.2S9.7 12.4 8 14.2C6.3 12.4 5.4 10.2 5.4 8S6.3 3.6 8 1.8Z" />
+        </g>
+        <g id="i-mic" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="6" y="1.8" width="4" height="7.4" rx="2" />
+          <path d="M3.6 7.4a4.4 4.4 0 0 0 8.8 0M8 11.8v2.4" />
+        </g>
+        <g id="i-search" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round">
+          <circle cx="7.2" cy="7.2" r="4.4" />
+          <path d="m10.6 10.6 3 3" />
+        </g>
+        <g id="i-users" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="6" cy="5.4" r="2.6" />
+          <path d="M1.8 13.4c0-2.4 1.9-4 4.2-4s4.2 1.6 4.2 4" />
+          <path d="M11 3.2a2.4 2.4 0 0 1 0 4.4M12.2 13.4c0-1.7-.5-3-1.4-3.7" />
+        </g>
+        <g id="i-chat" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M13.5 8.6c0 2.6-2.5 4.7-5.5 4.7-.8 0-1.6-.1-2.3-.4l-3 1 1-2.5A4.5 4.5 0 0 1 2.5 8.6C2.5 6 5 3.9 8 3.9s5.5 2.1 5.5 4.7Z" />
+        </g>
+      </defs>
+    </svg>
+
+    <header class="topbar">
       <div class="topbar-left">
-        <div class="app-title"><span class="mark">✦</span> VelvetDesk</div>
-        <div class="badge" id="providerBadge">провайдер не настроен</div>
-        <div class="badge green" id="keyBadge">ключей: 0</div>
+        <div class="app-title">
+          <svg width="16" height="16"><use href="#i-spark" /></svg>
+          VelvetDesk
+        </div>
+        <button class="status-chip" id="providerChip" title="Настроить провайдера и ключи">
+          <span class="dot off" id="providerDot"></span>
+          <span id="providerLabel" data-i18n="provider.unset">провайдер не настроен</span>
+        </button>
       </div>
 
       <div class="topbar-center">
         <div class="segmented-control" id="modeControl">
-          <button class="segmented-btn active" data-mode="auto">Auto</button>
-          <button class="segmented-btn" data-mode="act">Act</button>
-          <button class="segmented-btn" data-mode="memorize">Memorize</button>
+          <button class="segmented-btn active" data-mode="auto" data-i18n="mode.auto" data-i18n-title="mode.auto.hint">Auto</button>
+          <button class="segmented-btn" data-mode="act" data-i18n="mode.act" data-i18n-title="mode.act.hint">Act</button>
+          <button class="segmented-btn" data-mode="memorize" data-i18n="mode.memorize" data-i18n-title="mode.memorize.hint">Memorize</button>
         </div>
         <div class="segmented-control" id="securityControl">
-          <button class="segmented-btn" data-security="ask">Ask</button>
-          <button class="segmented-btn active" data-security="safe">Safe</button>
-          <button class="segmented-btn" data-security="yolo">Full</button>
+          <button class="segmented-btn" data-security="ask" data-i18n="sec.ask" data-i18n-title="sec.ask.hint">Спрашивать</button>
+          <button class="segmented-btn active" data-security="safe" data-i18n="sec.safe" data-i18n-title="sec.safe.hint">Безопасно</button>
+          <button class="segmented-btn" data-security="yolo" data-i18n="sec.full" data-i18n-title="sec.full.hint">Полный</button>
         </div>
       </div>
 
       <div class="topbar-right">
-        <button class="btn-icon" id="btnPending" title="Очередь подтверждений">🛡 <span id="pendingCount">0</span></button>
-        <button class="btn-icon" id="btnDoctor" title="Доктор">🩺</button>
-        <button class="btn-icon" id="btnKeys" title="Ключи и провайдеры">🔑</button>
-        <button class="btn-icon" id="btnMaster" title="Мастер-агент">🌐</button>
+        <button class="icon-btn" id="btnPending" data-i18n-title="nav.pending">
+          <svg width="16" height="16"><use href="#i-shield" /></svg>
+          <span class="count zero" id="pendingCount">0</span>
+        </button>
+        <button class="icon-btn" id="btnMaster" data-i18n-title="nav.master">
+          <svg width="16" height="16"><use href="#i-globe" /></svg>
+        </button>
+        <button class="icon-btn" id="btnDoctor" data-i18n-title="nav.doctor">
+          <svg width="16" height="16"><use href="#i-stethoscope" /></svg>
+        </button>
+        <button class="icon-btn" id="btnLang" data-i18n-title="nav.lang"><span id="langLabel">RU</span></button>
+        <button class="icon-btn" id="btnKeys" data-i18n-title="nav.keys">
+          <svg width="16" height="16"><use href="#i-key" /></svg>
+        </button>
       </div>
-    </div>
+    </header>
 
     <div class="workspace" id="workspace">
-      <aside class="sidebar-left" id="paneProfiles">
+      <aside class="rail rail-left" id="paneProfiles">
         <div class="panel-header">
-          <span class="panel-title">Модели</span>
-          <button class="btn-icon" id="btnAddProfile" title="Добавить модель">＋</button>
+          <span class="panel-title" data-i18n="rail.models">Модели</span>
+          <button class="icon-btn" id="btnAddProfile" data-i18n-title="rail.newProfile">
+            <svg width="16" height="16"><use href="#i-plus" /></svg>
+          </button>
         </div>
         <div class="panel-search">
-          <input class="search-input" id="profileSearch" placeholder="Поиск модели…" />
+          <input class="search-input" id="profileSearch" data-i18n-placeholder="rail.searchProfile" />
         </div>
-        <div class="profile-list" id="profileList"></div>
+        <div class="list" id="profileList"></div>
         <div class="panel-footer">
-          <button class="btn-ghost" id="btnEditProfile">Настроить персону</button>
+          <button class="btn btn-secondary btn-wide" id="btnEditProfile" data-i18n="rail.openProfile">Открыть анкету</button>
         </div>
       </aside>
 
-      <main class="chat-center" id="paneChat">
-        <div class="chat-header">
-          <div class="scope-pill">
-            <span class="status-dot" id="scopeDot"></span>
-            <span id="activeScopeLabel">Профиль не выбран</span>
+      <main class="center" id="paneChat">
+        <div class="center-header">
+          <div class="scope">
+            <span class="dot idle" id="scopeDot"></span>
+            <span id="scopeLabel" data-i18n="scope.none">Анкета не выбрана</span>
           </div>
-          <div class="scope-path">sandbox: <code id="scopePath">—</code></div>
+          <div class="scope-path" id="scopePath">—</div>
         </div>
 
-        <div class="chat-messages" id="chatMessages"></div>
+        <div class="messages" id="messages"></div>
 
-        <div class="chat-input-container">
-          <div class="input-bar">
+        <div class="composer">
+          <div class="composer-box">
             <textarea
-              id="chatInput"
-              class="chat-textarea"
+              id="composerInput"
+              class="composer-input"
               rows="3"
-              placeholder="Вставь входящее письмо, опиши задачу или надиктуй факты… (Ctrl+Enter — выполнить)"
+              data-i18n-placeholder="composer.placeholder"
             ></textarea>
-            <div class="input-toolbar">
-              <div class="input-flags">
-                <span class="mini-pill">Режим: <b id="currentModeLabel">AUTO</b></span>
-                <span class="mini-pill">Доступ: <b id="currentSecLabel">SAFE</b></span>
-                <label class="mini-pill checkbox">
-                  <input type="checkbox" id="logIncoming" /> писать в историю
-                </label>
-                <select class="mini-select" id="channelSelect">
-                  <option value="chat">чат</option>
-                  <option value="letter">письмо</option>
+            <div class="composer-bar">
+              <div class="composer-left">
+                <button class="btn btn-secondary btn-mic" id="btnMic" data-i18n-title="composer.dictateHint">
+                  <svg width="15" height="15"><use href="#i-mic" /></svg>
+                  <span id="micLabel" data-i18n="composer.dictate">Диктовать</span>
+                </button>
+                <select class="field-input compact" id="channelSelect" data-i18n-title="composer.channel">
+                  <option value="chat" data-i18n="composer.chat">чат</option>
+                  <option value="letter" data-i18n="composer.letter">письмо</option>
                 </select>
+                <label class="toggle" data-i18n-title="composer.logHint">
+                  <input type="checkbox" id="logIncoming" /> <span data-i18n="composer.log">в историю</span>
+                </label>
               </div>
-              <button class="btn-send" id="btnSend">Выполнить ↵</button>
+              <button class="btn btn-primary" id="btnSend" data-i18n="composer.send">Выполнить</button>
             </div>
           </div>
         </div>
       </main>
 
-      <aside class="sidebar-right" id="paneMen">
+      <aside class="rail rail-right" id="paneMen">
         <div class="panel-header">
-          <span class="panel-title">Мужчины в работе</span>
-          <button class="btn-icon" id="btnAddMan" title="Добавить мужчину">＋</button>
+          <span class="panel-title" data-i18n="rail.men">Мужчины</span>
+          <button class="icon-btn" id="btnAddMan" data-i18n-title="rail.newMan">
+            <svg width="16" height="16"><use href="#i-plus" /></svg>
+          </button>
         </div>
         <div class="panel-search">
-          <input class="search-input" id="menSearch" placeholder="🔍 Имя, ID, страна, метка…" />
+          <input class="search-input" id="menSearch" data-i18n-placeholder="rail.searchMan" />
         </div>
-        <div class="men-list" id="menList"></div>
+        <div class="list" id="menList"></div>
         <div class="panel-footer">
-          <button class="btn-ghost" id="btnManCard">Карточка мужчины</button>
+          <button class="btn btn-secondary btn-wide" id="btnManCard" data-i18n="rail.openMan">Открыть досье</button>
         </div>
       </aside>
     </div>
 
-    <nav class="mobile-tabs" id="mobileTabs">
-      <button class="tab-btn" data-pane="paneProfiles">Модели</button>
-      <button class="tab-btn active" data-pane="paneChat">Копилот</button>
-      <button class="tab-btn" data-pane="paneMen">CRM</button>
+    <nav class="tabbar" id="tabbar">
+      <button class="tab-btn" data-pane="paneProfiles">
+        <svg width="17" height="17"><use href="#i-search" /></svg><span data-i18n="tab.models">Модели</span>
+      </button>
+      <button class="tab-btn active" data-pane="paneChat">
+        <svg width="17" height="17"><use href="#i-chat" /></svg><span data-i18n="tab.copilot">Копилот</span>
+      </button>
+      <button class="tab-btn" data-pane="paneMen">
+        <svg width="17" height="17"><use href="#i-users" /></svg><span data-i18n="tab.crm">CRM</span>
+      </button>
     </nav>
 
-    <div class="modal-overlay" id="modalOverlay">
-      <div class="modal-card" id="modalCard"></div>
+    <div class="overlay" id="modalOverlay">
+      <div class="modal" id="modalCard"></div>
     </div>
 
     <div class="toast-stack" id="toastStack"></div>

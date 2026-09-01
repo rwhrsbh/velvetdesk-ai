@@ -30,9 +30,26 @@ pub struct ProviderConfig {
     pub temperature: f32,
     #[serde(default)]
     pub max_output_tokens: Option<u32>,
+    /// Model used for voice dictation. Empty means "same as `model`" for
+    /// Gemini and `whisper-1` for OpenAI-compatible endpoints.
+    #[serde(default)]
+    pub transcribe_model: String,
     /// Number of keys stored for this provider (mirrored from secrets).
     #[serde(default, skip_deserializing)]
     pub key_count: usize,
+}
+
+impl ProviderConfig {
+    /// Model that handles audio input for this provider.
+    pub fn speech_model(&self) -> String {
+        if !self.transcribe_model.trim().is_empty() {
+            return self.transcribe_model.trim().to_string();
+        }
+        match self.kind {
+            ProviderKind::Gemini => self.model.clone(),
+            ProviderKind::OpenaiCompatible => "whisper-1".to_string(),
+        }
+    }
 }
 
 fn default_api_version() -> String {
@@ -86,6 +103,9 @@ pub struct Settings {
     pub global_style_rules: String,
     #[serde(default = "default_true")]
     pub telemetry_disabled: bool,
+    /// UI language: "ru" or "en".
+    #[serde(default = "default_language")]
+    pub ui_language: String,
 }
 
 fn default_mode() -> AgentMode {
@@ -108,6 +128,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_language() -> String {
+    "ru".to_string()
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Settings {
@@ -122,6 +146,7 @@ impl Default for Settings {
                     extra_headers: vec![],
                     temperature: 0.85,
                     max_output_tokens: None,
+                    transcribe_model: String::new(),
                     key_count: 0,
                 },
                 ProviderConfig {
@@ -134,6 +159,7 @@ impl Default for Settings {
                     extra_headers: vec![],
                     temperature: 0.85,
                     max_output_tokens: None,
+                    transcribe_model: String::new(),
                     key_count: 0,
                 },
             ],
@@ -145,6 +171,7 @@ impl Default for Settings {
             max_tool_turns: 8,
             global_style_rules: String::new(),
             telemetry_disabled: true,
+            ui_language: default_language(),
         }
     }
 }

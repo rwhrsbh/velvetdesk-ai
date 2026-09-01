@@ -81,6 +81,18 @@ pub struct NewProfile {
     pub age: Option<u32>,
     #[serde(default)]
     pub site: Option<String>,
+    #[serde(default)]
+    pub avatar: Option<String>,
+    #[serde(default)]
+    pub bio: Option<String>,
+    #[serde(default)]
+    pub system_prompt_override: Option<String>,
+    #[serde(default)]
+    pub languages: Option<Vec<String>>,
+    #[serde(default)]
+    pub tone_rules: Option<Vec<String>>,
+    #[serde(default)]
+    pub banned_phrases: Option<Vec<String>>,
 }
 
 #[tauri::command]
@@ -99,6 +111,16 @@ pub fn create_profile(state: State<'_, AppState>, input: NewProfile) -> Result<P
     let mut profile = Profile::new(id, input.name.trim().to_string());
     profile.age = input.age;
     profile.site = input.site.unwrap_or_default();
+    profile.avatar = input.avatar.unwrap_or_default();
+    profile.bio = input.bio.unwrap_or_default();
+    profile.system_prompt_override = input.system_prompt_override.unwrap_or_default();
+    if let Some(languages) = input.languages {
+        if !languages.is_empty() {
+            profile.languages = languages;
+        }
+    }
+    profile.tone_rules = input.tone_rules.unwrap_or_default();
+    profile.banned_phrases = input.banned_phrases.unwrap_or_default();
     scope.write_profile(&profile)?;
     storage::rebuild_index(&state.paths)?;
     Ok(profile)
@@ -405,6 +427,83 @@ pub fn remove_key(
     }
     state.save_secrets(secrets)?;
     Ok(state.pool(&provider_id).status())
+}
+
+/// Ask the provider which models the stored keys may use. The detected API
+/// version is written back to settings so the operator never types it.
+#[tauri::command]
+pub async fn list_provider_models(
+    state: State<'_, AppState>,
+    provider_id: String,
+) -> Result<crate::llm::catalog::ModelCatalog> {
+    let provider = {
+        let settings = state.settings.read();
+        settings
+            .provider(&provider_id)
+            .cloned()
+            .ok_or_else(|| AppError::NotFound(format!("provider {provider_id}")))?
+    };
+    let pool = state.pool(&provider.id);
+    let lease = pool.acquire().ok_or_else(|| {
+        AppError::NoKeys(format!("у провайдера {} нет рабочего ключа", provider.id))
+    })?;
+
+    let catalog =
+        match crate::llm::catalog::list_models(&state.llm.http, &provider, &lease.key).await {
+            Ok(catalog) => {
+                pool.report_success(lease.index);
+                catalog
+            }
+            Err(err) => {
+                pool.report_failure(lease.index, crate::llm::keypool::KeyVerdict::Transient);
+                return Err(AppError::Provider(err.message()));
+            }
+        };
+
+    // Remember the version that actually answered.
+    let mut settings = state.settings.read().clone();
+    if let Some(target) = settings.providers.iter_mut().find(|p| p.id == provider.id) {
+        target.api_version = catalog.api_version.clone();
+    }
+    state.save_settings(settings)?;
+
+    Ok(catalog)
+}
+
+/// Transcribe a dictated clip through the operator's own provider.
+#[tauri::command]
+pub async fn transcribe(
+    state: State<'_, AppState>,
+    audio_base64: String,
+    mime: String,
+) -> Result<String> {
+    if audio_base64.trim().is_empty() {
+        return Err(AppError::Invalid("пустая запись".into()));
+    }
+    let provider = state.active_provider()?;
+    let pool = state.pool(&provider.id);
+    let lease = pool.acquire().ok_or_else(|| {
+        AppError::NoKeys(format!("у провайдера {} нет рабочего ключа", provider.id))
+    })?;
+
+    match crate::llm::catalog::transcribe(
+        &state.llm.http,
+        &provider,
+        &lease.key,
+        &audio_base64,
+        &mime,
+    )
+    .await
+    {
+        Ok(text) => {
+            pool.report_success(lease.index);
+            Ok(text)
+        }
+        Err(err) => {
+            pool.report_failure(lease.index, crate::llm::keypool::KeyVerdict::Transient);
+            Err(AppError::Provider(err.message()))
+        }
+    }
 }
 
 /// Cheap connectivity probe: one-token request through the pool.

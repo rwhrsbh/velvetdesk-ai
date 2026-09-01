@@ -8,6 +8,7 @@ import type {
   GlobalIndex,
   KeyStatus,
   Man,
+  ModelCatalog,
   MasterDecision,
   PendingAction,
   Profile,
@@ -32,8 +33,18 @@ export const api = {
   bootstrap: () => invoke<Bootstrap>("bootstrap"),
 
   listProfiles: () => invoke<Profile[]>("list_profiles"),
-  createProfile: (input: { name: string; id?: string; age?: number; site?: string }) =>
-    invoke<Profile>("create_profile", { input }),
+  createProfile: (input: {
+    name: string;
+    id?: string;
+    age?: number;
+    site?: string;
+    avatar?: string;
+    bio?: string;
+    system_prompt_override?: string;
+    languages?: string[];
+    tone_rules?: string[];
+    banned_phrases?: string[];
+  }) => invoke<Profile>("create_profile", { input }),
   getProfile: (modelId: string) => invoke<Profile>("get_profile", { modelId }),
   saveProfile: (profile: Profile) => invoke<Profile>("save_profile", { profile }),
   deleteProfile: (modelId: string) => invoke<void>("delete_profile", { modelId }),
@@ -80,6 +91,10 @@ export const api = {
   addKey: (providerId: string, key: string) => invoke<KeyStatus[]>("add_key", { providerId, key }),
   removeKey: (providerId: string, index: number) =>
     invoke<KeyStatus[]>("remove_key", { providerId, index }),
+  listProviderModels: (providerId: string) =>
+    invoke<ModelCatalog>("list_provider_models", { providerId }),
+  transcribe: (audioBase64: string, mime: string) =>
+    invoke<string>("transcribe", { audioBase64, mime }),
   testProvider: () => invoke<Record<string, unknown>>("test_provider"),
 
   seedDemo: () => invoke<Profile[]>("seed_demo"),

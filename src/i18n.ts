@@ -1,0 +1,578 @@
+/** Minimal dependency-free i18n: RU (default) and EN. */
+
+export type Lang = "ru" | "en";
+
+type Dict = Record<string, string>;
+
+const ru: Dict = {
+  "app.name": "VelvetDesk",
+  "provider.unset": "провайдер не настроен",
+  "provider.loading": "загрузка…",
+  "provider.noKey": "{label} — нет ключа",
+  "provider.keys": "{model} · {count} {word}",
+  "provider.title": "Провайдер и ключи",
+
+  "mode.auto": "Auto",
+  "mode.act": "Act",
+  "mode.memorize": "Memorize",
+  "mode.auto.hint": "Агент сам вызывает инструменты",
+  "mode.act.hint": "Один вызов: черновик + память",
+  "mode.memorize.hint": "Только запись фактов",
+
+  "sec.ask": "Спрашивать",
+  "sec.safe": "Безопасно",
+  "sec.full": "Полный",
+  "sec.ask.hint": "Спрашивать перед каждой записью",
+  "sec.safe.hint": "Записи сразу, удаления — с подтверждением",
+  "sec.full.hint": "Без подтверждений",
+
+  "nav.pending": "Очередь подтверждений",
+  "nav.master": "Мастер-агент и глобальный поиск",
+  "nav.doctor": "Доктор: проверка данных",
+  "nav.keys": "Провайдер и ключи",
+  "nav.lang": "Язык интерфейса",
+
+  "rail.models": "Модели",
+  "rail.men": "Мужчины",
+  "rail.newProfile": "Новая анкета",
+  "rail.newMan": "Новое досье",
+  "rail.searchProfile": "Поиск анкеты",
+  "rail.searchMan": "Имя, ID, страна, метка",
+  "rail.openProfile": "Открыть анкету",
+  "rail.openMan": "Открыть досье",
+
+  "scope.none": "Анкета не выбрана",
+  "composer.placeholder":
+    "Вставь письмо, опиши задачу или надиктуй факты голосом. Ctrl+Enter — выполнить.",
+  "composer.send": "Выполнить",
+  "composer.channel": "Канал",
+  "composer.chat": "чат",
+  "composer.letter": "письмо",
+  "composer.log": "в историю",
+  "composer.logHint": "Сохранить вставленный текст как входящее сообщение",
+  "composer.dictate": "Диктовать",
+  "composer.stop": "Стоп",
+  "composer.transcribing": "Расшифровываю…",
+  "composer.dictateHint": "Диктовка голосом",
+
+  "tab.models": "Модели",
+  "tab.copilot": "Копилот",
+  "tab.crm": "CRM",
+
+  "empty.noProfiles": "Анкет пока нет.",
+  "empty.createOrSeed": "Нажми <b>+</b> вверху или <a href=\"#\" data-act=\"seed\">загрузи демо-анкету</a>.",
+  "empty.pickProfile": "Выбери анкету слева.",
+  "empty.noMen": "Досье пока нет.",
+  "empty.addMan": "Нажми <b>+</b> или вставь письмо в мастер-агент.",
+  "empty.needProfile": "Создай анкету модели, чтобы включить изолированный агент.",
+  "empty.queue": "Очередь пуста.",
+  "empty.nothingFound": "Ничего не найдено.",
+
+  "chat.copy": "Копировать",
+  "chat.asOutgoing": "Записать как отправленное",
+  "chat.copied": "Скопировано",
+  "chat.logged": "Записано в переписку",
+  "chat.tokens": "{n} токенов",
+  "chat.key": "ключ #{n}",
+  "chat.turns": "{n} циклов",
+  "chat.pending": "ждёт подтверждения",
+  "chat.done": "выполнено",
+  "chat.failed": "ошибка",
+
+  "toast.pickProfile": "Сначала выбери анкету",
+  "toast.pickMan": "Сначала выбери мужчину",
+  "toast.needKey": "Добавь API-ключ в настройках провайдера",
+  "toast.needKeyVoice": "Для диктовки нужен настроенный провайдер с ключом",
+  "toast.pendingCount": "{n} действий ждут подтверждения",
+  "toast.saved": "Сохранено",
+  "toast.profileSaved": "Анкета сохранена",
+  "toast.profileCreated": "Анкета {name} создана",
+  "toast.profileDeleted": "Анкета удалена",
+  "toast.manSaved": "Досье сохранено",
+  "toast.manCreated": "Досье {name} создано",
+  "toast.manDeleted": "Досье удалено",
+  "toast.demoCreated": "Демо-анкета создана",
+  "toast.keyAdded": "Ключ добавлен, подтягиваю модели…",
+  "toast.modelsFound": "Найдено моделей: {n}",
+  "toast.nameRequired": "Имя обязательно",
+  "toast.noMic": "Микрофон недоступен в этой сборке вебвью",
+  "toast.micDenied": "Нет доступа к микрофону: {error}",
+  "toast.tooShort": "Запись слишком короткая",
+  "toast.nothingHeard": "Ничего не распознано",
+  "toast.bootFailed": "Не удалось запустить ядро: {error}",
+  "toast.photoFailed": "Не удалось прочитать фото: {error}",
+  "toast.applied": "Применено",
+  "toast.fixed": "Исправлено записей: {n}",
+  "toast.checking": "Проверяю связь…",
+  "toast.probeOk": "Ответ модели: «{text}» (ключ #{n})",
+
+  "hint.firstRun":
+    "Анкет пока нет. Создай модель слева — форма спросит имя, возраст, сайт и персону, и агент сразу готов к работе.",
+  "hint.noKey": "Провайдер без ключа — открой настройки ключей в правом верхнем углу.",
+
+  "common.cancel": "Отмена",
+  "common.close": "Закрыть",
+  "common.save": "Сохранить",
+  "common.ok": "Ок",
+  "common.delete": "Удалить",
+  "common.done": "Готово",
+  "common.or": "или",
+  "common.remove": "Убрать",
+  "common.confirm": "Подтвердить",
+  "common.empty": "пусто",
+  "common.noSite": "без сайта",
+  "common.open": "Открыть",
+
+  "profile.newTitle": "Новая модель",
+  "profile.editTitle": "Анкета — {name}",
+  "profile.newSub": "Заполни анкету — агент сразу получит персону и начнёт писать в её голосе.",
+  "profile.editSub": "Данные хранятся в <code>profiles/{id}/profile.json</code>.",
+  "profile.photo": "Фото",
+  "profile.photoUrl": "Ссылка на фото",
+  "profile.pickFile": "Выбрать файл",
+  "profile.fileHint": "файл уменьшается до {size}px и хранится внутри анкеты",
+  "profile.urlBlocked": "сайт блокирует ссылку — выбери файл с диска",
+  "profile.noPhoto": "нет фото",
+  "profile.urlFailed": "ссылка не грузится",
+  "profile.fileSaved": "{name} — сохранено в анкете",
+  "profile.name": "Имя *",
+  "profile.age": "Возраст",
+  "profile.site": "Сайт",
+  "profile.siteId": "ID анкеты на сайте",
+  "profile.idHint": "2428653 — пусто = сгенерировать",
+  "profile.languages": "Языки (через запятую)",
+  "profile.bio": "О ней — возраст детей, город, работа, характер",
+  "profile.bioHint":
+    "Зрелая, тёплая, ценит уважение. Пятеро детей, живёт в Оснабрюке, работает флористом.",
+  "profile.persona": "Инструкции персоны (что агент обязан помнить)",
+  "profile.personaHint":
+    "Не обсуждает политику. Пишет короткими абзацами. О бывшем муже — только вскользь.",
+  "profile.toneSection": "Тон и запреты",
+  "profile.tone": "Правила тона (по строке)",
+  "profile.toneHint": "тёплый спокойный тон без восклицаний",
+  "profile.banned": "Запрещённые фразы (по строке)",
+  "profile.factsCollected": "Факты, собранные агентом ({n})",
+  "profile.create": "Создать и начать работу",
+  "profile.delete": "Удалить анкету",
+  "profile.deleteTitle": "Удалить анкету?",
+  "profile.deleteBody":
+    "Папка <code>profiles/{id}/</code> со всеми досье и перепиской будет удалена безвозвратно.",
+  "profile.contacts": "{n} {word}",
+
+  "man.newTitle": "Новый мужчина",
+  "man.newSub": "Заполни, что уже известно — агент дополнит остальное сам.",
+  "man.editSub": "Досье: <code>profiles/{model}/men/{id}.json</code>",
+  "man.name": "Имя *",
+  "man.location": "Город / страна",
+  "man.siteId": "ID на сайте",
+  "man.idHint": "1219749 — пусто = сгенерировать",
+  "man.stage": "Стадия",
+  "man.tags": "Метки (через запятую)",
+  "man.tagsHint": "пенсия, походы, без игр",
+  "man.status": "Статус — одна строка для CRM",
+  "man.statusHint": "Осторожен, предложил встречу у Schlosstor",
+  "man.next": "Следующий шаг",
+  "man.nextHint": "позвать в чат вечером",
+  "man.memorySection": "Триггеры, запреты{memory}",
+  "man.memorySuffix": ", память",
+  "man.triggers": "Что заходит (по строке)",
+  "man.triggersHint": "тепло говорит о собаке",
+  "man.boundaries": "Чего не касаться (по строке)",
+  "man.boundariesHint": "не упоминать бывшую жену",
+  "man.facts": "Факты ({n})",
+  "man.gifts": "Подарки ({n})",
+  "man.notes": "Заметки ({n})",
+  "man.chat": "Переписка",
+  "man.create": "Создать",
+  "man.delete": "Удалить досье",
+  "man.deleteTitle": "Удалить досье?",
+  "man.deleteBody": "Досье <b>{name}</b> и его переписка будут удалены безвозвратно.",
+  "man.gifts.short": "подарков: {n}",
+  "man.years": "{n} лет",
+
+  "keys.title": "Провайдер и ключи",
+  "keys.sub":
+    "Вставь ключ — приложение само спросит у провайдера список доступных моделей и версию API. Ключи хранятся только на этом устройстве.",
+  "keys.provider": "Провайдер",
+  "keys.step1": "Шаг 1 — ключи API ({n})",
+  "keys.step2": "Шаг 2 — модель",
+  "keys.noKeysGemini":
+    "Ключей нет. Возьми ключ в <a href=\"https://aistudio.google.com/apikey\" target=\"_blank\" rel=\"noreferrer\">Google AI Studio</a>.",
+  "keys.noKeysOpenai":
+    "Ключей нет. Вставь ключ своего сервиса (OpenRouter, DeepSeek, локальный сервер — для локального можно ввести <code>local</code>).",
+  "keys.keyStats": "успешных {ok} · сбоев {fail}",
+  "keys.cooldown": " · кулдаун {n}с",
+  "keys.addPlaceholder": "Вставь API-ключ и нажми Enter",
+  "keys.add": "Добавить",
+  "keys.remove": "Удалить ключ",
+  "keys.found": "найдено {n}",
+  "keys.apiVersion": " · API {v}",
+  "keys.pressReload": "нажми «Обновить список»",
+  "keys.addKeyFirst": "сначала добавь ключ",
+  "keys.asking": "спрашиваю провайдера…",
+  "keys.reloadFailed": "не удалось получить список",
+  "keys.reload": "Обновить список",
+  "keys.modelPlaceholder": "например gemini-2.5-pro",
+  "keys.voice": "Голосовая диктовка",
+  "keys.sameModel": "та же модель, что и основная",
+  "keys.voiceHintGemini": "пусто = основная модель",
+  "keys.voiceHintOpenai": "например whisper-1",
+  "keys.advanced": "Дополнительно",
+  "keys.baseUrl": "Base URL",
+  "keys.temperature": "Температура: <b id=\"tempValue\">{v}</b>",
+  "keys.version": "Версия API",
+  "keys.headers": "Доп. заголовки (<code>Key: Value</code>, по одному в строке)",
+  "keys.history": "Глубина истории",
+  "keys.turns": "Макс. циклов инструментов",
+  "keys.rules": "Общие правила стиля (уходят в каждый системный промпт)",
+  "keys.test": "Проверить связь",
+
+  "doctor.title": "Доктор",
+  "doctor.scanning": "Сканирую файлы…",
+  "doctor.titleFull": "Доктор — схемы и целостность",
+  "doctor.result": "Доктор — результат",
+  "doctor.checked": "Проверено: {parts}",
+  "doctor.models": "анкет {n}",
+  "doctor.men": "досье {n}",
+  "doctor.chats": "переписок {n}",
+  "doctor.fixed": "исправлено {n}",
+  "doctor.fix": "Исправить автоматически",
+  "doctor.wasFixed": " — исправлено",
+
+  "master.title": "Мастер-агент",
+  "master.sub":
+    "Поиск по всем анкетам и авто-маршрутизация: вставь письмо — мастер определит, чьё оно, найдёт досье и создаст новое, если совпадений нет.",
+  "master.input": "Сырой текст или запрос",
+  "master.inputHint": "Письмо, кусок анкеты или просто имя",
+  "master.autoCreate": "создавать досье, если совпадений нет",
+  "master.searchOnly": "Только поиск",
+  "master.route": "Маршрутизировать",
+  "master.thinking": "Мастер думает…",
+  "master.decided": "решение принято",
+  "master.meta": "анкета {model} · досье {man} · уверенность {conf}%",
+  "master.goto": "Перейти",
+
+  "queue.title": "Очередь подтверждений ({n})",
+  "queue.sub":
+    "Слева — как есть сейчас, справа — что запишется. Без твоего согласия ничего не сохраняется.",
+  "queue.approve": "Применить",
+  "queue.reject": "Отклонить",
+  "queue.clear": "Очистить всё",
+};
+
+const en: Dict = {
+  "app.name": "VelvetDesk",
+  "provider.unset": "no provider configured",
+  "provider.loading": "loading…",
+  "provider.noKey": "{label} — no key",
+  "provider.keys": "{model} · {count} {word}",
+  "provider.title": "Provider and keys",
+
+  "mode.auto": "Auto",
+  "mode.act": "Act",
+  "mode.memorize": "Memorize",
+  "mode.auto.hint": "The agent calls tools on its own",
+  "mode.act.hint": "One call: draft + memory patch",
+  "mode.memorize.hint": "Store facts only",
+
+  "sec.ask": "Ask",
+  "sec.safe": "Safe",
+  "sec.full": "Full",
+  "sec.ask.hint": "Confirm every write",
+  "sec.safe.hint": "Writes apply, deletions need confirmation",
+  "sec.full.hint": "No confirmations",
+
+  "nav.pending": "Approval queue",
+  "nav.master": "Master agent and global search",
+  "nav.doctor": "Doctor: data integrity",
+  "nav.keys": "Provider and keys",
+  "nav.lang": "Interface language",
+
+  "rail.models": "Models",
+  "rail.men": "Men",
+  "rail.newProfile": "New profile",
+  "rail.newMan": "New dossier",
+  "rail.searchProfile": "Search profiles",
+  "rail.searchMan": "Name, ID, country, tag",
+  "rail.openProfile": "Open profile",
+  "rail.openMan": "Open dossier",
+
+  "scope.none": "No profile selected",
+  "composer.placeholder":
+    "Paste his letter, describe the task, or dictate facts. Ctrl+Enter to run.",
+  "composer.send": "Run",
+  "composer.channel": "Channel",
+  "composer.chat": "chat",
+  "composer.letter": "letter",
+  "composer.log": "log it",
+  "composer.logHint": "Store the pasted text as an incoming message",
+  "composer.dictate": "Dictate",
+  "composer.stop": "Stop",
+  "composer.transcribing": "Transcribing…",
+  "composer.dictateHint": "Voice dictation",
+
+  "tab.models": "Models",
+  "tab.copilot": "Copilot",
+  "tab.crm": "CRM",
+
+  "empty.noProfiles": "No profiles yet.",
+  "empty.createOrSeed": "Press <b>+</b> above or <a href=\"#\" data-act=\"seed\">load a demo profile</a>.",
+  "empty.pickProfile": "Pick a profile on the left.",
+  "empty.noMen": "No dossiers yet.",
+  "empty.addMan": "Press <b>+</b> or paste a letter into the master agent.",
+  "empty.needProfile": "Create a model profile to start the sandboxed agent.",
+  "empty.queue": "The queue is empty.",
+  "empty.nothingFound": "Nothing found.",
+
+  "chat.copy": "Copy",
+  "chat.asOutgoing": "Log as sent",
+  "chat.copied": "Copied",
+  "chat.logged": "Added to the thread",
+  "chat.tokens": "{n} tokens",
+  "chat.key": "key #{n}",
+  "chat.turns": "{n} turns",
+  "chat.pending": "awaiting approval",
+  "chat.done": "done",
+  "chat.failed": "failed",
+
+  "toast.pickProfile": "Pick a profile first",
+  "toast.pickMan": "Pick a man first",
+  "toast.needKey": "Add an API key in provider settings",
+  "toast.needKeyVoice": "Dictation needs a provider with a key",
+  "toast.pendingCount": "{n} actions await approval",
+  "toast.saved": "Saved",
+  "toast.profileSaved": "Profile saved",
+  "toast.profileCreated": "Profile {name} created",
+  "toast.profileDeleted": "Profile deleted",
+  "toast.manSaved": "Dossier saved",
+  "toast.manCreated": "Dossier {name} created",
+  "toast.manDeleted": "Dossier deleted",
+  "toast.demoCreated": "Demo profile created",
+  "toast.keyAdded": "Key added, fetching models…",
+  "toast.modelsFound": "Models found: {n}",
+  "toast.nameRequired": "Name is required",
+  "toast.noMic": "Microphone is not available in this webview build",
+  "toast.micDenied": "Microphone access denied: {error}",
+  "toast.tooShort": "Recording too short",
+  "toast.nothingHeard": "Nothing recognised",
+  "toast.bootFailed": "Core failed to start: {error}",
+  "toast.photoFailed": "Could not read the photo: {error}",
+  "toast.applied": "Applied",
+  "toast.fixed": "Records fixed: {n}",
+  "toast.checking": "Testing the connection…",
+  "toast.probeOk": "Model replied: “{text}” (key #{n})",
+
+  "hint.firstRun":
+    "No profiles yet. Create a model on the left — the form asks for name, age, site and persona, and the agent is ready.",
+  "hint.noKey": "The provider has no key — open key settings in the top right corner.",
+
+  "common.cancel": "Cancel",
+  "common.close": "Close",
+  "common.save": "Save",
+  "common.ok": "OK",
+  "common.delete": "Delete",
+  "common.done": "Done",
+  "common.or": "or",
+  "common.remove": "Remove",
+  "common.confirm": "Confirm",
+  "common.empty": "empty",
+  "common.noSite": "no site",
+  "common.open": "Open",
+
+  "profile.newTitle": "New model",
+  "profile.editTitle": "Profile — {name}",
+  "profile.newSub": "Fill this in and the agent gets her persona right away.",
+  "profile.editSub": "Stored in <code>profiles/{id}/profile.json</code>.",
+  "profile.photo": "Photo",
+  "profile.photoUrl": "Photo URL",
+  "profile.pickFile": "Choose a file",
+  "profile.fileHint": "the file is resized to {size}px and stored inside the profile",
+  "profile.urlBlocked": "the site blocks this URL — pick a local file",
+  "profile.noPhoto": "no photo",
+  "profile.urlFailed": "URL does not load",
+  "profile.fileSaved": "{name} — stored in the profile",
+  "profile.name": "Name *",
+  "profile.age": "Age",
+  "profile.site": "Site",
+  "profile.siteId": "Profile ID on the site",
+  "profile.idHint": "2428653 — leave empty to generate",
+  "profile.languages": "Languages (comma separated)",
+  "profile.bio": "About her — kids, city, work, character",
+  "profile.bioHint": "Mature, warm, values respect. Five children, lives in Osnabrück, florist.",
+  "profile.persona": "Persona instructions (what the agent must remember)",
+  "profile.personaHint":
+    "Never discusses politics. Writes in short paragraphs. Mentions her ex-husband only in passing.",
+  "profile.toneSection": "Tone and bans",
+  "profile.tone": "Tone rules (one per line)",
+  "profile.toneHint": "warm, calm tone without exclamations",
+  "profile.banned": "Banned phrases (one per line)",
+  "profile.factsCollected": "Facts collected by the agent ({n})",
+  "profile.create": "Create and start",
+  "profile.delete": "Delete profile",
+  "profile.deleteTitle": "Delete this profile?",
+  "profile.deleteBody":
+    "The folder <code>profiles/{id}/</code> with every dossier and thread will be gone for good.",
+  "profile.contacts": "{n} {word}",
+
+  "man.newTitle": "New man",
+  "man.newSub": "Add what you already know — the agent fills in the rest.",
+  "man.editSub": "Dossier: <code>profiles/{model}/men/{id}.json</code>",
+  "man.name": "Name *",
+  "man.location": "City / country",
+  "man.siteId": "ID on the site",
+  "man.idHint": "1219749 — leave empty to generate",
+  "man.stage": "Stage",
+  "man.tags": "Tags (comma separated)",
+  "man.tagsHint": "pension, hiking, no games",
+  "man.status": "Status — one line for the CRM",
+  "man.statusHint": "Cautious, proposed a meeting at Schlosstor",
+  "man.next": "Next action",
+  "man.nextHint": "invite him to chat tonight",
+  "man.memorySection": "Triggers, bans{memory}",
+  "man.memorySuffix": ", memory",
+  "man.triggers": "What lands well (one per line)",
+  "man.triggersHint": "talks warmly about his dog",
+  "man.boundaries": "What to avoid (one per line)",
+  "man.boundariesHint": "never mention his ex-wife",
+  "man.facts": "Facts ({n})",
+  "man.gifts": "Gifts ({n})",
+  "man.notes": "Notes ({n})",
+  "man.chat": "Correspondence",
+  "man.create": "Create",
+  "man.delete": "Delete dossier",
+  "man.deleteTitle": "Delete this dossier?",
+  "man.deleteBody": "The dossier <b>{name}</b> and its thread will be gone for good.",
+  "man.gifts.short": "gifts: {n}",
+  "man.years": "{n} y.o.",
+
+  "keys.title": "Provider and keys",
+  "keys.sub":
+    "Paste a key — the app asks the provider for the model list and API version itself. Keys never leave this device.",
+  "keys.provider": "Provider",
+  "keys.step1": "Step 1 — API keys ({n})",
+  "keys.step2": "Step 2 — model",
+  "keys.noKeysGemini":
+    "No keys yet. Grab one at <a href=\"https://aistudio.google.com/apikey\" target=\"_blank\" rel=\"noreferrer\">Google AI Studio</a>.",
+  "keys.noKeysOpenai":
+    "No keys yet. Paste your service key (OpenRouter, DeepSeek, or type <code>local</code> for a local server).",
+  "keys.keyStats": "ok {ok} · failures {fail}",
+  "keys.cooldown": " · cooldown {n}s",
+  "keys.addPlaceholder": "Paste an API key and press Enter",
+  "keys.add": "Add",
+  "keys.remove": "Remove key",
+  "keys.found": "{n} found",
+  "keys.apiVersion": " · API {v}",
+  "keys.pressReload": "press “Refresh list”",
+  "keys.addKeyFirst": "add a key first",
+  "keys.asking": "asking the provider…",
+  "keys.reloadFailed": "could not fetch the list",
+  "keys.reload": "Refresh list",
+  "keys.modelPlaceholder": "e.g. gemini-2.5-pro",
+  "keys.voice": "Voice dictation",
+  "keys.sameModel": "same model as the main one",
+  "keys.voiceHintGemini": "empty = main model",
+  "keys.voiceHintOpenai": "e.g. whisper-1",
+  "keys.advanced": "Advanced",
+  "keys.baseUrl": "Base URL",
+  "keys.temperature": "Temperature: <b id=\"tempValue\">{v}</b>",
+  "keys.version": "API version",
+  "keys.headers": "Extra headers (<code>Key: Value</code>, one per line)",
+  "keys.history": "History depth",
+  "keys.turns": "Max tool turns",
+  "keys.rules": "House style rules (appended to every system prompt)",
+  "keys.test": "Test connection",
+
+  "doctor.title": "Doctor",
+  "doctor.scanning": "Scanning files…",
+  "doctor.titleFull": "Doctor — schemas and integrity",
+  "doctor.result": "Doctor — result",
+  "doctor.checked": "Checked: {parts}",
+  "doctor.models": "profiles {n}",
+  "doctor.men": "dossiers {n}",
+  "doctor.chats": "threads {n}",
+  "doctor.fixed": "fixed {n}",
+  "doctor.fix": "Fix automatically",
+  "doctor.wasFixed": " — fixed",
+
+  "master.title": "Master agent",
+  "master.sub":
+    "Search across every profile and auto-route raw text: paste a letter and the master finds whose it is, or creates a new dossier.",
+  "master.input": "Raw text or query",
+  "master.inputHint": "A letter, a profile snippet, or just a name",
+  "master.autoCreate": "create a dossier when nothing matches",
+  "master.searchOnly": "Search only",
+  "master.route": "Route it",
+  "master.thinking": "The master is thinking…",
+  "master.decided": "decision made",
+  "master.meta": "profile {model} · dossier {man} · confidence {conf}%",
+  "master.goto": "Go there",
+
+  "queue.title": "Approval queue ({n})",
+  "queue.sub": "Left is the current state, right is what will be written. Nothing lands without you.",
+  "queue.approve": "Apply",
+  "queue.reject": "Reject",
+  "queue.clear": "Clear all",
+};
+
+const dicts: Record<Lang, Dict> = { ru, en };
+
+let current: Lang = "ru";
+
+export function lang(): Lang {
+  return current;
+}
+
+export function setLang(next: Lang) {
+  current = dicts[next] ? next : "ru";
+  document.documentElement.lang = current;
+}
+
+/** Translate a key, substituting {placeholders}. */
+export function t(key: string, params?: Record<string, string | number>): string {
+  const value = dicts[current][key] ?? dicts.ru[key] ?? key;
+  if (!params) return value;
+  return value.replace(/\{(\w+)\}/g, (match, name: string) =>
+    name in params ? String(params[name]) : match,
+  );
+}
+
+/** Russian needs three plural forms; English only two. */
+export function plural(n: number, forms: [string, string, string]): string {
+  if (current === "en") return n === 1 ? forms[0] : forms[2];
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return forms[0];
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return forms[1];
+  return forms[2];
+}
+
+export function keyWord(n: number): string {
+  return current === "en"
+    ? plural(n, ["key", "keys", "keys"])
+    : plural(n, ["ключ", "ключа", "ключей"]);
+}
+
+export function contactWord(n: number): string {
+  return current === "en"
+    ? plural(n, ["contact", "contacts", "contacts"])
+    : plural(n, ["контакт", "контакта", "контактов"]);
+}
+
+/**
+ * Apply translations to static markup:
+ * `data-i18n`, `data-i18n-html`, `data-i18n-placeholder`, `data-i18n-title`.
+ */
+export function applyStatic(root: ParentNode = document) {
+  root.querySelectorAll<HTMLElement>("[data-i18n]").forEach((el) => {
+    el.textContent = t(el.dataset.i18n!);
+  });
+  root.querySelectorAll<HTMLElement>("[data-i18n-html]").forEach((el) => {
+    el.innerHTML = t(el.dataset.i18nHtml!);
+  });
+  root.querySelectorAll<HTMLElement>("[data-i18n-placeholder]").forEach((el) => {
+    (el as HTMLInputElement).placeholder = t(el.dataset.i18nPlaceholder!);
+  });
+  root.querySelectorAll<HTMLElement>("[data-i18n-title]").forEach((el) => {
+    el.title = t(el.dataset.i18nTitle!);
+  });
+}

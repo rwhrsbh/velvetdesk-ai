@@ -155,6 +155,18 @@ export interface MasterDecision {
   usage: Usage;
 }
 
+export interface ModelInfo {
+  id: string;
+  label: string;
+  chat: boolean;
+  audio: boolean;
+}
+
+export interface ModelCatalog {
+  api_version: string;
+  models: ModelInfo[];
+}
+
 export interface ProviderConfig {
   id: string;
   label: string;
@@ -165,6 +177,7 @@ export interface ProviderConfig {
   extra_headers: [string, string][];
   temperature: number;
   max_output_tokens: number | null;
+  transcribe_model: string;
   key_count: number;
 }
 
@@ -178,6 +191,7 @@ export interface Settings {
   max_tool_turns: number;
   global_style_rules: string;
   telemetry_disabled: boolean;
+  ui_language: "ru" | "en";
 }
 
 export interface KeyStatus {

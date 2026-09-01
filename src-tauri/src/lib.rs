@@ -71,6 +71,8 @@ pub fn run() {
             commands::set_keys,
             commands::add_key,
             commands::remove_key,
+            commands::list_provider_models,
+            commands::transcribe,
             commands::test_provider,
             commands::seed_demo,
         ])

@@ -230,6 +230,7 @@ mod tests {
             extra_headers: vec![],
             temperature: 0.7,
             max_output_tokens: Some(2048),
+            transcribe_model: String::new(),
             key_count: 1,
         }
     }
