@@ -161,14 +161,38 @@ jobs:
       - name: Initialise Android project
         run: npx tauri android init --ci
 
-      - name: Build APK (debug-signed, installable)
-        run: npx tauri android build --debug --apk --target aarch64 armv7
+      - name: Build release APK
+        run: npx tauri android build --apk --target aarch64 armv7
 
-      - name: Collect APKs
+      - name: Sign APKs
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         shell: bash
         run: |
           mkdir -p out
-          find src-tauri/gen/android -name "*.apk" -exec cp {} out/ \; || true
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::warning::no ANDROID_KEYSTORE_BASE64 secret, signing with a throwaway CI key"
+            keytool -genkeypair -v -keystore ci.keystore -storetype PKCS12 -storepass velvetdesk \
+              -keypass velvetdesk -alias ci -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=VelvetDesk CI, OU=CI, O=VelvetDesk, C=DE"
+            KEYSTORE=ci.keystore; KEYSTORE_PASSWORD=velvetdesk; KEY_ALIAS=ci; KEY_PASSWORD=velvetdesk
+          else
+            echo "$KEYSTORE_B64" | base64 -d > release.keystore
+            KEYSTORE=release.keystore
+          fi
+          APKSIGNER=$(find "$ANDROID_SDK_ROOT/build-tools" -name apksigner | sort | tail -1)
+          for apk in $(find src-tauri/gen/android -name "*-unsigned.apk"); do
+            signed="out/$(basename "${apk%-unsigned.apk}").apk"
+            "$APKSIGNER" sign --ks "$KEYSTORE" --ks-pass "pass:$KEYSTORE_PASSWORD" \
+              --ks-key-alias "$KEY_ALIAS" --key-pass "pass:$KEY_PASSWORD" \
+              --out "$signed" "$apk"
+            "$APKSIGNER" verify --print-certs "$signed" | head -3
+          done
+          find src-tauri/gen/android -name "*.apk" ! -name "*-unsigned.apk" -exec cp -n {} out/ \; || true
+          rm -f release.keystore ci.keystore
           ls -la out
 
       - uses: actions/upload-artifact@v4
