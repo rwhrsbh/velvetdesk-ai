@@ -1,7 +1,7 @@
 {
   "name": "velvetdesk-ai",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "VelvetDesk AI — cross-platform agency copilot built on Tauri 2",
   "scripts": {

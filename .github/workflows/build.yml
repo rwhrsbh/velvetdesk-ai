@@ -11,6 +11,9 @@ concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: write
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -18,8 +21,24 @@ jobs:
   check:
     name: lint + tests
     runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release: ${{ steps.version.outputs.release }}
     steps:
       - uses: actions/checkout@v4
+
+      # Every push to the default branch becomes its own version, derived from
+      # the run number so it always moves forward without a commit.
+      - name: Compute version
+        id: version
+        run: |
+          base=$(node -p "require('./package.json').version.split('.').slice(0,2).join('.')")
+          echo "version=${base}.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.ref }}" = "refs/heads/master" ] && [ "${{ github.event_name }}" = "push" ]; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: actions/setup-node@v4
         with:
@@ -100,6 +119,9 @@ jobs:
             patchelf libxdo-dev libssl-dev build-essential file
 
       - run: npm ci
+      - name: Stamp version
+        shell: bash
+        run: node scripts/set-version.mjs "${{ needs.check.outputs.version }}"
 
       - name: Build bundles
         run: npx tauri build --target ${{ matrix.target }} --ci
@@ -157,6 +179,8 @@ jobs:
           key: android
 
       - run: npm ci
+      - name: Stamp version
+        run: node scripts/set-version.mjs "${{ needs.check.outputs.version }}"
 
       - name: Initialise Android project
         run: |
@@ -172,6 +196,7 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          VERSION: ${{ needs.check.outputs.version }}
         shell: bash
         run: |
           mkdir -p out
@@ -187,13 +212,13 @@ jobs:
           fi
           APKSIGNER=$(find "$ANDROID_SDK_ROOT/build-tools" -name apksigner | sort | tail -1)
           for apk in $(find src-tauri/gen/android -name "*-unsigned.apk"); do
-            signed="out/$(basename "${apk%-unsigned.apk}").apk"
+            name="$(basename "${apk%-unsigned.apk}")"
+            signed="out/VelvetDesk-${VERSION}-${name}.apk"
             "$APKSIGNER" sign --ks "$KEYSTORE" --ks-pass "pass:$KEYSTORE_PASSWORD" \
               --ks-key-alias "$KEY_ALIAS" --key-pass "pass:$KEY_PASSWORD" \
               --out "$signed" "$apk"
             "$APKSIGNER" verify --print-certs "$signed" | head -3
           done
-          find src-tauri/gen/android -name "*.apk" ! -name "*-unsigned.apk" -exec cp -n {} out/ \; || true
           rm -f release.keystore ci.keystore
           ls -la out
 
@@ -203,3 +228,30 @@ jobs:
           path: out/*.apk
           if-no-files-found: warn
           retention-days: 30
+
+  release:
+    name: publish release
+    needs: [check, desktop, android]
+    if: needs.check.outputs.release == 'true'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: velvetdesk-*
+          merge-multiple: true
+
+      - name: Publish
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          ls -la artifacts
+          notes="$(git log -1 --pretty=format:'%s')"
+          gh release create "v${VERSION}" artifacts/* \
+            --title "VelvetDesk AI v${VERSION}" \
+            --notes "${notes}" \
+            --latest \
+            --repo "$GITHUB_REPOSITORY"

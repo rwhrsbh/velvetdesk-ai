@@ -162,12 +162,17 @@ npm run android:dev      # телефон / эмулятор
 | `linux-x86_64` | `.deb`, `.AppImage`, `.rpm` |
 | `windows-x86_64` | `.msi`, `.exe` (NSIS) |
 | `macos-aarch64` / `macos-x86_64` | `.dmg`, `.app.tar.gz` |
-| `android-apk` | `.apk` (debug-подпись, ставится на телефон) |
+| `android-apk` | `.apk` (release, подписан ключом из секретов) |
 
 Перед сборкой прогоняются `cargo fmt`, `cargo clippy -D warnings`, `cargo test` и `tsc + vite build`.
 
-`.github/workflows/release.yml` по тегу `v*` собирает релизные бандлы, публикует GitHub Release
-и прикладывает подписанные APK. Ключ подписи берётся из секретов
+После успешных сборок ран публикует **GitHub Release** с версией `0.2.<номер сборки>` и всеми
+установщиками внутри — то есть каждый push в `master` даёт новую версию в разделе Releases.
+Версия проставляется на лету (`scripts/set-version.mjs`), в репозиторий бампы не коммитятся,
+поэтому цикла «релиз → новый push → релиз» не возникает.
+
+`.github/workflows/release.yml` остаётся для ручных релизов по тегу `v*` и тоже
+прикладывает подписанные APK. Ключ подписи берётся из секретов
 `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`;
 если их нет — APK подписывается одноразовым CI-ключом (для теста, не для стора).
 
