@@ -97,6 +97,9 @@ export function renderScope() {
 }
 
 export function renderMen() {
+  const back = document.getElementById("btnDeselectMan");
+  if (back) back.hidden = !store.activeManId;
+
   const container = $("menList");
   if (!store.activeModelId) {
     container.innerHTML = `<div class="empty-hint">${t("empty.pickProfile")}</div>`;

@@ -146,17 +146,6 @@ export interface SearchHit {
   score: number;
 }
 
-export interface MasterDecision {
-  model_id: string | null;
-  man_id: string | null;
-  confidence: number;
-  reason: string;
-  created: string | null;
-  hits: SearchHit[];
-  steps: RunStep[];
-  usage: Usage;
-}
-
 export interface ModelInfo {
   id: string;
   label: string;

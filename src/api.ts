@@ -14,7 +14,6 @@ import type {
   LocalModel,
   Man,
   ModelCatalog,
-  MasterDecision,
   PendingAction,
   Profile,
   RunOutput,
@@ -97,8 +96,6 @@ export const api = {
   listBackups: () => invoke<Backup[]>("list_backups"),
   restoreBackup: (backupId: string) => invoke<string>("restore_backup", { backupId }),
 
-  masterRoute: (raw: string, autoCreate: boolean) =>
-    invoke<MasterDecision>("master_route", { raw, autoCreate }),
   globalSearch: (query: string) => invoke<SearchHit[]>("global_search", { query }),
   rebuildIndex: () => invoke<GlobalIndex>("rebuild_index"),
 

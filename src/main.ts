@@ -644,6 +644,10 @@ function bindPanels() {
     void openProfileForm(deps, profile);
   });
 
+  // Leaving a dossier returns to the profile's own chat, which is a different
+  // conversation rather than the same one with less context.
+  $("btnDeselectMan").addEventListener("click", () => void selectMan(null));
+
   $("btnAddMan").addEventListener("click", () => {
     if (!store.activeModelId) {
       toast(t("toast.pickProfile"), "error");

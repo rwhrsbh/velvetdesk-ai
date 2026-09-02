@@ -3,7 +3,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::agent::tools::{self, PendingAction};
-use crate::agent::{self, AgentDeps, MasterDecision, RunInput, RunOutput};
+use crate::agent::{self, AgentDeps, RunInput, RunOutput};
 use crate::config::Settings;
 use crate::doctor::{self, DoctorReport};
 use crate::error::{AppError, Result};
@@ -378,30 +378,6 @@ pub fn clear_master_log(state: State<'_, AppState>) -> Result<()> {
     state
         .paths
         .write_master_log(&AgentLog::new("master".into(), None))
-}
-
-#[tauri::command]
-pub async fn master_route(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    raw: String,
-    auto_create: bool,
-) -> Result<MasterDecision> {
-    let settings = state.settings_view();
-    let provider = state.active_provider()?;
-    let pool = state.pool(&provider.id);
-    let emit = emitter(&app);
-
-    let deps = AgentDeps {
-        paths: &state.paths,
-        settings: &settings,
-        provider: &provider,
-        pool,
-        llm: &state.llm,
-        emit: &emit,
-    };
-
-    agent::master_route(&deps, &raw, auto_create).await
 }
 
 #[tauri::command]

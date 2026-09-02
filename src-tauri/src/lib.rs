@@ -107,7 +107,6 @@ pub fn run() {
             commands::context_stats,
             commands::clear_context,
             commands::compact_context,
-            commands::master_route,
             commands::global_search,
             commands::rebuild_index,
             commands::pending_list,

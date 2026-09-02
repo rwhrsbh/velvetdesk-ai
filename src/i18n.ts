@@ -43,7 +43,7 @@ const ru: Dict = {
 
   "scope.none": "Анкета не выбрана",
   "composer.placeholder":
-    "Вставь письмо, опиши задачу или надиктуй факты голосом. Ctrl+Enter — выполнить.",
+    "Письмо, задача или голосовая диктовка. Ctrl+Enter — выполнить.",
   "composer.send": "Выполнить",
   "composer.channel": "Канал",
   "composer.chat": "чат",
@@ -60,11 +60,11 @@ const ru: Dict = {
   "tab.crm": "CRM",
 
   "empty.noProfiles": "Анкет пока нет.",
-  "empty.createOrSeed": "Нажми <b>+</b> вверху или <a href=\"#\" data-act=\"seed\">загрузи демо-анкету</a>.",
-  "empty.pickProfile": "Выбери анкету слева.",
+  "empty.createOrSeed": "Кнопка <b>+</b> вверху создаёт анкету. <a href=\"#\" data-act=\"seed\">Демо-анкета</a> показывает, как всё устроено.",
+  "empty.pickProfile": "Анкета не выбрана.",
   "empty.noMen": "Досье пока нет.",
-  "empty.addMan": "Нажми <b>+</b> или вставь письмо в мастер-агент.",
-  "empty.needProfile": "Создай анкету модели, чтобы включить изолированный агент.",
+  "empty.addMan": "Кнопка <b>+</b> создаёт досье вручную. Мастер-агент заводит их из сырого текста.",
+  "empty.needProfile": "Агент работает внутри анкеты: без неё ему негде хранить факты и переписку.",
   "empty.queue": "Очередь пуста.",
   "empty.nothingFound": "Ничего не найдено.",
 
@@ -102,9 +102,9 @@ const ru: Dict = {
   "chat.done": "выполнено",
   "chat.failed": "ошибка",
 
-  "toast.pickProfile": "Сначала выбери анкету",
-  "toast.pickMan": "Сначала выбери мужчину",
-  "toast.needKey": "Добавь API-ключ в настройках провайдера",
+  "toast.pickProfile": "Анкета не выбрана",
+  "toast.pickMan": "Досье не выбрано",
+  "toast.needKey": "У провайдера нет API-ключа — настройки ключей в правом верхнем углу",
   "toast.needKeyVoice": "Для диктовки нужен настроенный провайдер с ключом",
   "toast.pendingCount": "{n} действий ждут подтверждения",
   "toast.saved": "Сохранено",
@@ -124,7 +124,7 @@ const ru: Dict = {
   "toast.nameRequired": "Имя обязательно",
   "toast.noMic": "Микрофон недоступен в этой сборке вебвью",
   "toast.micDenied": "Нет доступа к микрофону: {error}",
-  "toast.silentClip": "Микрофон ничего не записал — проверь уровень и попробуй снова",
+  "toast.silentClip": "Микрофон ничего не записал: на всей записи тишина",
   "composer.micDevice": "Микрофон",
   "composer.micDefault": "микрофон по умолчанию",
   "composer.micNumbered": "микрофон {n}",
@@ -146,7 +146,7 @@ const ru: Dict = {
   "cmd.nothingToCompact": "Сжимать нечего — чат пуст.",
   "cmd.summariseInstruction":
     "Сожми этот диалог оператора с копилотом в несколько строк на русском: что решили, что сделали, что осталось. Только конспект, без вступлений.",
-  "cmd.temporaryStarted": "Временный чат. Он не попадёт в историю, но всё сделанное сохранится.",
+  "cmd.temporaryStarted": "Временный чат: переписка не сохранится, а всё сделанное в ней останется.",
   "cmd.temporaryEnded": "Временный чат закрыт",
   "cmd.help":
     "Команды: /clear — очистить этот чат (и контекст переписки, если открыто досье); /compact — сжать длинное в конспект; /help — этот список. Ни одна из команд не трогает досье, факты и сохранённые сообщения.",
@@ -171,8 +171,8 @@ const ru: Dict = {
   "toast.probeOk": "Ответ модели: «{text}» (ключ #{n})",
 
   "hint.firstRun":
-    "Анкет пока нет. Создай модель слева — форма спросит имя, возраст, сайт и персону, и агент сразу готов к работе.",
-  "hint.noKey": "Провайдер без ключа — открой настройки ключей в правом верхнем углу.",
+    "Анкета — это профиль модели: имя, возраст, сайт и персона. Агент работает внутри неё и видит только её данные.",
+  "hint.noKey": "У активного провайдера нет ключа — без него агент не сможет обратиться к модели.",
 
   "common.cancel": "Отмена",
   "common.close": "Закрыть",
@@ -195,7 +195,7 @@ const ru: Dict = {
   "profile.photoUrl": "Ссылка на фото",
   "profile.pickFile": "Выбрать файл",
   "profile.fileHint": "файл уменьшается до {size}px и хранится внутри анкеты",
-  "profile.urlBlocked": "сайт блокирует ссылку — выбери файл с диска",
+  "profile.urlBlocked": "Сайт не отдаёт картинку по ссылке — подойдёт файл с диска",
   "profile.noPhoto": "нет фото",
   "profile.urlFailed": "ссылка не грузится",
   "profile.fileSaved": "{name} — сохранено в анкете",
@@ -256,23 +256,23 @@ const ru: Dict = {
 
   "keys.title": "Провайдер и ключи",
   "keys.sub":
-    "Вставь ключ — приложение само спросит у провайдера список доступных моделей и версию API. Ключи хранятся только на этом устройстве.",
+    "Ключи хранятся на этом устройстве и уходят только к выбранному провайдеру. Несколько ключей работают как пул с ротацией.",
   "keys.provider": "Провайдер",
   "keys.step1": "Шаг 1 — ключи API ({n})",
   "keys.step2": "Шаг 2 — модель",
   "keys.noKeysGemini":
     "Ключей нет. Возьми ключ в <a href=\"https://aistudio.google.com/apikey\" target=\"_blank\" rel=\"noreferrer\">Google AI Studio</a>.",
   "keys.noKeysOpenai":
-    "Ключей нет. Вставь ключ своего сервиса (OpenRouter, DeepSeek, локальный сервер — для локального можно ввести <code>local</code>).",
+    "Ключей нет. Подойдёт ключ любого OpenAI-совместимого сервиса (OpenRouter, DeepSeek, Groq); для локального сервера — слово <code>local</code>.",
   "keys.keyStats": "успешных {ok} · сбоев {fail}",
   "keys.cooldown": " · кулдаун {n}с",
-  "keys.addPlaceholder": "Вставь API-ключ и нажми Enter",
+  "keys.addPlaceholder": "API-ключ",
   "keys.add": "Добавить",
   "keys.remove": "Удалить ключ",
   "keys.found": "найдено {n}",
   "keys.apiVersion": " · API {v}",
-  "keys.pressReload": "нажми «Обновить список»",
-  "keys.addKeyFirst": "сначала добавь ключ",
+  "keys.pressReload": "список моделей загружается кнопкой «Обновить»",
+  "keys.addKeyFirst": "список появится после добавления ключа",
   "keys.asking": "спрашиваю провайдера…",
   "keys.reloadFailed": "не удалось получить список",
   "keys.modelSearch": "Поиск модели",
@@ -282,7 +282,7 @@ const ru: Dict = {
   "keys.reload": "Обновить список",
   "keys.modelPlaceholder": "например gemini-2.5-pro",
   "keys.folders": "Папки для агентов",
-  "keys.foldersHint": "агент видит только их и свои данные; он может попросить ещё — ответишь сам",
+  "keys.foldersHint": "агенту доступны только эти папки и его собственные данные; запрос на новую папку подтверждается вручную",
   "keys.addFolder": "Разрешить папку…",
   "keys.noFolders": "Пока ни одной — агент работает только со своими данными",
   "keys.folderRw": "чтение и запись",
@@ -340,21 +340,9 @@ const ru: Dict = {
   "doctor.wasFixed": " — исправлено",
 
   "master.hello":
-    "Мастер-агент. Видит все анкеты: вставь список эдмайеров или письмо и скажи, чьё это — он найдёт анкету или заведёт новую вместе с мужчинами.",
+    "Мастер-агент работает поверх всех анкет: ищет по ним, создаёт анкеты и досье. Чат внутри анкеты видит только её данные — этот видит все.",
   "master.scope": "Мастер-агент",
   "master.scopePath": "все анкеты",
-  "master.title": "Мастер-агент",
-  "master.sub":
-    "Поиск по всем анкетам и авто-маршрутизация: вставь письмо — мастер определит, чьё оно, найдёт досье и создаст новое, если совпадений нет.",
-  "master.input": "Сырой текст или запрос",
-  "master.inputHint": "Письмо, кусок анкеты или просто имя",
-  "master.autoCreate": "создавать досье, если совпадений нет",
-  "master.searchOnly": "Только поиск",
-  "master.route": "Маршрутизировать",
-  "master.thinking": "Мастер думает…",
-  "master.decided": "решение принято",
-  "master.meta": "анкета {model} · досье {man} · уверенность {conf}%",
-  "master.goto": "Перейти",
 
   "queue.title": "Очередь подтверждений ({n})",
   "queue.sub":
@@ -403,7 +391,7 @@ const en: Dict = {
 
   "scope.none": "No profile selected",
   "composer.placeholder":
-    "Paste his letter, describe the task, or dictate facts. Ctrl+Enter to run.",
+    "A letter, a task, or dictation. Ctrl+Enter to run.",
   "composer.send": "Run",
   "composer.channel": "Channel",
   "composer.chat": "chat",
@@ -420,11 +408,11 @@ const en: Dict = {
   "tab.crm": "CRM",
 
   "empty.noProfiles": "No profiles yet.",
-  "empty.createOrSeed": "Press <b>+</b> above or <a href=\"#\" data-act=\"seed\">load a demo profile</a>.",
-  "empty.pickProfile": "Pick a profile on the left.",
+  "empty.createOrSeed": "The <b>+</b> button above creates one. A <a href=\"#\" data-act=\"seed\">demo profile</a> shows how it all fits together.",
+  "empty.pickProfile": "No profile selected.",
   "empty.noMen": "No dossiers yet.",
-  "empty.addMan": "Press <b>+</b> or paste a letter into the master agent.",
-  "empty.needProfile": "Create a model profile to start the sandboxed agent.",
+  "empty.addMan": "The <b>+</b> button creates one by hand. The master agent builds them from raw text.",
+  "empty.needProfile": "The agent works inside a profile — without one it has nowhere to keep facts and correspondence.",
   "empty.queue": "The queue is empty.",
   "empty.nothingFound": "Nothing found.",
 
@@ -462,9 +450,9 @@ const en: Dict = {
   "chat.done": "done",
   "chat.failed": "failed",
 
-  "toast.pickProfile": "Pick a profile first",
-  "toast.pickMan": "Pick a man first",
-  "toast.needKey": "Add an API key in provider settings",
+  "toast.pickProfile": "No profile selected",
+  "toast.pickMan": "No dossier selected",
+  "toast.needKey": "The provider has no API key — key settings are in the top right corner",
   "toast.needKeyVoice": "Dictation needs a provider with a key",
   "toast.pendingCount": "{n} actions await approval",
   "toast.saved": "Saved",
@@ -484,7 +472,7 @@ const en: Dict = {
   "toast.nameRequired": "Name is required",
   "toast.noMic": "Microphone is not available in this webview build",
   "toast.micDenied": "Microphone access denied: {error}",
-  "toast.silentClip": "The microphone recorded nothing — check the level and try again",
+  "toast.silentClip": "The microphone recorded nothing: the whole clip is silence",
   "composer.micDevice": "Microphone",
   "composer.micDefault": "default microphone",
   "composer.micNumbered": "microphone {n}",
@@ -506,7 +494,7 @@ const en: Dict = {
   "cmd.nothingToCompact": "Nothing to compact — the chat is empty.",
   "cmd.summariseInstruction":
     "Compress this operator/copilot conversation into a few lines in Russian: what was decided, what was done, what is left. Summary only, no preface.",
-  "cmd.temporaryStarted": "Temporary chat. It stays out of the history; everything it does is kept.",
+  "cmd.temporaryStarted": "Temporary chat: the conversation is not saved, everything it does is kept.",
   "cmd.temporaryEnded": "Temporary chat closed",
   "cmd.help":
     "Commands: /clear — clear this chat (and the correspondence context when a dossier is open); /compact — fold what has grown long into a summary; /help — this list. Neither touches dossiers, facts or stored messages.",
@@ -531,8 +519,8 @@ const en: Dict = {
   "toast.probeOk": "Model replied: “{text}” (key #{n})",
 
   "hint.firstRun":
-    "No profiles yet. Create a model on the left — the form asks for name, age, site and persona, and the agent is ready.",
-  "hint.noKey": "The provider has no key — open key settings in the top right corner.",
+    "A profile is one model: her name, age, site and persona. The agent works inside it and sees nothing else.",
+  "hint.noKey": "The active provider has no key — without one the agent cannot reach a model.",
 
   "common.cancel": "Cancel",
   "common.close": "Close",
@@ -555,7 +543,7 @@ const en: Dict = {
   "profile.photoUrl": "Photo URL",
   "profile.pickFile": "Choose a file",
   "profile.fileHint": "the file is resized to {size}px and stored inside the profile",
-  "profile.urlBlocked": "the site blocks this URL — pick a local file",
+  "profile.urlBlocked": "The site refuses the image over a link — a file from disk works",
   "profile.noPhoto": "no photo",
   "profile.urlFailed": "URL does not load",
   "profile.fileSaved": "{name} — stored in the profile",
@@ -615,23 +603,23 @@ const en: Dict = {
 
   "keys.title": "Provider and keys",
   "keys.sub":
-    "Paste a key — the app asks the provider for the model list and API version itself. Keys never leave this device.",
+    "Keys stay on this device and travel only to the chosen provider. Several keys work as a rotating pool.",
   "keys.provider": "Provider",
   "keys.step1": "Step 1 — API keys ({n})",
   "keys.step2": "Step 2 — model",
   "keys.noKeysGemini":
     "No keys yet. Grab one at <a href=\"https://aistudio.google.com/apikey\" target=\"_blank\" rel=\"noreferrer\">Google AI Studio</a>.",
   "keys.noKeysOpenai":
-    "No keys yet. Paste your service key (OpenRouter, DeepSeek, or type <code>local</code> for a local server).",
+    "No keys yet. Any OpenAI-compatible service will do (OpenRouter, DeepSeek, Groq); a local server takes the word <code>local</code>.",
   "keys.keyStats": "ok {ok} · failures {fail}",
   "keys.cooldown": " · cooldown {n}s",
-  "keys.addPlaceholder": "Paste an API key and press Enter",
+  "keys.addPlaceholder": "API key",
   "keys.add": "Add",
   "keys.remove": "Remove key",
   "keys.found": "{n} found",
   "keys.apiVersion": " · API {v}",
-  "keys.pressReload": "press “Refresh list”",
-  "keys.addKeyFirst": "add a key first",
+  "keys.pressReload": "the model list loads with “Reload”",
+  "keys.addKeyFirst": "the list appears once a key is added",
   "keys.asking": "asking the provider…",
   "keys.reloadFailed": "could not fetch the list",
   "keys.modelSearch": "Search models",
@@ -641,7 +629,7 @@ const en: Dict = {
   "keys.reload": "Refresh list",
   "keys.modelPlaceholder": "e.g. gemini-2.5-pro",
   "keys.folders": "Folders for agents",
-  "keys.foldersHint": "an agent sees these and its own data; it can ask for more and you answer",
+  "keys.foldersHint": "agents reach these folders and their own data; a request for another one is answered by hand",
   "keys.addFolder": "Allow a folder…",
   "keys.noFolders": "None yet — agents work with their own data only",
   "keys.folderRw": "read and write",
@@ -699,21 +687,9 @@ const en: Dict = {
   "doctor.wasFixed": " — fixed",
 
   "master.hello":
-    "Master agent. It sees every profile: paste an admirer list or a letter and say whose it is — it will find the profile or create one, with the men.",
+    "The master agent works above every profile: it searches across them and creates profiles and dossiers. A chat inside a profile sees only that profile; this one sees them all.",
   "master.scope": "Master agent",
   "master.scopePath": "every profile",
-  "master.title": "Master agent",
-  "master.sub":
-    "Search across every profile and auto-route raw text: paste a letter and the master finds whose it is, or creates a new dossier.",
-  "master.input": "Raw text or query",
-  "master.inputHint": "A letter, a profile snippet, or just a name",
-  "master.autoCreate": "create a dossier when nothing matches",
-  "master.searchOnly": "Search only",
-  "master.route": "Route it",
-  "master.thinking": "The master is thinking…",
-  "master.decided": "decision made",
-  "master.meta": "profile {model} · dossier {man} · confidence {conf}%",
-  "master.goto": "Go there",
 
   "queue.title": "Approval queue ({n})",
   "queue.sub": "Left is the current state, right is what will be written. Nothing lands without you.",
