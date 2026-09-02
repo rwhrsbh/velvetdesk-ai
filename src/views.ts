@@ -185,6 +185,9 @@ export function renderChat() {
         /** set while the run is still going */
         live?: boolean;
         note?: string;
+        /** the model's own account of its reasoning */
+        thoughts?: string;
+        thinkingSince?: number;
       };
       const steps = Array.isArray(meta.steps) ? meta.steps.map(stepHtml).join("") : "";
       const extras: string[] = [];
@@ -201,6 +204,13 @@ export function renderChat() {
              </div>`
           : "";
 
+      // Reasoning is folded away: it is worth having, rarely worth reading.
+      const thinking = meta.thoughts?.trim()
+        ? `<details class="thoughts"><summary>${escapeHtml(
+            t("chat.thoughts", { n: Math.max(1, Math.round((meta.thoughts.length / 400) * 1)) }),
+          )}</summary><div class="thoughts-body">${escapeHtml(meta.thoughts.trim())}</div></details>`
+        : "";
+
       const working = meta.live
         ? `<div class="working"><span class="spinner"></span>` +
           `<span>${escapeHtml(meta.note || t("chat.working"))}</span></div>`
@@ -208,7 +218,7 @@ export function renderChat() {
 
       return (
         `<div class="msg ${entry.sender}" data-entry="${escapeHtml(entry.id)}">` +
-        `<div class="bubble"><span class="bubble-text">${escapeHtml(entry.text)}</span>` +
+        `<div class="bubble">${thinking}<span class="bubble-text">${escapeHtml(entry.text)}</span>` +
         `${steps}${working}${usageLine(meta.usage, extras)}${actions}</div></div>`
       );
     })

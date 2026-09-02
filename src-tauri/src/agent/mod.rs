@@ -52,6 +52,9 @@ pub struct RunStep {
 #[derive(Debug, Clone, Serialize)]
 pub struct RunOutput {
     pub reply: String,
+    /// The model's own summary of its reasoning, when it reports one.
+    #[serde(default)]
+    pub thoughts: String,
     pub mode: AgentMode,
     pub security: SecurityLevel,
     pub model_id: String,
@@ -332,6 +335,7 @@ async fn run_auto(
     let mut usage = Usage::default();
     let mut key_index = 0usize;
     let mut reply = String::new();
+    let mut thoughts = String::new();
     let mut turns = 0usize;
 
     for turn in 0..deps.settings.max_tool_turns.max(1) {
@@ -345,6 +349,15 @@ async fn run_auto(
         usage.completion_tokens += response.usage.completion_tokens;
         usage.total_tokens += response.usage.total_tokens;
         key_index = response.key_index;
+        if !response.thoughts.is_empty() {
+            if !thoughts.is_empty() {
+                thoughts.push_str("\n\n");
+            }
+            thoughts.push_str(&response.thoughts);
+            // A model that answers in one go reports its thinking only here,
+            // so the UI is told about it even when nothing was streamed.
+            (deps.emit)(json!({ "kind": "thought", "text": response.thoughts }));
+        }
 
         if response.tool_calls.is_empty() {
             reply = response.text;
@@ -424,7 +437,7 @@ async fn run_auto(
     }
 
     finish(
-        scope, mode, security, input, reply, steps, pending, usage, key_index, turns,
+        scope, mode, security, input, reply, thoughts, steps, pending, usage, key_index, turns,
     )
 }
 
@@ -479,6 +492,7 @@ async fn run_single_turn(
         security,
         input,
         reply,
+        response.thoughts,
         steps,
         pending,
         response.usage,
@@ -494,6 +508,7 @@ fn finish(
     security: SecurityLevel,
     input: RunInput,
     reply: String,
+    thoughts: String,
     steps: Vec<RunStep>,
     pending: Vec<PendingAction>,
     usage: Usage,
@@ -511,12 +526,14 @@ fn finish(
             "steps": steps,
             "pending": pending.len(),
             "usage": usage,
+            "thoughts": thoughts,
         });
         let _ = scope.append_agent_entry(man, entry);
     }
 
     Ok(RunOutput {
         reply,
+        thoughts,
         mode,
         security,
         model_id: input.model_id,

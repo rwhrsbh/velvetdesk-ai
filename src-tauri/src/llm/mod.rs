@@ -97,6 +97,9 @@ pub struct ChatRequest {
     pub force_json: bool,
     /// How hard to think on this call.
     pub thinking: Thinking,
+    /// Stream the answer as it is written. Falls back to a single response if
+    /// the endpoint does not support it.
+    pub stream: bool,
 }
 
 /// Reasoning controls, in the two shapes vendors offer: a level, or a number
@@ -133,6 +136,7 @@ impl ChatRequest {
             max_output_tokens: None,
             force_json: false,
             thinking: Thinking::default(),
+            stream: true,
         }
     }
 }
@@ -150,6 +154,9 @@ pub struct Usage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatResponse {
     pub text: String,
+    /// The model's summary of its own reasoning, when it reports one.
+    #[serde(default)]
+    pub thoughts: String,
     #[serde(default)]
     pub tool_calls: Vec<ToolCall>,
     #[serde(default)]
@@ -203,6 +210,16 @@ pub struct LlmClient {
     pub http: reqwest::Client,
 }
 
+/// True when a failure looks like "this endpoint does not stream" rather than
+/// a problem with the request itself.
+fn cannot_stream(result: &std::result::Result<ChatResponse, CallError>) -> bool {
+    let Err(CallError::Status { code, body }) = result else {
+        return false;
+    };
+    let body = body.to_lowercase();
+    *code == 404 || (*code == 400 && (body.contains("stream") || body.contains("not supported")))
+}
+
 impl LlmClient {
     pub fn new() -> Self {
         let http = reqwest::Client::builder()
@@ -245,14 +262,37 @@ impl LlmClient {
                 }
             };
 
-            let result = match provider.kind {
-                ProviderKind::Gemini => {
+            let mut result = match (request.stream, provider.kind) {
+                (true, ProviderKind::Gemini) => {
+                    gemini::call_streaming(&self.http, provider, &lease.key, request, on_event)
+                        .await
+                }
+                (true, ProviderKind::OpenaiCompatible) => {
+                    openai::call_streaming(&self.http, provider, &lease.key, request, on_event)
+                        .await
+                }
+                (false, ProviderKind::Gemini) => {
                     gemini::call(&self.http, provider, &lease.key, request).await
                 }
-                ProviderKind::OpenaiCompatible => {
+                (false, ProviderKind::OpenaiCompatible) => {
                     openai::call(&self.http, provider, &lease.key, request).await
                 }
             };
+
+            // Not every endpoint streams — a local server or an old proxy may
+            // answer 404 or 400 for it. One plain call settles that, instead of
+            // the operator losing the turn.
+            if request.stream && cannot_stream(&result) {
+                on_event(serde_json::json!({ "kind": "no_stream" }));
+                result = match provider.kind {
+                    ProviderKind::Gemini => {
+                        gemini::call(&self.http, provider, &lease.key, request).await
+                    }
+                    ProviderKind::OpenaiCompatible => {
+                        openai::call(&self.http, provider, &lease.key, request).await
+                    }
+                };
+            }
 
             match result {
                 Ok(mut response) => {

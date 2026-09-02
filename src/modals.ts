@@ -3,7 +3,7 @@ import type { ModalDeps } from "./deps";
 import { closeModal, escapeHtml, formatDate, openModal, toast } from "./dom";
 import { t } from "./i18n";
 import { store } from "./store";
-import type { DoctorReport, PendingAction } from "./types";
+import type { Backup, DoctorReport, PendingAction } from "./types";
 
 // ---------------------------------------------------------------------------
 // Doctor
@@ -32,18 +32,66 @@ function doctorBody(report: DoctorReport): string {
   );
 }
 
+/**
+ * Copies kept before an agent changed a file.
+ *
+ * They live beside the doctor because this is where an operator comes when
+ * something is wrong with the data — including "the agent deleted my file".
+ */
+async function backupsSection(): Promise<string> {
+  let backups: Backup[] = [];
+  try {
+    backups = await api.listBackups();
+  } catch (error) {
+    console.error("backups", error);
+    return "";
+  }
+  if (backups.length === 0) return "";
+
+  const rows = backups
+    .slice(0, 40)
+    .map(
+      (backup) =>
+        `<div class="doctor-line"><span class="lvl ok">${escapeHtml(backup.reason)}</span>` +
+        `<span class="doctor-text">${escapeHtml(backup.original)}` +
+        `<span class="doctor-path">${formatDate(backup.created_at)} · ${Math.max(1, Math.round(backup.bytes / 1024))} KB</span></span>` +
+        `<button class="btn btn-secondary" data-restore="${escapeHtml(backup.id)}">${t("doctor.restore")}</button></div>`,
+    )
+    .join("");
+
+  return (
+    `<label class="section-label">${t("doctor.backups")}</label>` +
+    `<div class="doctor-list">${rows}</div>`
+  );
+}
+
 export async function openDoctorModal(deps: ModalDeps) {
   const card = openModal(`<h3>${t("doctor.title")}</h3><div class="modal-sub">${t("doctor.scanning")}</div>`);
   try {
     const report = await api.doctorScan();
+    const backups = await backupsSection();
     card.innerHTML = `
       <h3>${t("doctor.titleFull")}</h3>
       ${doctorBody(report)}
+      ${backups}
       <div class="modal-actions">
         <button class="btn btn-secondary" data-act="close">${t("common.close")}</button>
         <button class="btn btn-primary" id="btnFix">${t("doctor.fix")}</button>
       </div>`;
     card.querySelector<HTMLButtonElement>('[data-act="close"]')?.addEventListener("click", closeModal);
+
+    card.addEventListener("click", async (event) => {
+      const id = (event.target as HTMLElement).closest<HTMLElement>("[data-restore]")?.dataset
+        .restore;
+      if (!id) return;
+      try {
+        const path = await api.restoreBackup(id);
+        toast(t("doctor.restored", { path }), "success");
+      } catch (error) {
+        toast(errorText(error), "error");
+      }
+    });
+
     card.querySelector<HTMLButtonElement>("#btnFix")?.addEventListener("click", async () => {
       try {
         const fixed = await api.doctorFix();

@@ -53,6 +53,155 @@ pub async fn call(
     parse_response(&value)
 }
 
+/// Stream a reply from any OpenAI-compatible endpoint.
+///
+/// Tool calls arrive in fragments identified by index, so they are assembled
+/// here; `reasoning_content` — what DeepSeek, Qwen and vLLM put the thinking in
+/// — is kept apart from the answer.
+pub async fn call_streaming(
+    http: &reqwest::Client,
+    provider: &ProviderConfig,
+    api_key: &str,
+    request: &ChatRequest,
+    on_event: &(dyn Fn(Value) + Send + Sync),
+) -> Result<ChatResponse, CallError> {
+    use futures_util::StreamExt;
+
+    let base = provider.base_url.trim_end_matches('/');
+    let url = format!("{base}/chat/completions");
+
+    let mut body = build_body(provider, request);
+    body["stream"] = json!(true);
+    // Without this most servers omit usage entirely when streaming.
+    body["stream_options"] = json!({ "include_usage": true });
+
+    let mut req = http
+        .post(&url)
+        .header("authorization", format!("Bearer {api_key}"))
+        .header("content-type", "application/json");
+    for (k, v) in &provider.extra_headers {
+        req = req.header(k.as_str(), v.as_str());
+    }
+
+    let response = req
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| CallError::Transport(e.to_string()))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        return Err(CallError::Status {
+            code: status.as_u16(),
+            body,
+        });
+    }
+
+    let mut text = String::new();
+    let mut thoughts = String::new();
+    let mut finish_reason = String::new();
+    let mut usage = Usage::default();
+    // Fragments of tool calls, in the order the server numbered them.
+    let mut partial: Vec<(String, String, String)> = vec![];
+    let mut buffer = String::new();
+    let mut stream = response.bytes_stream();
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| CallError::Transport(e.to_string()))?;
+        buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+        for value in super::gemini::take_events(&mut buffer) {
+            if let Some(err) = value.get("error") {
+                return Err(CallError::Parse(err.to_string()));
+            }
+            if let Some(meta) = value.get("usage").filter(|u| !u.is_null()) {
+                usage = read_usage(Some(meta));
+            }
+
+            let delta = &value["choices"][0]["delta"];
+            if let Some(reason) = value["choices"][0]["finish_reason"].as_str() {
+                finish_reason = reason.to_string();
+            }
+            if let Some(piece) = delta["content"].as_str() {
+                text.push_str(piece);
+                on_event(json!({ "kind": "delta", "text": piece }));
+            }
+            // Servers disagree on the name; both mean the same thing.
+            for field in ["reasoning_content", "reasoning"] {
+                if let Some(piece) = delta[field].as_str() {
+                    thoughts.push_str(piece);
+                    on_event(json!({ "kind": "thought", "text": piece }));
+                }
+            }
+
+            if let Some(calls) = delta["tool_calls"].as_array() {
+                for call in calls {
+                    let index = call["index"].as_u64().unwrap_or(0) as usize;
+                    while partial.len() <= index {
+                        partial.push((String::new(), String::new(), String::new()));
+                    }
+                    let slot = &mut partial[index];
+                    if let Some(id) = call["id"].as_str() {
+                        slot.0 = id.to_string();
+                    }
+                    if let Some(name) = call["function"]["name"].as_str() {
+                        slot.1.push_str(name);
+                    }
+                    if let Some(args) = call["function"]["arguments"].as_str() {
+                        slot.2.push_str(args);
+                    }
+                }
+            }
+        }
+    }
+
+    let tool_calls = assemble_tool_calls(partial);
+
+    Ok(ChatResponse {
+        text: text.trim().to_string(),
+        thoughts: thoughts.trim().to_string(),
+        tool_calls,
+        usage,
+        finish_reason,
+        key_index: 0,
+        attempts: 0,
+    })
+}
+
+/// Turn the fragments a stream delivers into whole tool calls. Names and
+/// argument JSON arrive a few characters at a time, keyed by index.
+fn assemble_tool_calls(partial: Vec<(String, String, String)>) -> Vec<ToolCall> {
+    partial
+        .into_iter()
+        .enumerate()
+        .filter(|(_, (_, name, _))| !name.is_empty())
+        .map(|(i, (id, name, args))| ToolCall {
+            id: if id.is_empty() {
+                format!("call-{i}")
+            } else {
+                id
+            },
+            name,
+            args: serde_json::from_str(&args).unwrap_or_else(|_| json!({ "raw": args })),
+            signature: String::new(),
+        })
+        .collect()
+}
+
+fn read_usage(meta: Option<&Value>) -> Usage {
+    let field = |name: &str| {
+        meta.and_then(|m| m.get(name))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u32
+    };
+    Usage {
+        prompt_tokens: field("prompt_tokens"),
+        completion_tokens: field("completion_tokens"),
+        total_tokens: field("total_tokens"),
+    }
+}
+
 fn build_body(provider: &ProviderConfig, request: &ChatRequest) -> Value {
     let mut messages: Vec<Value> = vec![];
     if !request.system.trim().is_empty() {
@@ -234,24 +383,20 @@ fn parse_response(value: &Value) -> Result<ChatResponse, CallError> {
         }
     }
 
-    let usage_raw = value.get("usage");
-    let usage = Usage {
-        prompt_tokens: usage_raw
-            .and_then(|u| u.get("prompt_tokens"))
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as u32,
-        completion_tokens: usage_raw
-            .and_then(|u| u.get("completion_tokens"))
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as u32,
-        total_tokens: usage_raw
-            .and_then(|u| u.get("total_tokens"))
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as u32,
-    };
+    let usage = read_usage(value.get("usage"));
+
+    // Servers that expose the model's reasoning put it beside the content.
+    let thoughts = message
+        .get("reasoning_content")
+        .or_else(|| message.get("reasoning"))
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .trim()
+        .to_string();
 
     Ok(ChatResponse {
         text: text.trim().to_string(),
+        thoughts,
         tool_calls,
         usage,
         finish_reason: choice
@@ -288,6 +433,36 @@ mod tests {
             context_tokens: None,
             key_count: 1,
         }
+    }
+
+    /// Arguments come through the stream in pieces; a call is only usable once
+    /// they are joined back together.
+    #[test]
+    fn streamed_tool_calls_are_reassembled() {
+        let calls = assemble_tool_calls(vec![
+            (
+                "call_1".into(),
+                "add_man_fact".into(),
+                "{\"man_id\":\"12\",\"key\":\"health\"".to_string() + ",\"value\":\"epilepsy\"}",
+            ),
+            // A slot that never got a name is a gap in the stream, not a call.
+            (String::new(), String::new(), String::new()),
+        ]);
+
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].id, "call_1");
+        assert_eq!(calls[0].name, "add_man_fact");
+        assert_eq!(calls[0].args["value"], "epilepsy");
+    }
+
+    /// Malformed arguments must not lose the call — the model still said what
+    /// it wanted, and the tool reports the problem itself.
+    #[test]
+    fn broken_arguments_are_kept_as_text() {
+        let calls =
+            assemble_tool_calls(vec![(String::new(), "get_man".into(), "{not json".into())]);
+        assert_eq!(calls[0].id, "call-0");
+        assert_eq!(calls[0].args["raw"], "{not json");
     }
 
     fn provider_at(url: &str) -> ProviderConfig {

@@ -17,6 +17,10 @@ pub struct ModelInfo {
     pub chat: bool,
     /// Model accepts audio input (voice dictation).
     pub audio: bool,
+    /// Costs nothing to call — worth showing first on an endpoint that lists
+    /// hundreds of models.
+    #[serde(default)]
+    pub free: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -122,6 +126,9 @@ fn parse_gemini_models(value: &Value) -> Vec<ModelInfo> {
                 audio: accepts_audio(&id),
                 id,
                 chat,
+                // Google publishes no prices here; the free tier is a property
+                // of the key, not of the model.
+                free: false,
             })
         })
         .collect();
@@ -266,16 +273,41 @@ fn parse_openai_models(value: &Value) -> Vec<ModelInfo> {
                 .map(|n| format!("{n} ({id})"))
                 .unwrap_or_else(|| id.clone());
             let audio = id.contains("whisper") || id.contains("transcribe") || id.contains("audio");
+            let free = is_free(entry, &id);
             Some(ModelInfo {
                 id,
                 label,
                 chat: true,
                 audio,
+                free,
             })
         })
         .collect();
-    out.sort_by(|a, b| a.id.cmp(&b.id));
+    // Free models first: on a gateway that lists hundreds, they are what an
+    // operator without a budget is looking for.
+    out.sort_by(|a, b| b.free.cmp(&a.free).then_with(|| a.id.cmp(&b.id)));
     out
+}
+
+/// OpenRouter and the gateways that copy it publish per-token prices and mark
+/// free variants with a `:free` suffix.
+fn is_free(entry: &Value, id: &str) -> bool {
+    if id.ends_with(":free") {
+        return true;
+    }
+    let Some(pricing) = entry.get("pricing") else {
+        return false;
+    };
+    let zero = |field: &str| match pricing.get(field) {
+        Some(Value::String(text)) => text
+            .trim()
+            .parse::<f64>()
+            .map(|n| n == 0.0)
+            .unwrap_or(false),
+        Some(Value::Number(n)) => n.as_f64().map(|n| n == 0.0).unwrap_or(false),
+        _ => false,
+    };
+    zero("prompt") && zero("completion")
 }
 
 // ---------------------------------------------------------------------------

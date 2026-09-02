@@ -8,6 +8,8 @@ import type {
   KeyStatus,
   LocalModel,
   ModelCatalog,
+  ModelInfo,
+  TrustedRoot,
   ModelProgress,
   ProviderConfig,
   Settings,
@@ -35,6 +37,33 @@ function modelNote(model: LocalModel): string {
   const key = `local.${model.id}.note`;
   const translated = t(key);
   return translated === key ? model.note : translated;
+}
+
+/**
+ * The model list, filtered as the operator types.
+ *
+ * A gateway like OpenRouter answers with hundreds of entries, which is
+ * unusable as a dropdown; free models come first because that is what someone
+ * without a budget is looking for.
+ */
+function modelRows(models: ModelInfo[], selected: string, query: string): string {
+  const needle = query.trim().toLowerCase();
+  const matches = models.filter(
+    (m) => !needle || m.id.toLowerCase().includes(needle) || m.label.toLowerCase().includes(needle),
+  );
+  if (matches.length === 0) return `<div class="empty-hint">${t("keys.noModels")}</div>`;
+
+  return matches
+    .slice(0, 200)
+    .map(
+      (m) =>
+        `<button type="button" class="model-row${m.id === selected ? " active" : ""}" data-model="${escapeHtml(m.id)}">` +
+        `<span class="model-name">${escapeHtml(m.label)}</span>` +
+        (m.free ? `<span class="tag free">${t("keys.free")}</span>` : "") +
+        (m.audio ? `<span class="tag">${t("keys.audioTag")}</span>` : "") +
+        `</button>`,
+    )
+    .join("");
 }
 
 function formatSize(bytes: number): string {
@@ -113,16 +142,7 @@ export async function openKeysModal(deps: ModalDeps) {
     const catalog = catalogs.get(p.id) ?? null;
     const isGemini = p.kind === "gemini";
 
-    const modelOptions = catalog
-      ? catalog.models
-          .map(
-            (m) =>
-              `<option value="${escapeHtml(m.id)}" ${m.id === p.model ? "selected" : ""}>${escapeHtml(
-                m.label,
-              )}</option>`,
-          )
-          .join("")
-      : "";
+    const modelOptions = catalog ? modelRows(catalog.models, p.model, "") : "";
 
     // Dictation may run through a different provider than the chat one, so an
     // operator on a text-only endpoint can still dictate via Gemini or Groq.
@@ -207,13 +227,22 @@ export async function openKeysModal(deps: ModalDeps) {
         <div class="row-inline">
           ${
             catalog
-              ? `<select class="field-input" id="modelSelect">${modelOptions}</select>`
+              ? `<input class="field-input" id="modelSearch" placeholder="${t("keys.modelSearch")}" autocomplete="off" />`
               : `<input class="field-input" id="modelManual" value="${escapeHtml(p.model)}" placeholder="${t("keys.modelPlaceholder")}" />`
           }
           <button class="btn btn-secondary" id="btnReloadModels" ${keys.length ? "" : "disabled"}>
             ${t("keys.reload")}
           </button>
         </div>
+        ${catalog ? `<div class="model-list" id="modelList">${modelOptions}</div>` : ""}
+      </div>
+
+      <div class="field">
+        <label>${t("keys.folders")}
+          <span class="hint-inline">${t("keys.foldersHint")}</span>
+        </label>
+        <div class="folder-list" id="folderList"></div>
+        <button class="btn btn-secondary btn-wide" id="btnAddFolder">${t("keys.addFolder")}</button>
       </div>
 
       <div class="field">
@@ -431,10 +460,6 @@ export async function openKeysModal(deps: ModalDeps) {
       if ((raw as KeyboardEvent).key === "Enter") void addKey();
     });
 
-    card.querySelector<HTMLSelectElement>("#modelSelect")?.addEventListener("change", (event) => {
-      void persist({ model: (event.target as HTMLSelectElement).value }, true);
-    });
-
     card.querySelectorAll<HTMLButtonElement>("#speechEngine .segmented-btn").forEach((btn) => {
       btn.addEventListener("click", async () => {
         settings.speech_engine = btn.dataset.engine === "local" ? "local" : "provider";
@@ -510,6 +535,68 @@ export async function openKeysModal(deps: ModalDeps) {
       await draw();
     });
 
+    // Picking a model: the list is filtered live and the choice is remembered
+    // on the element the save step reads.
+    let chosenModel = p.model;
+    const list = card.querySelector<HTMLElement>("#modelList");
+    const search = card.querySelector<HTMLInputElement>("#modelSearch");
+    const redrawModels = () => {
+      if (!list || !catalog) return;
+      list.innerHTML = modelRows(catalog.models, chosenModel, search?.value ?? "");
+    };
+    search?.addEventListener("input", redrawModels);
+    list?.addEventListener("click", (event) => {
+      const row = (event.target as HTMLElement).closest<HTMLElement>("[data-model]");
+      if (!row?.dataset.model) return;
+      chosenModel = row.dataset.model;
+      redrawModels();
+    });
+
+    // Folders an agent may read and write. Revoking one takes effect on the
+    // next tool call; nothing on disk is touched either way.
+    const drawFolders = async () => {
+      const box = card.querySelector<HTMLElement>("#folderList");
+      if (!box) return;
+      let roots: TrustedRoot[] = [];
+      try {
+        roots = await api.listTrustedRoots();
+      } catch (error) {
+        console.error("trusted roots", error);
+      }
+      box.innerHTML = roots.length
+        ? roots
+            .map(
+              (root) =>
+                `<div class="folder-row"><span class="folder-path">${escapeHtml(root.path)}</span>` +
+                `<span class="tag">${root.writable ? t("keys.folderRw") : t("keys.folderRo")}</span>` +
+                `<button class="btn-icon" data-revoke="${escapeHtml(root.path)}" title="${t("keys.revoke")}">✕</button></div>`,
+            )
+            .join("")
+        : `<div class="empty-hint">${t("keys.noFolders")}</div>`;
+    };
+    void drawFolders();
+
+    card.querySelector<HTMLElement>("#folderList")?.addEventListener("click", async (event) => {
+      const path = (event.target as HTMLElement).closest<HTMLElement>("[data-revoke]")?.dataset
+        .revoke;
+      if (!path) return;
+      await api.revokeFolder(path);
+      await drawFolders();
+    });
+
+    card.querySelector<HTMLButtonElement>("#btnAddFolder")?.addEventListener("click", async () => {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const picked = await open({ directory: true, multiple: false });
+      if (typeof picked !== "string") return;
+      try {
+        await api.trustFolder(picked, true);
+        await drawFolders();
+        toast(t("keys.folderAdded"), "success");
+      } catch (error) {
+        toast(errorText(error), "error");
+      }
+    });
+
     const tempInput = card.querySelector<HTMLInputElement>("#temperature");
     tempInput?.addEventListener("input", () => {
       const label = card.querySelector<HTMLElement>("#tempValue");
@@ -536,9 +623,7 @@ export async function openKeysModal(deps: ModalDeps) {
 
     card.querySelector<HTMLButtonElement>("#btnSaveProvider")?.addEventListener("click", async () => {
       const model =
-        card.querySelector<HTMLSelectElement>("#modelSelect")?.value ??
-        card.querySelector<HTMLInputElement>("#modelManual")?.value.trim() ??
-        p.model;
+        card.querySelector<HTMLInputElement>("#modelManual")?.value.trim() || chosenModel;
       const speech =
         card.querySelector<HTMLSelectElement>("#speechSelect")?.value ??
         card.querySelector<HTMLInputElement>("#speechManual")?.value.trim() ??

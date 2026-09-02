@@ -124,6 +124,8 @@ export interface PendingAction {
 
 export interface RunOutput {
   reply: string;
+  /** The model's own summary of its reasoning, when it reports one. */
+  thoughts: string;
   mode: AgentMode;
   security: SecurityLevel;
   model_id: string;
@@ -160,6 +162,8 @@ export interface ModelInfo {
   label: string;
   chat: boolean;
   audio: boolean;
+  /** Costs nothing to call — listed first. */
+  free: boolean;
 }
 
 export interface ModelCatalog {

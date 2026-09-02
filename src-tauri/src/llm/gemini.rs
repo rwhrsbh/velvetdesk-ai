@@ -78,6 +78,186 @@ async fn post(
     Ok((status, text))
 }
 
+/// Stream a reply token by token.
+///
+/// Everything the non-streaming path does still applies — the body is the same
+/// and the thinking-field retry is the same — but the answer is emitted as it
+/// arrives, so the operator watches it being written instead of a spinner.
+pub async fn call_streaming(
+    http: &reqwest::Client,
+    provider: &ProviderConfig,
+    api_key: &str,
+    request: &ChatRequest,
+    on_event: &(dyn Fn(Value) + Send + Sync),
+) -> Result<ChatResponse, CallError> {
+    use futures_util::StreamExt;
+
+    let version = if provider.api_version.is_empty() {
+        "v1beta"
+    } else {
+        provider.api_version.as_str()
+    };
+    let base = provider.base_url.trim_end_matches('/');
+    let url = format!(
+        "{base}/{version}/models/{}:streamGenerateContent?alt=sse",
+        provider.model.trim()
+    );
+
+    let mut body = build_body(provider, request);
+    // Ask for the model's own summary of its reasoning when it is thinking.
+    if !request.thinking.is_default() {
+        request_thoughts(&mut body, provider);
+    }
+
+    let mut response = send(http, &url, api_key, provider, &body).await?;
+
+    // The thinking fields are the ones an endpoint is most likely to reject;
+    // retry once with the other spelling, exactly as the plain call does.
+    if response.status().as_u16() == 400 {
+        let text = response
+            .text()
+            .await
+            .map_err(|e| CallError::Transport(e.to_string()))?;
+        if !(rejected_thinking_field(&text)
+            && flip_thinking(&mut body, provider, &request.thinking))
+        {
+            return Err(CallError::Status {
+                code: 400,
+                body: text,
+            });
+        }
+        response = send(http, &url, api_key, provider, &body).await?;
+    }
+
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        return Err(CallError::Status {
+            code: status.as_u16(),
+            body,
+        });
+    }
+
+    let mut text = String::new();
+    let mut thoughts = String::new();
+    let mut tool_calls: Vec<ToolCall> = vec![];
+    let mut usage = Usage::default();
+    let mut finish_reason = String::new();
+    let mut buffer = String::new();
+    let mut stream = response.bytes_stream();
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| CallError::Transport(e.to_string()))?;
+        buffer.push_str(&String::from_utf8_lossy(&chunk));
+
+        for value in take_events(&mut buffer) {
+            if let Some(reason) = value["candidates"][0]["finishReason"].as_str() {
+                finish_reason = reason.to_string();
+            }
+            if let Some(meta) = value.get("usageMetadata") {
+                usage = read_usage(Some(meta));
+            }
+            let Some(parts) = value["candidates"][0]["content"]["parts"].as_array() else {
+                continue;
+            };
+            for part in parts {
+                if let Some(piece) = part.get("text").and_then(|t| t.as_str()) {
+                    // A part marked `thought` is the model reasoning aloud, not
+                    // the answer: it belongs behind the spoiler, not in the text.
+                    if part.get("thought").and_then(|t| t.as_bool()) == Some(true) {
+                        thoughts.push_str(piece);
+                        on_event(json!({ "kind": "thought", "text": piece }));
+                    } else {
+                        text.push_str(piece);
+                        on_event(json!({ "kind": "delta", "text": piece }));
+                    }
+                }
+                if let Some(call) = part.get("functionCall") {
+                    tool_calls.push(ToolCall {
+                        id: format!("gem-{}", tool_calls.len()),
+                        name: call["name"].as_str().unwrap_or_default().to_string(),
+                        args: call
+                            .get("args")
+                            .cloned()
+                            .unwrap_or(Value::Object(Default::default())),
+                        signature: part
+                            .get("thoughtSignature")
+                            .and_then(|s| s.as_str())
+                            .unwrap_or_default()
+                            .to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    Ok(ChatResponse {
+        text: text.trim().to_string(),
+        thoughts: thoughts.trim().to_string(),
+        tool_calls,
+        usage,
+        finish_reason,
+        key_index: 0,
+        attempts: 0,
+    })
+}
+
+/// Take the complete server-sent events out of a buffer.
+///
+/// A chunk off the wire can end in the middle of an event, so whatever is left
+/// unterminated stays in the buffer for the next one.
+pub(crate) fn take_events(buffer: &mut String) -> Vec<Value> {
+    let mut events = vec![];
+    while let Some(cut) = buffer.find("\n\n") {
+        let event = buffer[..cut].to_string();
+        buffer.drain(..cut + 2);
+        let Some(payload) = event
+            .lines()
+            .find_map(|line| line.strip_prefix("data:"))
+            .map(str::trim)
+        else {
+            continue;
+        };
+        if payload == "[DONE]" {
+            continue;
+        }
+        if let Ok(value) = serde_json::from_str::<Value>(payload) {
+            events.push(value);
+        }
+    }
+    events
+}
+
+async fn send(
+    http: &reqwest::Client,
+    url: &str,
+    api_key: &str,
+    provider: &ProviderConfig,
+    body: &Value,
+) -> Result<reqwest::Response, CallError> {
+    let mut req = http
+        .post(url)
+        .header("x-goog-api-key", api_key)
+        .header("content-type", "application/json");
+    for (k, v) in &provider.extra_headers {
+        req = req.header(k.as_str(), v.as_str());
+    }
+    req.json(body)
+        .send()
+        .await
+        .map_err(|e| CallError::Transport(e.to_string()))
+}
+
+/// Ask for thought summaries in whichever way this generation spells it.
+fn request_thoughts(body: &mut Value, provider: &ProviderConfig) {
+    let config = &mut body["generationConfig"];
+    if takes_thinking_level(&provider.model) {
+        config["thinkingSummaries"] = json!("auto");
+    } else if let Some(thinking) = config.get_mut("thinkingConfig") {
+        thinking["includeThoughts"] = json!(true);
+    }
+}
+
 fn build_body(provider: &ProviderConfig, request: &ChatRequest) -> Value {
     let mut contents: Vec<Value> = vec![];
 
@@ -319,6 +499,19 @@ fn sanitize_schema(schema: &Value) -> Value {
     }
 }
 
+fn read_usage(meta: Option<&Value>) -> Usage {
+    let field = |name: &str| {
+        meta.and_then(|m| m.get(name))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u32
+    };
+    Usage {
+        prompt_tokens: field("promptTokenCount"),
+        completion_tokens: field("candidatesTokenCount"),
+        total_tokens: field("totalTokenCount"),
+    }
+}
+
 /// Parse a raw generateContent payload (used by the transcription path too).
 pub fn parse_public(value: &Value) -> Result<ChatResponse, CallError> {
     parse_response(value)
@@ -341,6 +534,7 @@ fn parse_response(value: &Value) -> Result<ChatResponse, CallError> {
         })?;
 
     let mut text = String::new();
+    let mut thoughts = String::new();
     let mut tool_calls = vec![];
 
     if let Some(parts) = candidate
@@ -350,7 +544,11 @@ fn parse_response(value: &Value) -> Result<ChatResponse, CallError> {
     {
         for part in parts {
             if let Some(t) = part.get("text").and_then(|t| t.as_str()) {
-                text.push_str(t);
+                if part.get("thought").and_then(|v| v.as_bool()) == Some(true) {
+                    thoughts.push_str(t);
+                } else {
+                    text.push_str(t);
+                }
             }
             if let Some(fc) = part.get("functionCall") {
                 let name = fc
@@ -377,24 +575,11 @@ fn parse_response(value: &Value) -> Result<ChatResponse, CallError> {
         }
     }
 
-    let usage_meta = value.get("usageMetadata");
-    let usage = Usage {
-        prompt_tokens: usage_meta
-            .and_then(|u| u.get("promptTokenCount"))
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as u32,
-        completion_tokens: usage_meta
-            .and_then(|u| u.get("candidatesTokenCount"))
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as u32,
-        total_tokens: usage_meta
-            .and_then(|u| u.get("totalTokenCount"))
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as u32,
-    };
+    let usage = read_usage(value.get("usageMetadata"));
 
     Ok(ChatResponse {
         text: text.trim().to_string(),
+        thoughts: thoughts.trim().to_string(),
         tool_calls,
         usage,
         finish_reason: candidate
@@ -708,6 +893,27 @@ mod tests {
         let config = config_for("gemini-3.5-flash", Thinking::default());
         assert!(config.get("thinkingLevel").is_none());
         assert!(config.get("thinkingConfig").is_none());
+    }
+
+    /// A stream arrives in arbitrary pieces: an event split across two chunks
+    /// must still be read exactly once, and only when it is whole.
+    #[test]
+    fn events_are_only_taken_when_complete() {
+        let mut buffer = String::from("data: {\"a\":1}\n\ndata: {\"b\"");
+        let first = take_events(&mut buffer);
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0]["a"], 1);
+        assert_eq!(buffer, "data: {\"b\"");
+
+        buffer.push_str(":2}\n\n");
+        let second = take_events(&mut buffer);
+        assert_eq!(second.len(), 1);
+        assert_eq!(second[0]["b"], 2);
+        assert!(buffer.is_empty());
+
+        // Keep-alives and the terminator carry nothing to parse.
+        let mut buffer = String::from(": ping\n\ndata: [DONE]\n\n");
+        assert!(take_events(&mut buffer).is_empty());
     }
 
     #[test]

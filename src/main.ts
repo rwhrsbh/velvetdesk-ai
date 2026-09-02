@@ -192,6 +192,9 @@ async function sendMessage() {
       temporary: store.temporary,
     });
 
+    const streamed = store.entries.find((e) => e.transient && e.sender === "assistant");
+    const thoughts =
+      output.thoughts || ((streamed?.meta as { thoughts?: string })?.thoughts ?? "");
     store.entries = store.entries.filter((e) => !e.transient);
     pushEntry(
       makeEntry("assistant", output.reply, {
@@ -200,6 +203,7 @@ async function sendMessage() {
         mode: output.mode,
         key_index: output.key_index,
         turns: output.turns,
+        thoughts,
       }),
     );
     store.thoughts = "";
@@ -1168,7 +1172,7 @@ function bindTabs() {
 function liveEntry(): UiEntry {
   const existing = store.entries.find((e) => e.transient && e.sender === "assistant");
   if (existing) return existing;
-  const entry = makeEntry("assistant", "", { steps: [], live: true }, true);
+  const entry = makeEntry("assistant", "", { steps: [], live: true, thoughts: "" }, true);
   pushEntry(entry);
   return entry;
 }
@@ -1177,9 +1181,24 @@ function bindAgentEvents() {
   void onAgentEvent((payload) => {
     const kind = String(payload.kind ?? "");
     const entry = liveEntry();
-    const meta = entry.meta as { steps?: RunStep[]; note?: string; live?: boolean };
+    const meta = entry.meta as {
+    steps?: RunStep[];
+    note?: string;
+    live?: boolean;
+    thoughts?: string;
+    thinkingSince?: number;
+  };
 
-    if (kind === "step") {
+    if (kind === "delta") {
+      // The answer as it is written. `live` stays set until the run ends, so
+      // the spinner keeps turning under the growing text.
+      entry.text += String(payload.text ?? "");
+    } else if (kind === "thought") {
+      meta.thoughts = (meta.thoughts ?? "") + String(payload.text ?? "");
+      if (!meta.thinkingSince) meta.thinkingSince = Date.now();
+    } else if (kind === "no_stream") {
+      meta.note = t("chat.noStream");
+    } else if (kind === "step") {
       const step = payload.step as RunStep | undefined;
       if (!step) return;
       meta.steps = [...(meta.steps ?? []), step];

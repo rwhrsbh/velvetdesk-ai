@@ -603,6 +603,129 @@ input[type="range"] {
   border-color: var(--text-faint);
 }
 
+/* Folders agents have been let into. */
+.folder-list {
+  margin-bottom: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  max-height: 150px;
+  overflow: auto;
+}
+
+.folder-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 12px;
+}
+
+.folder-row:last-child {
+  border-bottom: none;
+}
+
+.folder-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+/* Model picker: a filtered list beats a dropdown of several hundred. */
+.model-list {
+  margin-top: 8px;
+  max-height: 210px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+}
+
+.model-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 6px 9px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--line-soft);
+  text-align: left;
+  font-size: 12.5px;
+  cursor: default;
+}
+
+.model-row:last-child {
+  border-bottom: none;
+}
+
+.model-row:hover {
+  background: var(--surface);
+}
+
+.model-row.active {
+  background: var(--accent-dim);
+  color: var(--text);
+}
+
+.model-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag.free {
+  background: rgba(48, 209, 88, 0.14);
+  color: var(--ok);
+}
+
+/* The model's reasoning, folded away by default. */
+.thoughts {
+  margin-bottom: 7px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.thoughts > summary {
+  cursor: default;
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 7px;
+  border-radius: 5px;
+  background: var(--sunken);
+  user-select: none;
+}
+
+.thoughts > summary::-webkit-details-marker {
+  display: none;
+}
+
+.thoughts > summary::before {
+  content: "›";
+  transition: transform 0.15s ease;
+}
+
+.thoughts[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.thoughts-body {
+  margin-top: 6px;
+  padding-left: 9px;
+  border-left: 2px solid var(--line);
+  white-space: pre-wrap;
+  line-height: 1.55;
+}
+
 /* Shown inside the bubble a run is still filling. */
 .working {
   display: flex;
