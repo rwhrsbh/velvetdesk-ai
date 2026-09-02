@@ -87,6 +87,7 @@ fn provider(model: &str) -> ProviderConfig {
         transcribe_model: String::new(),
         thinking_effort: String::new(),
         thinking_budget: None,
+        model_chain: vec![],
         reasoning_dialect: "auto".into(),
         context_tokens: None,
         key_count: 1,
@@ -417,6 +418,368 @@ async fn the_agent_stores_what_it_is_told() {
             .any(|f| f.value.to_lowercase().contains("рыбал")),
         "the fact was not stored: {:?}",
         man.facts
+    );
+}
+
+/// The gauge promises "how full is the window". This checks that promise
+/// against the only authority on it — the provider's own tokenizer — and keeps
+/// the fallback estimate honest enough to stand in for it.
+#[tokio::test]
+#[ignore = "calls the real Gemini API"]
+async fn the_context_gauge_matches_what_the_provider_counts() {
+    let Some(mut harness) = Harness::new() else {
+        return;
+    };
+    // The gauge describes the mode the operator has selected, so both sides of
+    // this comparison have to be in the same one.
+    harness.settings.agent_mode = AgentMode::Act;
+
+    let config = provider(MODEL);
+    let emit = quiet();
+
+    let scope = harness.paths.scope("7100004").unwrap();
+    let mut profile = Profile::new("7100004".into(), "Марина".into());
+    profile.site = "RomanceCompass".into();
+    profile.bio = "Зрелая, тёплая, ценит уважение. Пятеро детей, Оснабрюк.".into();
+    scope.write_profile(&profile).unwrap();
+
+    for i in 0..8 {
+        let man = velvetdesk_lib::models::Man::new(
+            "7100004".into(),
+            format!("70000{i:02}"),
+            format!("Кандидат {i}"),
+        );
+        scope.write_man(&man).unwrap();
+    }
+
+    let request =
+        agent::next_request(&scope, &harness.settings, &config, None).expect("the next request");
+    let key = api_keys().into_iter().next().unwrap_or_default();
+    let exact =
+        velvetdesk_lib::llm::gemini::count_tokens(&harness.llm.http, &config, &key, &request)
+            .await
+            .expect("countTokens answers");
+
+    let stats =
+        agent::context_stats(&scope, &harness.settings, &config, None).expect("the estimate");
+
+    let input = RunInput {
+        model_id: "7100004".into(),
+        man_id: None,
+        mode: Some(AgentMode::Act),
+        security: Some(SecurityLevel::Safe),
+        message: "Скажи одним словом: готова?".into(),
+        channel: None,
+        log_incoming: false,
+        thinking_effort: Some("none".into()),
+        temporary: true,
+    };
+    let output = agent::run(&harness.deps(&config, &emit), input)
+        .await
+        .expect("one turn");
+
+    let counted = output.usage.prompt_tokens as f32;
+    println!(
+        "    countTokens said {exact}, the run cost {} — estimate was {}",
+        output.usage.prompt_tokens, stats.used_tokens
+    );
+
+    // The counted request is the same one, minus the operator's short message,
+    // so the two numbers should be within a few percent of each other.
+    let exact = exact as f32;
+    assert!(
+        exact > counted * 0.85 && exact < counted * 1.15,
+        "countTokens ({exact}) disagrees with the run ({counted})"
+    );
+
+    // The estimate only has to be close enough to drive a gauge and a
+    // compaction threshold — half to double is the promise it makes.
+    let estimated = stats.used_tokens as f32;
+    assert!(
+        estimated > counted * 0.5 && estimated < counted * 2.0,
+        "the estimate is misleading: {estimated} against {counted}"
+    );
+}
+
+/// The point of a chain: when a model will not answer — out of quota, or
+/// simply not there — the next one takes the request rather than the operator
+/// seeing an error.
+#[tokio::test]
+#[ignore = "calls the real Gemini API"]
+async fn an_unavailable_model_hands_over_to_the_next() {
+    let Some(harness) = Harness::new() else {
+        return;
+    };
+
+    let mut config = provider("gemini-does-not-exist");
+    config.model_chain = vec!["also-not-a-model".into(), MODEL.to_string()];
+
+    let switches = std::sync::Mutex::new(Vec::<String>::new());
+    let emit = |event: serde_json::Value| {
+        if event["kind"] == "model_switch" {
+            switches.lock().unwrap().push(format!(
+                "{} → {}",
+                event["from"].as_str().unwrap_or_default(),
+                event["to"].as_str().unwrap_or_default()
+            ));
+        }
+    };
+
+    let mut request = velvetdesk_lib::llm::ChatRequest::new("Answer with one word.");
+    request.stream = false;
+    request
+        .messages
+        .push(velvetdesk_lib::llm::LlmMessage::user("Скажи «готово»."));
+
+    let response = harness
+        .llm
+        .chat(&config, harness.pool.clone(), &request, &emit)
+        .await
+        .expect("the chain finds a model that answers");
+
+    for switch in switches.lock().unwrap().iter() {
+        println!("    {switch}");
+    }
+    assert_eq!(response.model, MODEL, "the last model should have answered");
+    assert!(!response.text.trim().is_empty());
+    assert_eq!(
+        switches.lock().unwrap().len(),
+        2,
+        "both dead models should have been reported"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Letters
+// ---------------------------------------------------------------------------
+
+/// Two women, two voices, the same brief. The letters have to come out
+/// recognisably different — that is the whole point of giving a profile
+/// samples of how she writes.
+#[tokio::test]
+#[ignore = "calls the real Gemini API"]
+async fn each_woman_writes_in_her_own_voice() {
+    let Some(harness) = Harness::new() else {
+        return;
+    };
+    let config = provider(MODEL);
+    let emit = quiet();
+
+    // One writes in short, plain lines. The other is warm and wordy.
+    let terse = harness.paths.scope("7200001").unwrap();
+    let mut profile = Profile::new("7200001".into(), "Ирина".into());
+    profile.bio = "Врач, 38, Киев. Мало свободного времени.".into();
+    profile.tone_rules = vec!["короткие предложения".into(), "без восклицаний".into()];
+    profile.writing_samples = vec![
+        "Привет. День был длинный, две операции подряд. Как ты?".into(),
+        "Спасибо за фото. Красиво. У нас дождь вторую неделю.".into(),
+    ];
+    terse.write_profile(&profile).unwrap();
+    let mut man =
+        velvetdesk_lib::models::Man::new("7200001".into(), "7200101".into(), "Hartwig".into());
+    man.age = Some(65);
+    man.location = "Bückeburg".into();
+    terse.write_man(&man).unwrap();
+
+    let warm = harness.paths.scope("7200002").unwrap();
+    let mut profile = Profile::new("7200002".into(), "Алёна".into());
+    profile.bio = "Воспитатель в детском саду, 29, Одесса. Любит море.".into();
+    profile.tone_rules = vec!["тёплый тон".into(), "много бытовых деталей".into()];
+    profile.writing_samples = vec![
+        "Мой дорогой, сегодня утром я шла на работу и увидела, как рыбаки \
+         вытаскивают сети, и подумала о тебе — ты бы точно остановился \
+         посмотреть, правда? Дети сегодня рисовали море, и я поставила их \
+         рисунки на подоконник, чтобы солнце их грело."
+            .into(),
+        "Знаешь, я всё думаю о твоих словах. Вечером заварила чай с мятой, \
+         села у окна и долго смотрела на огни в порту."
+            .into(),
+    ];
+    warm.write_profile(&profile).unwrap();
+    let mut man =
+        velvetdesk_lib::models::Man::new("7200002".into(), "7200201".into(), "Hartwig".into());
+    man.age = Some(65);
+    man.location = "Bückeburg".into();
+    warm.write_man(&man).unwrap();
+
+    let brief = "Поблагодари за фотографию и спроси про его выходные.";
+    let mut written = vec![];
+    for model_id in ["7200001", "7200002"] {
+        let output = agent::write_letters(
+            &harness.deps(&config, &emit),
+            agent::LettersInput {
+                model_id: model_id.into(),
+                man_ids: vec![],
+                temporary: true,
+                brief: brief.into(),
+                channel: Some("letter".into()),
+                thinking_effort: Some("low".into()),
+            },
+        )
+        .await
+        .expect("letters are written");
+
+        assert_eq!(output.letters.len(), 1);
+        let letter = &output.letters[0];
+        assert!(letter.error.is_empty(), "{}", letter.error);
+        assert!(!letter.text.is_empty(), "an empty letter");
+        println!("--- {model_id}: {}\n{}\n", letter.name, letter.text);
+        written.push(letter.text.clone());
+    }
+
+    let (terse_letter, warm_letter) = (&written[0], &written[1]);
+
+    // A letter is prose to be sent, not a reply to the operator.
+    for letter in &written {
+        let lower = letter.to_lowercase();
+        for giveaway in ["subject:", "тема:", "вот письмо", "here is the letter"] {
+            assert!(
+                !lower.contains(giveaway),
+                "letter reads as a draft: {letter}"
+            );
+        }
+        // Naming him in the opening line is a style choice, not a requirement;
+        // what matters is that the brief was actually written about.
+        let about_the_brief = ["фото", "photo", "foto"]
+            .iter()
+            .any(|word| lower.contains(word))
+            && ["выходн", "weekend", "wochenende"]
+                .iter()
+                .any(|word| lower.contains(word));
+        assert!(about_the_brief, "the brief was ignored: {letter}");
+    }
+
+    // The wordy one should be plainly longer, and its sentences longer too.
+    let sentence_length = |text: &str| {
+        let sentences = text
+            .split(['.', '!', '?'])
+            .filter(|s| s.trim().len() > 3)
+            .count();
+        text.chars().count() as f32 / sentences.max(1) as f32
+    };
+    println!(
+        "    terse: {} chars, {:.0} per sentence · warm: {} chars, {:.0} per sentence",
+        terse_letter.chars().count(),
+        sentence_length(terse_letter),
+        warm_letter.chars().count(),
+        sentence_length(warm_letter)
+    );
+    assert!(
+        sentence_length(warm_letter) > sentence_length(terse_letter),
+        "the two voices came out the same"
+    );
+}
+
+/// A brief goes to everyone in the profile, and each letter is written for its
+/// own man rather than copied.
+#[tokio::test]
+#[ignore = "calls the real Gemini API"]
+async fn a_round_of_letters_is_written_one_by_one() {
+    let Some(harness) = Harness::new() else {
+        return;
+    };
+    let config = provider(MODEL);
+    let emit = quiet();
+
+    let scope = harness.paths.scope("7200003").unwrap();
+    let mut profile = Profile::new("7200003".into(), "Марина".into());
+    profile.bio = "Флорист, 42, Оснабрюк.".into();
+    profile.writing_samples =
+        vec!["Доброе утро. Сегодня собирала букет из белых роз — вспомнила наш разговор.".into()];
+    scope.write_profile(&profile).unwrap();
+
+    for (id, name, place) in [
+        ("7200301", "Hartwig", "Bückeburg"),
+        ("7200302", "Sven", "Malmö"),
+        ("7200303", "Josef", "Wien"),
+    ] {
+        let mut man = velvetdesk_lib::models::Man::new("7200003".into(), id.into(), name.into());
+        man.location = place.into();
+        scope.write_man(&man).unwrap();
+    }
+
+    let output = agent::write_letters(
+        &harness.deps(&config, &emit),
+        agent::LettersInput {
+            model_id: "7200003".into(),
+            man_ids: vec![],
+            temporary: false,
+            brief: "Короткое письмо: как прошли выходные.".into(),
+            channel: Some("letter".into()),
+            thinking_effort: Some("none".into()),
+        },
+    )
+    .await
+    .expect("a round of letters");
+
+    assert_eq!(output.letters.len(), 3);
+    for letter in &output.letters {
+        assert!(letter.error.is_empty(), "{}: {}", letter.name, letter.error);
+        // No letter may name a different man — the round is personal, not a
+        // template with the wrong name pasted in.
+        let lower = letter.text.to_lowercase();
+        for other in ["hartwig", "sven", "josef"] {
+            if other != letter.name.to_lowercase() {
+                assert!(
+                    !lower.contains(other),
+                    "{} was sent a letter mentioning {other}: {}",
+                    letter.name,
+                    letter.text
+                );
+            }
+        }
+        println!("--- {}\n{}\n", letter.name, letter.text);
+    }
+
+    // Written one by one, so no two are the same text.
+    let first = &output.letters[0].text;
+    assert!(
+        output.letters.iter().skip(1).any(|l| &l.text != first),
+        "every man got the same letter"
+    );
+    assert!(output.usage.total_tokens > 0, "usage was not reported");
+
+    // And the round is part of the conversation it was asked for in: it was
+    // living only on screen, and vanished on the next switch of profile.
+    let log = scope.read_agent_log(None).unwrap();
+    assert_eq!(
+        log.entries
+            .iter()
+            .filter(|e| e.sender == "assistant")
+            .count(),
+        3,
+        "the letters were not kept in the chat"
+    );
+    assert!(
+        log.entries.iter().any(|e| e.sender == "user"),
+        "the brief was not kept"
+    );
+    assert_eq!(log.entries[1].meta["recipient"], output.letters[0].name);
+
+    // Writing to one man files the letter in his own chat instead.
+    let single = agent::write_letters(
+        &harness.deps(&config, &emit),
+        agent::LettersInput {
+            model_id: "7200003".into(),
+            man_ids: vec!["7200301".into()],
+            temporary: false,
+            brief: "Короткое письмо про погоду.".into(),
+            channel: Some("chat".into()),
+            thinking_effort: Some("none".into()),
+        },
+    )
+    .await
+    .expect("one letter");
+    assert_eq!(single.letters.len(), 1);
+    let his_chat = scope.read_agent_log(Some("7200301")).unwrap();
+    assert_eq!(
+        his_chat
+            .entries
+            .iter()
+            .filter(|e| e.sender == "assistant")
+            .count(),
+        1,
+        "the letter did not land in his chat"
     );
 }
 

@@ -63,6 +63,65 @@ pub async fn call(
     parse_response(&value)
 }
 
+/// Exactly how many tokens a request is, counted by the model's own tokenizer.
+///
+/// A local estimate can only ever approximate this — a character count is off
+/// by half on Cyrillic alone — and `countTokens` neither generates anything nor
+/// spends the generation quota.
+pub async fn count_tokens(
+    http: &reqwest::Client,
+    provider: &ProviderConfig,
+    api_key: &str,
+    request: &ChatRequest,
+) -> Result<u32, CallError> {
+    let version = if provider.api_version.is_empty() {
+        "v1beta"
+    } else {
+        provider.api_version.as_str()
+    };
+    let base = provider.base_url.trim_end_matches('/');
+    let url = format!(
+        "{base}/{version}/models/{}:countTokens",
+        provider.model.trim()
+    );
+
+    // The endpoint takes the request itself, minus the settings that do not
+    // affect its size — and it insists on the model name and at least one
+    // message, even when what is being measured is the system prompt.
+    let mut body = build_body(provider, request);
+    if let Some(map) = body.as_object_mut() {
+        map.remove("generationConfig");
+        map.remove("safetySettings");
+        map.insert(
+            "model".into(),
+            json!(format!("models/{}", provider.model.trim())),
+        );
+    }
+    // `is_none_or` would read better, but the project builds on 1.77.
+    if body["contents"]
+        .as_array()
+        .map(|c| c.is_empty())
+        .unwrap_or(true)
+    {
+        body["contents"] = json!([{ "role": "user", "parts": [{ "text": "" }] }]);
+    }
+    let payload = json!({ "generateContentRequest": body });
+
+    let (status, text) = post(http, &url, api_key, provider, &payload).await?;
+    if !status.is_success() {
+        return Err(CallError::Status {
+            code: status.as_u16(),
+            body: text,
+        });
+    }
+    let value: Value =
+        serde_json::from_str(&text).map_err(|e| CallError::Parse(format!("{e}: {text}")))?;
+    value["totalTokens"]
+        .as_u64()
+        .map(|n| n as u32)
+        .ok_or_else(|| CallError::Parse(format!("no totalTokens in {text}")))
+}
+
 async fn post(
     http: &reqwest::Client,
     url: &str,
@@ -213,6 +272,8 @@ pub async fn call_streaming(
 
     Ok(ChatResponse {
         text: text.trim().to_string(),
+        // The caller fills this in: it knows which model of the chain this was.
+        model: String::new(),
         thoughts: thoughts.trim().to_string(),
         tool_calls,
         usage,
@@ -658,6 +719,8 @@ fn parse_response(value: &Value) -> Result<ChatResponse, CallError> {
 
     Ok(ChatResponse {
         text: text.trim().to_string(),
+        // The caller fills this in: it knows which model of the chain this was.
+        model: String::new(),
         thoughts: thoughts.trim().to_string(),
         tool_calls,
         usage,
@@ -691,6 +754,7 @@ mod tests {
             transcribe_model: String::new(),
             thinking_effort: String::new(),
             thinking_budget: None,
+            model_chain: vec![],
             reasoning_dialect: "auto".into(),
             context_tokens: None,
             key_count: 1,

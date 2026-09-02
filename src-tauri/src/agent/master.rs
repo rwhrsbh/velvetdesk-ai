@@ -260,7 +260,12 @@ fn create_profile(
 }
 
 /// One master turn: the same tool loop as the scoped agent, over every profile.
-pub async fn chat(deps: &AgentDeps<'_>, input: MasterInput) -> Result<MasterOutput> {
+/// How much of the conversation is carried into each turn.
+const HISTORY_TURNS: usize = 20;
+
+/// The system prompt for a master turn: who it is, what it may touch, and
+/// every profile in the installation.
+fn system_prompt(deps: &AgentDeps<'_>, security: SecurityLevel) -> Result<String> {
     let index = storage::load_index(deps.paths)?;
     let roster: Vec<Value> = index
         .models
@@ -268,7 +273,6 @@ pub async fn chat(deps: &AgentDeps<'_>, input: MasterInput) -> Result<MasterOutp
         .map(|m| json!({ "model_id": m.id, "name": m.name, "site": m.site, "men": m.men.len() }))
         .collect();
 
-    let security = input.security.unwrap_or(deps.settings.security_level);
     let folders = if deps.settings.trusted_roots.is_empty() {
         String::new()
     } else {
@@ -294,19 +298,76 @@ pub async fn chat(deps: &AgentDeps<'_>, input: MasterInput) -> Result<MasterOutp
             list.join("\n")
         )
     };
-    let mut request = ChatRequest::new(format!(
+
+    Ok(format!(
         "{MASTER_SYSTEM}{folders}\n\nOperator language: {}.\n\nProfiles in this installation:\n{}\n\n{}",
         super::prompts::operator_language(&deps.settings.ui_language),
         serde_json::to_string_pretty(&roster)?,
         super::prompts::security_block(security)
-    ));
+    ))
+}
+
+/// The request the next master turn would send, minus the operator's message.
+pub fn next_request(deps: &AgentDeps<'_>) -> Result<ChatRequest> {
+    let security = deps.settings.security_level;
+    let mut request = ChatRequest::new(system_prompt(deps, security)?);
+    request.temperature = deps.provider.temperature;
+    request.tools = tool_defs();
+
+    let log = deps.paths.master_log()?;
+    for entry in log.entries.iter().rev().take(HISTORY_TURNS).rev() {
+        match entry.sender.as_str() {
+            "user" => request.messages.push(LlmMessage::user(entry.text.clone())),
+            "assistant" => request
+                .messages
+                .push(LlmMessage::assistant(entry.text.clone(), vec![])),
+            _ => {}
+        }
+    }
+    Ok(request)
+}
+
+/// What the next master turn would cost, so the gauge describes this chat
+/// rather than whichever profile happens to be selected behind it.
+pub fn context_stats(deps: &AgentDeps<'_>) -> Result<super::ContextStats> {
+    let security = deps.settings.security_level;
+    let system = system_prompt(deps, security)?;
+    let log = deps.paths.master_log()?;
+    let history: String = log
+        .entries
+        .iter()
+        .rev()
+        .take(HISTORY_TURNS)
+        .map(|entry| entry.text.clone())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let tools = serde_json::to_string(&tool_defs()).unwrap_or_default();
+
+    let window = deps.provider.context_window();
+    let used = super::estimate_tokens(&system)
+        + super::estimate_tokens(&history)
+        + super::estimate_tokens(&tools);
+    Ok(super::ContextStats {
+        used_tokens: used,
+        window_tokens: window,
+        ratio: used as f32 / window.max(1) as f32,
+        exact: false,
+        live_messages: log.entries.len().min(HISTORY_TURNS),
+        total_messages: log.entries.len(),
+        has_summary: false,
+    })
+}
+
+pub async fn chat(deps: &AgentDeps<'_>, input: MasterInput) -> Result<MasterOutput> {
+    let security = input.security.unwrap_or(deps.settings.security_level);
+    let mut request = ChatRequest::new(system_prompt(deps, security)?);
     request.temperature = deps.provider.temperature;
     request.max_output_tokens = deps.provider.max_output_tokens;
     request.thinking = super::thinking_for(deps.provider, input.thinking_effort.as_deref());
     request.tools = tool_defs();
 
     let log = deps.paths.master_log()?;
-    for entry in log.entries.iter().rev().take(20).rev() {
+    for entry in log.entries.iter().rev().take(HISTORY_TURNS).rev() {
         match entry.sender.as_str() {
             "user" => request.messages.push(LlmMessage::user(entry.text.clone())),
             "assistant" => request

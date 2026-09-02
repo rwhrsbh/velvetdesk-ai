@@ -184,6 +184,10 @@ export async function openProfileForm(deps: ModalDeps, existing?: Profile | null
         <textarea class="field-area" id="fTone" placeholder="${t("profile.toneHint")}">${escapeHtml(
           (p?.tone_rules ?? []).join("\n"),
         )}</textarea></div>
+      <div class="field"><label>${t("profile.samples")}</label>
+        <textarea class="field-area tall" id="fSamples" placeholder="${t("profile.samplesHint")}">${escapeHtml(
+          (p?.writing_samples ?? []).join("\n\n"),
+        )}</textarea></div>
       <div class="field"><label>${t("profile.banned")}</label>
         <textarea class="field-area" id="fBanned" placeholder="I hope this message finds you well">${escapeHtml(
           (p?.banned_phrases ?? []).join("\n"),
@@ -219,6 +223,13 @@ export async function openProfileForm(deps: ModalDeps, existing?: Profile | null
     languages: csv(card.querySelector<HTMLInputElement>("#fLangs")!.value),
     tone: lines(card.querySelector<HTMLTextAreaElement>("#fTone")!.value),
     banned: lines(card.querySelector<HTMLTextAreaElement>("#fBanned")!.value),
+    // A sample letter runs over several lines, so they are separated by blank
+    // lines rather than by newlines.
+    samples: card
+      .querySelector<HTMLTextAreaElement>("#fSamples")!
+      .value.split(/\n\s*\n/)
+      .map((part) => part.trim())
+      .filter(Boolean),
   });
 
   card.querySelector<HTMLButtonElement>("#btnSubmit")?.addEventListener("click", async () => {
@@ -239,6 +250,7 @@ export async function openProfileForm(deps: ModalDeps, existing?: Profile | null
           system_prompt_override: form.prompt,
           languages: form.languages,
           tone_rules: form.tone,
+          writing_samples: form.samples,
           banned_phrases: form.banned,
         });
         toast(t("toast.profileSaved"), "success");
@@ -254,6 +266,7 @@ export async function openProfileForm(deps: ModalDeps, existing?: Profile | null
           system_prompt_override: form.prompt,
           languages: form.languages,
           tone_rules: form.tone,
+          writing_samples: form.samples,
           banned_phrases: form.banned,
         });
         toast(t("toast.profileCreated", { name: created.name }), "success");

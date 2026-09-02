@@ -59,6 +59,9 @@ pub struct RunStep {
 #[derive(Debug, Clone, Serialize)]
 pub struct RunOutput {
     pub reply: String,
+    /// Which model answered: the chosen one, or a fallback from the chain.
+    #[serde(default)]
+    pub model: String,
     /// Set when the reply is the app's own words rather than the model's, so
     /// the interface can say them in its language.
     #[serde(default)]
@@ -172,7 +175,7 @@ pub async fn run(deps: &AgentDeps<'_>, input: RunInput) -> Result<RunOutput> {
 
     match mode {
         AgentMode::Auto => run_auto(deps, &scope, security, mode, input, request).await,
-        AgentMode::Act | AgentMode::Memorize => {
+        AgentMode::Act | AgentMode::Memorize | AgentMode::Letters => {
             run_single_turn(deps, &scope, security, mode, input, request).await
         }
     }
@@ -195,10 +198,21 @@ fn thinking_for(provider: &ProviderConfig, override_effort: Option<&str>) -> Thi
     }
 }
 
-/// Cheap token estimate — a quarter of the characters, which is close enough
-/// for deciding when to compact and costs no API call.
+/// Cheap token estimate, used until the provider has been asked for a real
+/// count.
+///
+/// A flat "quarter of the characters" is only right for English: Cyrillic runs
+/// closer to two characters per token, and a prompt that is mostly Russian was
+/// coming out at half its true size.
 pub fn estimate_tokens(text: &str) -> usize {
-    text.chars().count().div_ceil(4)
+    let (ascii, other) = text.chars().fold((0usize, 0usize), |(ascii, other), c| {
+        if c.is_ascii() {
+            (ascii + 1, other)
+        } else {
+            (ascii, other + 1)
+        }
+    });
+    ascii.div_ceil(4) + other.div_ceil(2)
 }
 
 /// How much of the context window one man's correspondence is using.
@@ -207,6 +221,10 @@ pub struct ContextStats {
     pub used_tokens: usize,
     pub window_tokens: u32,
     pub ratio: f32,
+    /// True when the provider counted the tokens, false when they were guessed
+    /// from the text — the interface says which.
+    #[serde(default)]
+    pub exact: bool,
     /// Messages currently sent to the model.
     pub live_messages: usize,
     pub total_messages: usize,
@@ -242,9 +260,14 @@ pub fn context_stats(
         &settings.ui_language,
     );
     let context = prompts::context_block(thread.as_ref(), settings.history_limit);
-    // The tool declarations travel with every request too, and they are not
-    // small; leaving them out would understate the load by thousands of tokens.
-    let tools = serde_json::to_string(&tools::tool_defs()).unwrap_or_default();
+    // The declarations are only sent in AUTO, where the model calls the tools
+    // itself. ACT and MEMORIZE answer with one JSON object and carry none of
+    // them — counting them there overstated the prompt by half.
+    let tools = if settings.agent_mode == AgentMode::Auto {
+        serde_json::to_string(&all_tool_defs()).unwrap_or_default()
+    } else {
+        String::new()
+    };
 
     let window = provider.context_window();
     let used = estimate_tokens(&system) + estimate_tokens(&context) + estimate_tokens(&tools);
@@ -252,6 +275,7 @@ pub fn context_stats(
         used_tokens: used,
         window_tokens: window,
         ratio: used as f32 / window.max(1) as f32,
+        exact: false,
         live_messages: thread
             .as_ref()
             .map(|t| t.live_messages(settings.history_limit).len())
@@ -338,6 +362,226 @@ pub async fn compact_context(
     Ok(thread.context_summary.clone())
 }
 
+/// One letter, ready for the operator to read and send.
+#[derive(Debug, Clone, Serialize)]
+pub struct Letter {
+    pub man_id: String,
+    pub name: String,
+    pub text: String,
+    pub usage: Usage,
+    /// Set instead of `text` when this one could not be written.
+    #[serde(default)]
+    pub error: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct LettersInput {
+    pub model_id: String,
+    /// Whom to write to. Empty means everyone in the profile.
+    #[serde(default)]
+    pub man_ids: Vec<String>,
+    /// A temporary chat keeps nothing, letters included.
+    #[serde(default)]
+    pub temporary: bool,
+    /// What the letters are about; empty lets her write what comes next.
+    #[serde(default)]
+    pub brief: String,
+    #[serde(default)]
+    pub channel: Option<String>,
+    #[serde(default)]
+    pub thinking_effort: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LettersOutput {
+    pub letters: Vec<Letter>,
+    pub usage: Usage,
+    pub key_index: usize,
+}
+
+/// Write to several men in one go, each letter in her voice and about him.
+///
+/// One call per man rather than one call for all of them: a batch prompt makes
+/// the model average the letters together, which is exactly what an operator
+/// sending a round of messages must not have.
+pub async fn write_letters(deps: &AgentDeps<'_>, input: LettersInput) -> Result<LettersOutput> {
+    let scope = deps.paths.scope(&input.model_id)?;
+    let profile = scope.read_profile()?;
+
+    let men: Vec<Man> = if input.man_ids.is_empty() {
+        scope.read_all_men()?
+    } else {
+        input
+            .man_ids
+            .iter()
+            .filter_map(|id| scope.read_man(id).ok())
+            .collect()
+    };
+    if men.is_empty() {
+        return Err(AppError::message("error.noRecipients", json!({})));
+    }
+
+    let mut letters = vec![];
+    let mut usage = Usage::default();
+    let mut key_index = 0usize;
+
+    for (index, man) in men.iter().enumerate() {
+        (deps.emit)(json!({
+            "kind": "letter_progress",
+            "done": index,
+            "total": men.len(),
+            "name": man.name,
+        }));
+
+        let thread = scope.read_chat(&man.id).ok();
+        let system = prompts::build_system(
+            &profile,
+            Some(man),
+            &[],
+            &deps.settings.trusted_roots,
+            AgentMode::Letters,
+            deps.settings.security_level,
+            &deps.settings.global_style_rules,
+            &deps.settings.ui_language,
+        );
+
+        let mut request = ChatRequest::new(system);
+        request.temperature = deps.provider.temperature;
+        request.max_output_tokens = deps.provider.max_output_tokens;
+        request.thinking = thinking_for(deps.provider, input.thinking_effort.as_deref());
+
+        let mut ask = prompts::context_block(thread.as_ref(), deps.settings.history_limit);
+        if let Some(channel) = &input.channel {
+            ask.push_str(&format!("Channel: {channel}\n"));
+        }
+        ask.push_str(if input.brief.trim().is_empty() {
+            "Write the next letter from her to him."
+        } else {
+            "What this letter is about:\n"
+        });
+        if !input.brief.trim().is_empty() {
+            ask.push_str(input.brief.trim());
+        }
+        request.messages.push(LlmMessage::user(ask));
+
+        match deps
+            .llm
+            .chat(deps.provider, deps.pool.clone(), &request, deps.emit)
+            .await
+        {
+            Ok(response) => {
+                usage.prompt_tokens += response.usage.prompt_tokens;
+                usage.completion_tokens += response.usage.completion_tokens;
+                usage.total_tokens += response.usage.total_tokens;
+                key_index = response.key_index;
+                letters.push(Letter {
+                    man_id: man.id.clone(),
+                    name: man.name.clone(),
+                    text: response.text.trim().to_string(),
+                    usage: response.usage,
+                    error: String::new(),
+                });
+            }
+            // One failure does not cost the operator the whole round.
+            Err(err) => letters.push(Letter {
+                man_id: man.id.clone(),
+                name: man.name.clone(),
+                text: String::new(),
+                usage: Usage::default(),
+                error: err.to_string(),
+            }),
+        }
+    }
+
+    // The letters belong to the conversation they were asked for in: writing to
+    // one man files them in his chat, a round files them in the profile's.
+    // Without this they lived only on screen and were gone on the next switch.
+    if !input.temporary {
+        let target = if input.man_ids.len() == 1 {
+            input.man_ids.first().map(String::as_str)
+        } else {
+            None
+        };
+
+        if !input.brief.trim().is_empty() {
+            let _ = scope.append_agent_entry(target, AgentEntry::new("user", input.brief.clone()));
+        }
+        for letter in &letters {
+            let mut entry = AgentEntry::new(
+                "assistant",
+                if letter.error.is_empty() {
+                    letter.text.clone()
+                } else {
+                    letter.error.clone()
+                },
+            );
+            entry.meta = json!({
+                "letter": true,
+                "man_id": letter.man_id,
+                "recipient": letter.name,
+                "failed": !letter.error.is_empty(),
+                "usage": letter.usage,
+            });
+            let _ = scope.append_agent_entry(target, entry);
+        }
+    }
+
+    Ok(LettersOutput {
+        letters,
+        usage,
+        key_index,
+    })
+}
+
+/// The request the next scoped run would send, minus the operator's message.
+///
+/// Built here so the gauge measures the same thing the run sends: anything
+/// that drifts between the two makes the figure a lie.
+pub fn next_request(
+    scope: &Scope,
+    settings: &Settings,
+    provider: &ProviderConfig,
+    man_id: Option<&str>,
+) -> Result<ChatRequest> {
+    let profile = scope.read_profile()?;
+    let man = man_id.and_then(|id| scope.read_man(id).ok());
+    let roster = if man.is_some() {
+        Vec::new()
+    } else {
+        scope.read_all_men().unwrap_or_default()
+    };
+    let thread = man_id.and_then(|id| scope.read_chat(id).ok());
+
+    let system = prompts::build_system(
+        &profile,
+        man.as_ref(),
+        &roster,
+        &settings.trusted_roots,
+        settings.agent_mode,
+        settings.security_level,
+        &settings.global_style_rules,
+        &settings.ui_language,
+    );
+
+    let mut request = ChatRequest::new(system);
+    request.temperature = provider.temperature;
+    if settings.agent_mode == AgentMode::Auto {
+        request.tools = all_tool_defs();
+    }
+    let context = prompts::context_block(thread.as_ref(), settings.history_limit);
+    if !context.is_empty() {
+        request.messages.push(LlmMessage::user(context));
+    }
+    Ok(request)
+}
+
+/// Everything an AUTO run declares: the profile tools plus files and commands.
+pub fn all_tool_defs() -> Vec<crate::llm::ToolDef> {
+    let mut defs = tools::tool_defs();
+    defs.extend(workspace_tools::tool_defs());
+    defs
+}
+
 async fn run_auto(
     deps: &AgentDeps<'_>,
     scope: &Scope,
@@ -346,8 +590,7 @@ async fn run_auto(
     input: RunInput,
     mut request: ChatRequest,
 ) -> Result<RunOutput> {
-    request.tools = tools::tool_defs();
-    request.tools.extend(workspace_tools::tool_defs());
+    request.tools = all_tool_defs();
 
     let mut steps: Vec<RunStep> = vec![];
     let mut pending: Vec<PendingAction> = vec![];
@@ -356,6 +599,7 @@ async fn run_auto(
     let mut reply = String::new();
     let mut thoughts = String::new();
     let mut reply_key = String::new();
+    let mut model = String::new();
     let mut turns = 0usize;
 
     for turn in 0..deps.settings.max_tool_turns.max(1) {
@@ -369,6 +613,7 @@ async fn run_auto(
         usage.completion_tokens += response.usage.completion_tokens;
         usage.total_tokens += response.usage.total_tokens;
         key_index = response.key_index;
+        model = response.model.clone();
         if !response.thoughts.is_empty() {
             if !thoughts.is_empty() {
                 thoughts.push_str("\n\n");
@@ -462,8 +707,8 @@ async fn run_auto(
     }
 
     finish(
-        scope, mode, security, input, reply, reply_key, thoughts, steps, pending, usage, key_index,
-        turns,
+        scope, mode, security, input, reply, reply_key, model, thoughts, steps, pending, usage,
+        key_index, turns,
     )
 }
 
@@ -475,13 +720,33 @@ async fn run_single_turn(
     input: RunInput,
     mut request: ChatRequest,
 ) -> Result<RunOutput> {
-    request.force_json = true;
+    request.force_json = mode != AgentMode::Letters;
     request.tools = vec![];
 
     let response = deps
         .llm
         .chat(deps.provider, deps.pool.clone(), &request, deps.emit)
         .await?;
+
+    // A letter is prose: there is no JSON to parse and nothing to write to
+    // disk. The operator decides what to do with it.
+    if mode == AgentMode::Letters {
+        return finish(
+            scope,
+            mode,
+            security,
+            input,
+            response.text,
+            String::new(),
+            response.model.clone(),
+            response.thoughts,
+            vec![],
+            vec![],
+            response.usage,
+            response.key_index,
+            1,
+        );
+    }
 
     let parsed = extract_json_object(&response.text).ok_or_else(|| {
         AppError::Provider(format!(
@@ -523,6 +788,7 @@ async fn run_single_turn(
         input,
         reply,
         reply_key,
+        response.model.clone(),
         response.thoughts,
         steps,
         pending,
@@ -540,6 +806,7 @@ fn finish(
     input: RunInput,
     reply: String,
     reply_key: String,
+    model: String,
     thoughts: String,
     steps: Vec<RunStep>,
     pending: Vec<PendingAction>,
@@ -559,6 +826,7 @@ fn finish(
             "pending": pending.len(),
             "usage": usage,
             "thoughts": thoughts,
+            "model": model,
         });
         let _ = scope.append_agent_entry(man, entry);
     }
@@ -566,6 +834,7 @@ fn finish(
     Ok(RunOutput {
         reply,
         reply_key,
+        model,
         thoughts,
         mode,
         security,

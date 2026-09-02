@@ -198,10 +198,17 @@ export function renderChat() {
         /** the model's own account of its reasoning */
         thoughts?: string;
         thinkingSince?: number;
+        /** which model answered, when a fallback took over */
+        model?: string;
+        /** letters carry their recipient */
+        letter?: boolean;
+        recipient?: string;
+        failed?: boolean;
       };
       const steps = Array.isArray(meta.steps) ? meta.steps.map(stepHtml).join("") : "";
       const extras: string[] = [];
       if (meta.mode) extras.push(String(meta.mode).toUpperCase());
+      if (meta.model) extras.push(t("chat.viaModel", { model: meta.model }));
       if (typeof meta.key_index === "number") extras.push(t("chat.key", { n: meta.key_index + 1 }));
       if (typeof meta.turns === "number" && meta.turns > 1)
         extras.push(t("chat.turns", { n: meta.turns }));
@@ -226,9 +233,15 @@ export function renderChat() {
           `<span>${escapeHtml(meta.note || t("chat.working"))}</span></div>`
         : "";
 
+      const recipient = meta.letter
+        ? `<div class="letter-to${meta.failed ? " failed" : ""}">${escapeHtml(
+            t("letters.to", { name: meta.recipient ?? "" }),
+          )}</div>`
+        : "";
+
       return (
         `<div class="msg ${entry.sender}" data-entry="${escapeHtml(entry.id)}">` +
-        `<div class="bubble">${thinking}<span class="bubble-text">${escapeHtml(entry.text)}</span>` +
+        `<div class="bubble">${recipient}${thinking}<span class="bubble-text">${escapeHtml(entry.text)}</span>` +
         `${steps}${working}${usageLine(meta.usage, extras)}${actions}</div></div>`
       );
     })

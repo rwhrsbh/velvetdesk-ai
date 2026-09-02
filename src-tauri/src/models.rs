@@ -97,6 +97,11 @@ pub struct Profile {
     pub system_prompt_override: String,
     #[serde(default)]
     pub tone_rules: Vec<String>,
+    /// Letters she has written, or the operator's idea of how she writes.
+    /// Rules describe a voice; examples are the voice, and a model copies one
+    /// far more reliably than it follows the other.
+    #[serde(default)]
+    pub writing_samples: Vec<String>,
     #[serde(default)]
     pub banned_phrases: Vec<String>,
     #[serde(default)]
@@ -122,6 +127,7 @@ impl Profile {
             bio: String::new(),
             system_prompt_override: String::new(),
             tone_rules: vec![],
+            writing_samples: vec![],
             banned_phrases: vec![],
             languages: vec!["en".into()],
             facts: vec![],
@@ -158,6 +164,13 @@ impl Profile {
             for r in &self.tone_rules {
                 out.push_str(&format!("- {}\n", r));
             }
+        }
+        if !self.writing_samples.is_empty() {
+            out.push_str("how she writes — her own letters, copy this voice:\n");
+            for sample in self.writing_samples.iter().take(5) {
+                out.push_str(&format!("---\n{}\n", sample.trim()));
+            }
+            out.push_str("---\n");
         }
         if !self.banned_phrases.is_empty() {
             out.push_str(&format!(

@@ -88,6 +88,23 @@ somebody else — including a man who has no dossier yet — goes into
 Entries in \"men\" are matched by id, then by name; unknown ones are created.
 Omit any patch field you have nothing new for. Never fabricate facts to fill it."
         }
+        AgentMode::Letters => {
+            "\
+Mode: LETTERS. Write one letter from her to him, ready to send. Answer with the
+letter text and nothing else — no subject line, no greeting template, no
+signature block, no commentary, no quotes around it.
+
+The voice is hers, taken from her persona and her sample letters above: her
+sentence length, her punctuation, her way of starting and ending. Do not write
+like an assistant being helpful.
+
+Ground it in what is known about him — his name, his life, what he last said,
+what he cares about — and never invent a fact about either of them. If the
+operator gave a brief, it is what the letter is about; without one, write what
+she would plausibly write next in this correspondence.
+
+Write in his language."
+        }
         AgentMode::Memorize => {
             "\
 Mode: MEMORIZE. The operator is dictating raw facts. Produce NO outgoing

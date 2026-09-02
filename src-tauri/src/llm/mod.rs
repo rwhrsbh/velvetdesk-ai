@@ -154,6 +154,9 @@ pub struct Usage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatResponse {
     pub text: String,
+    /// Which model answered — the first of the chain, or a fallback.
+    #[serde(default)]
+    pub model: String,
     /// The model's summary of its own reasoning, when it reports one.
     #[serde(default)]
     pub thoughts: String,
@@ -230,8 +233,56 @@ impl LlmClient {
         LlmClient { http }
     }
 
-    /// Send a chat request, rotating API keys on rate limits and server errors.
+    /// Send a chat request, working down the provider's list of models and
+    /// rotating its keys within each one.
+    ///
+    /// Quotas are per model, not per key: when every key has been refused by
+    /// one model, the next model in the list starts again with the first key.
+    /// Cooldowns are dropped at that point for the same reason — a key parked
+    /// for quota on one model has a fresh quota on the next.
     pub async fn chat(
+        &self,
+        provider: &ProviderConfig,
+        pool: Arc<KeyPool>,
+        request: &ChatRequest,
+        on_event: &(dyn Fn(Value) + Send + Sync),
+    ) -> Result<ChatResponse> {
+        let models = provider.models();
+        let mut last_error = AppError::Provider("no model was tried".into());
+
+        for (index, model) in models.iter().enumerate() {
+            let mut attempt_provider = provider.clone();
+            attempt_provider.model = model.clone();
+
+            match self
+                .chat_one_model(&attempt_provider, pool.clone(), request, on_event)
+                .await
+            {
+                Ok(mut response) => {
+                    response.model = model.clone();
+                    return Ok(response);
+                }
+                Err(err) => {
+                    last_error = err;
+                    let Some(next) = models.get(index + 1) else {
+                        break;
+                    };
+                    on_event(serde_json::json!({
+                        "kind": "model_switch",
+                        "from": model,
+                        "to": next,
+                        "reason": last_error.to_string(),
+                    }));
+                    pool.clear_cooldowns();
+                }
+            }
+        }
+
+        Err(last_error)
+    }
+
+    /// One model, every key it has.
+    async fn chat_one_model(
         &self,
         provider: &ProviderConfig,
         pool: Arc<KeyPool>,

@@ -13,7 +13,15 @@ import { openManForm, openProfileForm } from "./forms";
 import { openDoctorModal, openPendingModal } from "./modals";
 import { loadModel, SilentClipError, transcribeLocally } from "./local-whisper";
 import { openKeysModal } from "./provider-modal";
-import { activeMan, activeProfile, makeEntry, pushEntry, store, type UiEntry } from "./store";
+import {
+  activeMan,
+  activeProfile,
+  makeEntry,
+  pushEntry,
+  store,
+  visibleMen,
+  type UiEntry,
+} from "./store";
 import type { AgentMode, RunStep, SecurityLevel, Settings } from "./types";
 import {
   renderAll,
@@ -149,6 +157,13 @@ async function sendMessage() {
   const typed = ($("composerInput") as HTMLTextAreaElement).value.trim();
   if (typed.startsWith("/") && (await runSlashCommand(typed))) return;
 
+  // Letters are not a conversation: the brief goes to one man or to a whole
+  // list, and each letter comes back as its own card.
+  if (store.mode === "letters" && !store.master) {
+    await writeLetters(typed);
+    return;
+  }
+
   if (store.master) {
     if (!typed || store.busy) return;
     const input = $("composerInput") as HTMLTextAreaElement;
@@ -204,6 +219,7 @@ async function sendMessage() {
         steps: output.steps as unknown as RunStep[],
         usage: output.usage,
         mode: output.mode,
+        model: output.model,
         key_index: output.key_index,
         turns: output.turns,
         thoughts,
@@ -617,14 +633,18 @@ function bindPanels() {
     }
 
     if (btn.dataset.act === "send-as-outgoing") {
-      if (!store.activeModelId || !store.activeManId) {
+      // A letter carries its own recipient; a chat reply belongs to whoever is
+      // open.
+      const meta = (entry.meta ?? {}) as { man_id?: string };
+      const manId = meta.man_id ?? store.activeManId;
+      if (!store.activeModelId || !manId) {
         toast(t("toast.pickMan"), "error");
         return;
       }
       try {
         await api.appendMessage({
           model_id: store.activeModelId,
-          man_id: store.activeManId,
+          man_id: manId,
           role: "outgoing",
           channel: store.channel,
           text: entry.text,
@@ -693,9 +713,9 @@ function profileEntries(modelId: string): MenuEntry[] {
   const profile = store.profiles.find((p) => p.id === modelId);
   if (!profile) return [];
   return [
-    { label: t("ctx.open"), onSelect: () => void selectProfile(modelId) },
+    { label: t("ctx.openChat"), onSelect: () => void selectProfile(modelId) },
     {
-      label: t("ctx.edit"),
+      label: t("ctx.openProfile"),
       onSelect: async () => {
         if (modelId !== store.activeModelId) await selectProfile(modelId);
         void openProfileForm(deps, activeProfile());
@@ -739,9 +759,11 @@ function manEntries(manId: string): MenuEntry[] {
   const man = store.men.find((m) => m.id === manId);
   if (!man) return [];
   return [
-    { label: t("ctx.openDossier"), onSelect: () => void selectMan(manId) },
+    // Two different things, and naming both "open" made one of them look
+    // broken: his chat is what the rail switches to, his dossier is a card.
+    { label: t("ctx.openChat"), onSelect: () => void selectMan(manId) },
     {
-      label: t("ctx.edit"),
+      label: t("ctx.openDossier"),
       onSelect: async () => {
         if (manId !== store.activeManId) await selectMan(manId);
         void openManForm(deps, activeMan());
@@ -904,24 +926,31 @@ function systemNote(key: string, params: Record<string, string | number> = {}) {
 /** Redraw the "how full is the model's context" gauge for the open dossier. */
 async function refreshContextGauge() {
   const gauge = $("ctxGauge");
-  if (!store.activeModelId || !store.activeManId) {
+  // Whichever chat is open is the one measured: the master carries its own
+  // conversation into every turn, a profile chat carries the correspondence.
+  if (!store.master && !store.activeModelId) {
     gauge.hidden = true;
     return;
   }
   try {
-    const stats = await api.contextStats(store.activeModelId, store.activeManId);
+    const stats = store.master
+      ? await api.masterContextStats()
+      : await api.contextStats(store.activeModelId!, store.activeManId);
     store.context = stats;
     const percent = Math.min(100, Math.round(stats.ratio * 100));
     gauge.hidden = false;
     gauge.classList.toggle("warn", stats.ratio >= (store.settings?.auto_compact_at ?? 0.85));
     $("ctxFill").style.width = `${percent}%`;
     $("ctxLabel").textContent = `${percent}%`;
-    gauge.title = t("composer.contextDetail", {
-      used: stats.used_tokens,
-      window: stats.window_tokens,
-      live: stats.live_messages,
-      total: stats.total_messages,
-    });
+    gauge.title = t(
+      store.master ? "composer.contextDetailChat" : "composer.contextDetail",
+      {
+        used: stats.used_tokens,
+        window: stats.window_tokens,
+        live: stats.live_messages,
+        total: stats.total_messages,
+      },
+    );
   } catch {
     gauge.hidden = true;
   }
@@ -1067,6 +1096,7 @@ async function toggleMasterChat() {
   $("btnMaster").classList.toggle("active", store.master);
   store.entries = [];
 
+  void refreshContextGauge();
   if (store.master) {
     try {
       const log = await api.getMasterLog();
@@ -1110,6 +1140,77 @@ async function sendToMaster(text: string) {
     store.profiles = await api.listProfiles();
     store.pending = await api.pendingList();
     if (store.activeModelId) store.men = await api.listMen(store.activeModelId);
+  } catch (error) {
+    store.entries = store.entries.filter((e) => !e.transient);
+    pushEntry(makeEntry("system", t("chat.error", { message: errorText(error) })));
+    toast(errorText(error), "error");
+  } finally {
+    store.busy = false;
+    ($("btnSend") as HTMLButtonElement).disabled = false;
+    renderAll();
+    void refreshContextGauge();
+  }
+}
+
+/**
+ * Write to the open dossier, or to everyone the rail is showing.
+ *
+ * Each letter is a separate request so it is written for its man rather than
+ * averaged across the list; a long round is confirmed first, because it costs
+ * one call per recipient.
+ */
+async function writeLetters(brief: string) {
+  if (!store.activeModelId) {
+    toast(t("toast.pickProfile"), "error");
+    return;
+  }
+  if (store.busy) return;
+
+  const recipients = store.activeManId ? [store.activeManId] : visibleMen().map((m) => m.id);
+  if (recipients.length === 0) {
+    toast(t("letters.noRecipients"), "error");
+    return;
+  }
+  if (recipients.length > 5) {
+    const ok = await confirmDialog({
+      title: t("letters.confirmTitle"),
+      body: t("letters.confirmBody", { n: recipients.length }),
+      confirmLabel: t("letters.write"),
+    });
+    if (!ok) return;
+  }
+
+  const input = $("composerInput") as HTMLTextAreaElement;
+  input.value = "";
+  input.style.height = "auto";
+  store.busy = true;
+  ($("btnSend") as HTMLButtonElement).disabled = true;
+  if (brief) pushEntry(makeEntry("user", brief));
+  pushEntry(makeEntry("system", t("letters.writing", { n: recipients.length }), null, true));
+  renderChat();
+  renderScope();
+
+  try {
+    const output = await api.writeLetters({
+      model_id: store.activeModelId,
+      man_ids: store.activeManId ? recipients : [],
+      brief,
+      channel: store.channel,
+      thinking_effort: store.thinking || undefined,
+      temporary: store.temporary,
+    });
+    store.entries = store.entries.filter((e) => !e.transient);
+    for (const letter of output.letters) {
+      pushEntry(
+        makeEntry("assistant", letter.error || letter.text, {
+          letter: true,
+          man_id: letter.man_id,
+          recipient: letter.name,
+          failed: Boolean(letter.error),
+          usage: letter.usage,
+        }),
+      );
+    }
   } catch (error) {
     store.entries = store.entries.filter((e) => !e.transient);
     pushEntry(makeEntry("system", t("chat.error", { message: errorText(error) })));

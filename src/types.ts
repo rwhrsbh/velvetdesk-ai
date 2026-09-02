@@ -1,4 +1,4 @@
-export type AgentMode = "auto" | "act" | "memorize";
+export type AgentMode = "auto" | "act" | "memorize" | "letters";
 export type SecurityLevel = "ask" | "safe" | "yolo";
 export type Risk = "read" | "write" | "destructive";
 export type MsgRole = "incoming" | "outgoing" | "note";
@@ -28,6 +28,21 @@ export interface Gift {
   date: string;
 }
 
+/** One letter, written for one man. */
+export interface Letter {
+  man_id: string;
+  name: string;
+  text: string;
+  usage: Usage;
+  error: string;
+}
+
+export interface LettersOutput {
+  letters: Letter[];
+  usage: Usage;
+  key_index: number;
+}
+
 export interface Profile {
   id: string;
   name: string;
@@ -37,6 +52,7 @@ export interface Profile {
   bio: string;
   system_prompt_override: string;
   tone_rules: string[];
+  writing_samples: string[];
   banned_phrases: string[];
   languages: string[];
   facts: Fact[];
@@ -129,6 +145,8 @@ export interface PendingAction {
 
 export interface RunOutput {
   reply: string;
+  /** Which model answered — the chosen one, or a fallback. */
+  model?: string;
   /** Set when the reply is the app's own words; the dictionary holds them. */
   reply_key?: string;
   /** The model's own summary of its reasoning, when it reports one. */
@@ -180,6 +198,8 @@ export interface ProviderConfig {
   transcribe_model: string;
   thinking_effort: string;
   thinking_budget: number | null;
+  /** Models to fall back to, in order, when the one above will not answer. */
+  model_chain: string[];
   reasoning_dialect: string;
   context_tokens: number | null;
   key_count: number;

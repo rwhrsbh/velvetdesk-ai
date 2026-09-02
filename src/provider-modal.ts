@@ -57,11 +57,13 @@ function modelRows(models: ModelInfo[], selected: string, query: string): string
     .slice(0, 200)
     .map(
       (m) =>
-        `<button type="button" class="model-row${m.id === selected ? " active" : ""}" data-model="${escapeHtml(m.id)}">` +
-        `<span class="model-name">${escapeHtml(m.label)}</span>` +
+        `<div class="model-row${m.id === selected ? " active" : ""}">` +
+        `<button type="button" class="model-pick" data-model="${escapeHtml(m.id)}">` +
+        `<span class="model-name">${escapeHtml(m.label)}</span></button>` +
         (m.free ? `<span class="tag free">${t("keys.free")}</span>` : "") +
         (m.audio ? `<span class="tag">${t("keys.audioTag")}</span>` : "") +
-        `</button>`,
+        `<button type="button" class="btn-icon" data-chain-add="${escapeHtml(m.id)}" title="${t("keys.chainAdd")}">+</button>` +
+        `</div>`,
     )
     .join("");
 }
@@ -235,6 +237,13 @@ export async function openKeysModal(deps: ModalDeps) {
           </button>
         </div>
         ${catalog ? `<div class="model-list" id="modelList">${modelOptions}</div>` : ""}
+      </div>
+
+      <div class="field">
+        <label>${t("keys.chain")}
+          <span class="hint-inline">${t("keys.chainHint")}</span>
+        </label>
+        <div class="chain-list" id="chainList"></div>
       </div>
 
       <div class="field">
@@ -545,10 +554,54 @@ export async function openKeysModal(deps: ModalDeps) {
       list.innerHTML = modelRows(catalog.models, chosenModel, search?.value ?? "");
     };
     search?.addEventListener("input", redrawModels);
+
+    // The chain: which model answers when the one above will not.
+    let chain = [...(p.model_chain ?? [])];
+    const chainBox = card.querySelector<HTMLElement>("#chainList");
+    const drawChain = () => {
+      if (!chainBox) return;
+      chainBox.innerHTML = chain.length
+        ? chain
+            .map(
+              (id, index) =>
+                `<div class="chain-row"><span class="chain-order">${index + 2}</span>` +
+                `<span class="model-name">${escapeHtml(id)}</span>` +
+                `<button class="btn-icon" data-chain-up="${index}" title="${t("keys.chainUp")}">↑</button>` +
+                `<button class="btn-icon" data-chain-out="${index}" title="${t("keys.chainRemove")}">✕</button></div>`,
+            )
+            .join("")
+        : `<div class="empty-hint">${t("keys.chainEmpty")}</div>`;
+    };
+    drawChain();
+
+    chainBox?.addEventListener("click", (event) => {
+      const target = event.target as HTMLElement;
+      const up = target.closest<HTMLElement>("[data-chain-up]")?.dataset.chainUp;
+      const out = target.closest<HTMLElement>("[data-chain-out]")?.dataset.chainOut;
+      if (up !== undefined) {
+        const index = Number(up);
+        if (index > 0) [chain[index - 1], chain[index]] = [chain[index], chain[index - 1]];
+      } else if (out !== undefined) {
+        chain.splice(Number(out), 1);
+      } else {
+        return;
+      }
+      drawChain();
+    });
+
     list?.addEventListener("click", (event) => {
-      const row = (event.target as HTMLElement).closest<HTMLElement>("[data-model]");
+      const target = event.target as HTMLElement;
+      const add = target.closest<HTMLElement>("[data-chain-add]")?.dataset.chainAdd;
+      if (add) {
+        if (!chain.includes(add) && add !== chosenModel) chain.push(add);
+        drawChain();
+        return;
+      }
+      const row = target.closest<HTMLElement>("[data-model]");
       if (!row?.dataset.model) return;
       chosenModel = row.dataset.model;
+      chain = chain.filter((id) => id !== chosenModel);
+      drawChain();
       redrawModels();
     });
 
@@ -659,6 +712,7 @@ export async function openKeysModal(deps: ModalDeps) {
         base_url: card.querySelector<HTMLInputElement>("#baseUrl")?.value.trim() ?? p.base_url,
         api_version: card.querySelector<HTMLInputElement>("#apiVersion")?.value.trim() ?? p.api_version,
         temperature: Number(card.querySelector<HTMLInputElement>("#temperature")?.value ?? p.temperature),
+        model_chain: chain,
         thinking_budget: numberOrNull("#thinkingBudget"),
         context_tokens: numberOrNull("#contextTokens"),
         reasoning_dialect:

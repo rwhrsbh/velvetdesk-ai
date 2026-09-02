@@ -35,9 +35,32 @@ html.forEach((line, index) => {
   problems.push(`index.html:${index + 1} holds untranslated text: ${line.trim()}`);
 });
 
+// 4. Every key the interface asks for has to exist. A missing one shows up as
+//    the key itself in a tooltip, which is how `rail.deselect` shipped.
+const known = new Set([...ru]);
+const referenced = new Map();
+const note = (key, where) => {
+  if (!referenced.has(key)) referenced.set(key, where);
+};
+
+for (const [, key] of html.join("\n").matchAll(/data-i18n(?:-\w+)?="([\w.@-]+)"/g)) {
+  note(key, "index.html");
+}
+for (const file of readdirSync("src").filter((f) => f.endsWith(".ts") && f !== "i18n.ts")) {
+  const source = readFileSync(join("src", file), "utf8");
+  // Literal keys only: a computed one cannot be checked from here.
+  for (const [, key] of source.matchAll(/\bt\(\s*"([\w.@-]+)"/g)) note(key, file);
+}
+
+for (const [key, where] of referenced) {
+  if (!known.has(key)) problems.push(`${where} asks for a key nothing defines: ${key}`);
+}
+
 if (problems.length > 0) {
   console.error(problems.join("\n"));
   console.error(`\n${problems.length} problems`);
   process.exit(1);
 }
-console.log(`i18n ok: ${ru.size} keys in both languages, no stray text`);
+console.log(
+  `i18n ok: ${ru.size} keys in both languages, ${referenced.size} referenced, no stray text`,
+);

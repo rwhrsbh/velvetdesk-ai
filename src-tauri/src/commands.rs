@@ -92,6 +92,8 @@ pub struct NewProfile {
     #[serde(default)]
     pub tone_rules: Option<Vec<String>>,
     #[serde(default)]
+    pub writing_samples: Option<Vec<String>>,
+    #[serde(default)]
     pub banned_phrases: Option<Vec<String>>,
 }
 
@@ -123,6 +125,7 @@ pub fn create_profile(state: State<'_, AppState>, input: NewProfile) -> Result<P
         }
     }
     profile.tone_rules = input.tone_rules.unwrap_or_default();
+    profile.writing_samples = input.writing_samples.unwrap_or_default();
     profile.banned_phrases = input.banned_phrases.unwrap_or_default();
     scope.write_profile(&profile)?;
     storage::rebuild_index(&state.paths)?;
@@ -289,7 +292,7 @@ pub async fn run_agent(
 /// What the correspondence currently costs, so the UI can show a gauge and
 /// the operator knows when compaction is due.
 #[tauri::command]
-pub fn context_stats(
+pub async fn context_stats(
     state: State<'_, AppState>,
     model_id: String,
     man_id: Option<String>,
@@ -297,7 +300,39 @@ pub fn context_stats(
     let settings = state.settings_view();
     let provider = state.active_provider()?;
     let scope = state.paths.scope(&model_id)?;
-    agent::context_stats(&scope, &settings, &provider, man_id.as_deref())
+    let mut stats = agent::context_stats(&scope, &settings, &provider, man_id.as_deref())?;
+
+    if let Ok(request) = agent::next_request(&scope, &settings, &provider, man_id.as_deref()) {
+        count_exactly(&state, &provider, &request, &mut stats).await;
+    }
+    Ok(stats)
+}
+
+/// Replace the estimate with the provider's own count, when it offers one.
+///
+/// Gemini's `countTokens` uses the tokenizer that does the real work and costs
+/// no generation quota. A failure here is not worth surfacing: the gauge simply
+/// stays on the estimate, which is what it says it is.
+async fn count_exactly(
+    state: &State<'_, AppState>,
+    provider: &crate::config::ProviderConfig,
+    request: &crate::llm::ChatRequest,
+    stats: &mut agent::ContextStats,
+) {
+    if provider.kind != crate::config::ProviderKind::Gemini {
+        return;
+    }
+    let Some(lease) = state.pool(&provider.id).acquire() else {
+        return;
+    };
+    match crate::llm::gemini::count_tokens(&state.llm.http, provider, &lease.key, request).await {
+        Ok(tokens) => {
+            stats.used_tokens = tokens as usize;
+            stats.ratio = tokens as f32 / stats.window_tokens.max(1) as f32;
+            stats.exact = true;
+        }
+        Err(err) => eprintln!("countTokens unavailable: {}", err.message()),
+    }
 }
 
 /// Drop the correspondence from the prompt without deleting a single message
@@ -344,6 +379,29 @@ pub async fn compact_context(
 }
 
 /// The master chat: one conversation with access to every profile.
+/// Write to one man or to a whole list, each letter in her voice.
+#[tauri::command]
+pub async fn write_letters(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    input: agent::LettersInput,
+) -> Result<agent::LettersOutput> {
+    let settings = state.settings_view();
+    let provider = state.active_provider()?;
+    let pool = state.pool(&provider.id);
+    let emit = emitter(&app);
+
+    let deps = AgentDeps {
+        paths: &state.paths,
+        settings: &settings,
+        provider: &provider,
+        pool,
+        llm: &state.llm,
+        emit: &emit,
+    };
+    agent::write_letters(&deps, input).await
+}
+
 #[tauri::command]
 pub async fn master_chat(
     app: AppHandle,
@@ -369,6 +427,32 @@ pub async fn master_chat(
         state.pending.write().extend(output.pending.clone());
     }
     Ok(output)
+}
+
+/// What the master chat's next turn would cost.
+#[tauri::command]
+pub async fn master_context_stats(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<agent::ContextStats> {
+    let settings = state.settings_view();
+    let provider = state.active_provider()?;
+    let pool = state.pool(&provider.id);
+    let emit = emitter(&app);
+
+    let deps = AgentDeps {
+        paths: &state.paths,
+        settings: &settings,
+        provider: &provider,
+        pool,
+        llm: &state.llm,
+        emit: &emit,
+    };
+    let mut stats = agent::master::context_stats(&deps)?;
+    if let Ok(request) = agent::master::next_request(&deps) {
+        count_exactly(&state, &provider, &request, &mut stats).await;
+    }
+    Ok(stats)
 }
 
 #[tauri::command]

@@ -47,6 +47,11 @@ pub struct ProviderConfig {
     /// auto | openai | openrouter | qwen. Ignored for Gemini, which is native.
     #[serde(default = "default_dialect")]
     pub reasoning_dialect: String,
+    /// Models to try in order when the one above is unavailable. Quotas are
+    /// per model, not per key, so a day spent on one model is not a day spent
+    /// on the next.
+    #[serde(default)]
+    pub model_chain: Vec<String>,
     /// Context window in tokens. Empty falls back to a guess from the model
     /// name, which is what drives automatic compaction.
     #[serde(default)]
@@ -83,6 +88,19 @@ const CONTEXT_GUESSES: &[(&str, u32)] = &[
 ];
 
 impl ProviderConfig {
+    /// Every model this provider may answer with, in order: the chosen one
+    /// first, then the fallbacks, without repeats.
+    pub fn models(&self) -> Vec<String> {
+        let mut models = vec![self.model.trim().to_string()];
+        for fallback in &self.model_chain {
+            let fallback = fallback.trim();
+            if !fallback.is_empty() && !models.iter().any(|m| m == fallback) {
+                models.push(fallback.to_string());
+            }
+        }
+        models
+    }
+
     /// Context window used for the "how full is it" figure and for deciding
     /// when to compact.
     pub fn context_window(&self) -> u32 {
@@ -144,6 +162,8 @@ pub enum AgentMode {
     Act,
     /// One call: memory patch only, no visible reply.
     Memorize,
+    /// One call per man: a letter in her voice, nothing written to disk.
+    Letters,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -260,6 +280,7 @@ impl Default for Settings {
                     transcribe_model: String::new(),
                     thinking_effort: String::new(),
                     thinking_budget: None,
+                    model_chain: vec![],
                     reasoning_dialect: default_dialect(),
                     context_tokens: None,
                     key_count: 0,
@@ -277,6 +298,7 @@ impl Default for Settings {
                     transcribe_model: String::new(),
                     thinking_effort: String::new(),
                     thinking_budget: None,
+                    model_chain: vec![],
                     reasoning_dialect: default_dialect(),
                     context_tokens: None,
                     key_count: 0,
@@ -294,6 +316,7 @@ impl Default for Settings {
                     transcribe_model: "whisper-large-v3-turbo".into(),
                     thinking_effort: String::new(),
                     thinking_budget: None,
+                    model_chain: vec![],
                     reasoning_dialect: default_dialect(),
                     context_tokens: None,
                     key_count: 0,
@@ -392,3 +415,34 @@ fn restrict_permissions(path: &std::path::Path) {
 
 #[cfg(not(unix))]
 fn restrict_permissions(_path: &std::path::Path) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The chain is "this one, then these", with no repeats: a fallback that
+    /// names the primary again would waste a whole round of keys on it.
+    #[test]
+    fn the_model_chain_starts_with_the_chosen_model() {
+        let mut provider = Settings::default().providers[0].clone();
+        provider.model = "gemini-3.5-flash".into();
+        provider.model_chain = vec![
+            "gemini-3.5-flash".into(),
+            " gemini-3.5-flash-lite ".into(),
+            String::new(),
+            "gemini-2.5-flash".into(),
+        ];
+
+        assert_eq!(
+            provider.models(),
+            vec![
+                "gemini-3.5-flash".to_string(),
+                "gemini-3.5-flash-lite".to_string(),
+                "gemini-2.5-flash".to_string(),
+            ]
+        );
+
+        provider.model_chain.clear();
+        assert_eq!(provider.models(), vec!["gemini-3.5-flash".to_string()]);
+    }
+}

@@ -160,6 +160,8 @@ pub async fn call_streaming(
 
     Ok(ChatResponse {
         text: text.trim().to_string(),
+        // The caller fills this in: it knows which model of the chain this was.
+        model: String::new(),
         thoughts: thoughts.trim().to_string(),
         tool_calls,
         usage,
@@ -396,6 +398,8 @@ fn parse_response(value: &Value) -> Result<ChatResponse, CallError> {
 
     Ok(ChatResponse {
         text: text.trim().to_string(),
+        // The caller fills this in: it knows which model of the chain this was.
+        model: String::new(),
         thoughts,
         tool_calls,
         usage,
@@ -429,6 +433,7 @@ mod tests {
             transcribe_model: String::new(),
             thinking_effort: String::new(),
             thinking_budget: None,
+            model_chain: vec![],
             reasoning_dialect: "auto".into(),
             context_tokens: None,
             key_count: 1,

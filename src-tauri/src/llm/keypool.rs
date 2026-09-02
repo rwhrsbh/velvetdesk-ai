@@ -129,6 +129,19 @@ impl KeyPool {
             .min()
     }
 
+    /// Forget every cooldown.
+    ///
+    /// Called when the caller moves on to another model: a key parked for
+    /// quota on one model has a fresh quota on the next, and leaving it parked
+    /// would make the fallback useless.
+    pub fn clear_cooldowns(&self) {
+        let mut inner = self.inner.lock();
+        for key in inner.keys.iter_mut() {
+            key.cooldown_until = None;
+            key.failures = 0;
+        }
+    }
+
     pub fn report_success(&self, index: usize) {
         let mut inner = self.inner.lock();
         if let Some(state) = inner.keys.get_mut(index) {
@@ -185,6 +198,20 @@ mod tests {
         assert_eq!(pool.acquire().unwrap().key, "b");
         assert_eq!(pool.acquire().unwrap().key, "c");
         assert_eq!(pool.acquire().unwrap().key, "a");
+    }
+
+    /// A key parked for quota on one model has a fresh quota on the next, so
+    /// moving down the chain releases them all.
+    #[test]
+    fn cooldowns_are_released_when_the_model_changes() {
+        let pool = KeyPool::new(vec!["a".into(), "b".into()]);
+        pool.report_failure(0, KeyVerdict::QuotaOrAuth);
+        pool.report_failure(1, KeyVerdict::QuotaOrAuth);
+        assert!(pool.acquire().is_none(), "both keys are cooling");
+
+        pool.clear_cooldowns();
+        let lease = pool.acquire().expect("a key is usable again");
+        assert_eq!(lease.index, 0, "and the first one is tried first");
     }
 
     #[test]

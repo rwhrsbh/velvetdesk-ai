@@ -651,13 +651,51 @@ input[type="range"] {
   align-items: center;
   gap: 7px;
   width: 100%;
-  padding: 6px 9px;
+  padding: 4px 9px;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 12.5px;
+}
+
+.model-pick {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 2px 0;
   background: transparent;
   border: none;
-  border-bottom: 1px solid var(--line-soft);
   text-align: left;
-  font-size: 12.5px;
+  color: inherit;
   cursor: default;
+}
+
+/* Fallbacks, in the order they will be tried. */
+.chain-list {
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  max-height: 140px;
+  overflow: auto;
+}
+
+.chain-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 9px;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 12px;
+}
+
+.chain-row:last-child {
+  border-bottom: none;
+}
+
+.chain-order {
+  flex: none;
+  width: 18px;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-faint);
 }
 
 .model-row:last-child {
@@ -684,6 +722,19 @@ input[type="range"] {
 .tag.free {
   background: rgba(48, 209, 88, 0.14);
   color: var(--ok);
+}
+
+/* Who a letter is for. */
+.letter-to {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+
+.letter-to.failed {
+  color: var(--danger);
 }
 
 /* The model's reasoning, folded away by default. */

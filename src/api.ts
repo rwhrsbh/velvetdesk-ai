@@ -4,6 +4,7 @@ import { t } from "./i18n";
 import type {
   Backup,
   ContextStats,
+  LettersOutput,
   MasterOutput,
   TrustedRoot,
   AgentLog,
@@ -53,6 +54,7 @@ export const api = {
     system_prompt_override?: string;
     languages?: string[];
     tone_rules?: string[];
+    writing_samples?: string[];
     banned_phrases?: string[];
   }) => invoke<Profile>("create_profile", { input }),
   getProfile: (modelId: string) => invoke<Profile>("get_profile", { modelId }),
@@ -81,12 +83,22 @@ export const api = {
     invoke<void>("clear_agent_log", { modelId, manId }),
 
   runAgent: (input: RunInput) => invoke<RunOutput>("run_agent", { input }),
+  writeLetters: (input: {
+    model_id: string;
+    man_ids?: string[];
+    brief?: string;
+    channel?: string;
+    thinking_effort?: string;
+    temporary?: boolean;
+  }) => invoke<LettersOutput>("write_letters", { input }),
+
   masterChat: (input: {
     message: string;
     security?: string;
     thinking_effort?: string;
     temporary?: boolean;
   }) => invoke<MasterOutput>("master_chat", { input }),
+  masterContextStats: () => invoke<ContextStats>("master_context_stats"),
   getMasterLog: () => invoke<AgentLog>("get_master_log"),
   clearMasterLog: () => invoke<void>("clear_master_log"),
 
