@@ -203,6 +203,7 @@ export interface Settings {
   speech_provider: string | null;
   speech_engine: "provider" | "local";
   local_speech_model: string;
+  speech_device: string;
   speech_language: string;
   auto_compact_at: number;
 }
@@ -295,4 +296,32 @@ export interface Bootstrap {
   profiles: Profile[];
   index: GlobalIndex;
   pending: PendingAction[];
+}
+
+/** A folder the operator has allowed agents into. */
+export interface TrustedRoot {
+  path: string;
+  writable: boolean;
+  granted_at: string;
+  reason: string;
+}
+
+/** A copy kept before an agent overwrote or deleted a file. */
+export interface Backup {
+  id: string;
+  original: string;
+  copy: string;
+  bytes: number;
+  reason: string;
+  created_at: string;
+}
+
+/** One turn of the cross-profile master chat. */
+export interface MasterOutput {
+  reply: string;
+  steps: RunStep[];
+  pending: PendingAction[];
+  usage: Usage;
+  key_index: number;
+  turns: number;
 }

@@ -101,6 +101,7 @@ drop a fact because no dossier exists yet: an entry in \"men\" creates one."
 pub fn build_system(
     profile: &Profile,
     man: Option<&Man>,
+    roster: &[Man],
     mode: AgentMode,
     security: SecurityLevel,
     global_rules: &str,
@@ -114,7 +115,9 @@ pub fn build_system(
         out.push_str(&man.dossier());
         out.push('\n');
     } else {
-        out.push_str("No target man is selected. Ask the operator which dossier to use, or use the tools to find him.\n\n");
+        // The profile-wide chat: no single target, so the agent gets the CRM
+        // itself and can answer about anyone without a round of tool calls.
+        out.push_str(&roster_block(roster));
     }
     out.push_str(&format!(
         "Storage sandbox: profiles/{}/ — you cannot read or write any other profile.\n\n",
@@ -127,6 +130,46 @@ pub fn build_system(
         out.push_str("\n\nHouse rules from the operator:\n");
         out.push_str(global_rules.trim());
     }
+    out
+}
+
+/// Everyone in this profile's CRM, one line each. Enough to reason about the
+/// roster; `get_man` still fetches the full dossier when it matters.
+fn roster_block(roster: &[Man]) -> String {
+    if roster.is_empty() {
+        return "This profile has no dossiers yet. Create one with create_man when the operator \
+                describes a man.\n\n"
+            .to_string();
+    }
+    let mut out =
+        String::from("No single man is selected — this is the profile-wide chat. The CRM holds:\n");
+    for man in roster.iter().take(120) {
+        let mut line = format!("- {} (id {})", man.name, man.id);
+        if let Some(age) = man.age {
+            line.push_str(&format!(", {age}"));
+        }
+        if !man.location.is_empty() {
+            line.push_str(&format!(", {}", man.location));
+        }
+        if !man.stage.is_empty() {
+            line.push_str(&format!(" · stage {}", man.stage));
+        }
+        if !man.status.is_empty() {
+            line.push_str(&format!(" · {}", man.status));
+        }
+        if !man.tags.is_empty() {
+            line.push_str(&format!(" · {}", man.tags.join(", ")));
+        }
+        out.push_str(&line);
+        out.push('\n');
+    }
+    if roster.len() > 120 {
+        out.push_str(&format!(
+            "…and {} more, use list_men.\n",
+            roster.len() - 120
+        ));
+    }
+    out.push_str("Read a full dossier with get_man before writing to him.\n\n");
     out
 }
 

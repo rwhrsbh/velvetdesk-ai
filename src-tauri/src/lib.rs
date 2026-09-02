@@ -8,6 +8,7 @@ pub mod models;
 pub mod state;
 pub mod storage;
 pub mod whisper;
+pub mod workspace;
 
 use tauri::Manager;
 
@@ -95,6 +96,14 @@ pub fn run() {
             commands::get_agent_log,
             commands::clear_agent_log,
             commands::run_agent,
+            commands::list_trusted_roots,
+            commands::trust_folder,
+            commands::revoke_folder,
+            commands::list_backups,
+            commands::restore_backup,
+            commands::master_chat,
+            commands::get_master_log,
+            commands::clear_master_log,
             commands::context_stats,
             commands::clear_context,
             commands::compact_context,

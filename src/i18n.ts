@@ -88,6 +88,7 @@ const ru: Dict = {
   "ctx.dictate": "Диктовать",
   "ctx.confirmClearLog": "Очистить историю агента этой анкеты?",
 
+  "chat.working": "работаю…",
   "chat.copy": "Копировать",
   "chat.asOutgoing": "Записать как отправленное",
   "chat.copied": "Скопировано",
@@ -122,6 +123,9 @@ const ru: Dict = {
   "toast.noMic": "Микрофон недоступен в этой сборке вебвью",
   "toast.micDenied": "Нет доступа к микрофону: {error}",
   "toast.silentClip": "Микрофон ничего не записал — проверь уровень и попробуй снова",
+  "composer.micDevice": "Микрофон",
+  "composer.micDefault": "микрофон по умолчанию",
+  "composer.micNumbered": "микрофон {n}",
   "composer.speechLang": "Язык диктовки",
   "composer.thinkingHint": "Сколько модель думает перед ответом",
   "composer.contextHint": "Заполнение контекста модели",
@@ -133,8 +137,17 @@ const ru: Dict = {
   "thinking.medium": "средне",
   "thinking.high": "глубоко",
   "thinking.xhigh": "максимум",
+  "composer.temporary": "временный",
+  "composer.temporaryHint":
+    "Временный чат: переписка с копилотом не сохранится, а всё, что он сделает — записи, факты, досье — останется",
+  "cmd.clearedChat": "Чат очищен. Досье, факты и переписка на месте.",
+  "cmd.nothingToCompact": "Сжимать нечего — чат пуст.",
+  "cmd.summariseInstruction":
+    "Сожми этот диалог оператора с копилотом в несколько строк на русском: что решили, что сделали, что осталось. Только конспект, без вступлений.",
+  "cmd.temporaryStarted": "Временный чат. Он не попадёт в историю, но всё сделанное сохранится.",
+  "cmd.temporaryEnded": "Временный чат закрыт",
   "cmd.help":
-    "Команды: /clear — очистить контекст чата (анкеты, факты и переписка остаются на месте); /compact — сжать старую переписку в конспект; /help — этот список.",
+    "Команды: /clear — очистить этот чат (и контекст переписки, если открыто досье); /compact — сжать длинное в конспект; /help — этот список. Ни одна из команд не трогает досье, факты и сохранённые сообщения.",
   "cmd.cleared": "Контекст очищен. {n} сообщений остались в переписке, но модель их больше не читает.",
   "cmd.compacting": "Сжимаю переписку…",
   "cmd.compacted": "Переписка сжата: модель читает {live} последних сообщений из {total}, остальное — конспектом.",
@@ -309,6 +322,10 @@ const ru: Dict = {
   "doctor.fix": "Исправить автоматически",
   "doctor.wasFixed": " — исправлено",
 
+  "master.hello":
+    "Мастер-агент. Видит все анкеты: вставь список эдмайеров или письмо и скажи, чьё это — он найдёт анкету или заведёт новую вместе с мужчинами.",
+  "master.scope": "Мастер-агент",
+  "master.scopePath": "все анкеты",
   "master.title": "Мастер-агент",
   "master.sub":
     "Поиск по всем анкетам и авто-маршрутизация: вставь письмо — мастер определит, чьё оно, найдёт досье и создаст новое, если совпадений нет.",
@@ -414,6 +431,7 @@ const en: Dict = {
   "ctx.dictate": "Dictate",
   "ctx.confirmClearLog": "Clear this profile's agent history?",
 
+  "chat.working": "working…",
   "chat.copy": "Copy",
   "chat.asOutgoing": "Log as sent",
   "chat.copied": "Copied",
@@ -448,6 +466,9 @@ const en: Dict = {
   "toast.noMic": "Microphone is not available in this webview build",
   "toast.micDenied": "Microphone access denied: {error}",
   "toast.silentClip": "The microphone recorded nothing — check the level and try again",
+  "composer.micDevice": "Microphone",
+  "composer.micDefault": "default microphone",
+  "composer.micNumbered": "microphone {n}",
   "composer.speechLang": "Dictation language",
   "composer.thinkingHint": "How long the model thinks before answering",
   "composer.contextHint": "Context window usage",
@@ -459,8 +480,17 @@ const en: Dict = {
   "thinking.medium": "medium",
   "thinking.high": "deep",
   "thinking.xhigh": "maximum",
+  "composer.temporary": "temporary",
+  "composer.temporaryHint":
+    "Temporary chat: the conversation is not saved, while everything it does — notes, facts, dossiers — stays",
+  "cmd.clearedChat": "Chat cleared. Dossiers, facts and correspondence are untouched.",
+  "cmd.nothingToCompact": "Nothing to compact — the chat is empty.",
+  "cmd.summariseInstruction":
+    "Compress this operator/copilot conversation into a few lines in Russian: what was decided, what was done, what is left. Summary only, no preface.",
+  "cmd.temporaryStarted": "Temporary chat. It stays out of the history; everything it does is kept.",
+  "cmd.temporaryEnded": "Temporary chat closed",
   "cmd.help":
-    "Commands: /clear — drop the chat context (profiles, facts and messages all stay); /compact — fold older correspondence into a summary; /help — this list.",
+    "Commands: /clear — clear this chat (and the correspondence context when a dossier is open); /compact — fold what has grown long into a summary; /help — this list. Neither touches dossiers, facts or stored messages.",
   "cmd.cleared": "Context cleared. {n} messages remain in the thread, but the model no longer reads them.",
   "cmd.compacting": "Compacting the correspondence…",
   "cmd.compacted": "Compacted: the model now reads the last {live} of {total} messages, the rest as a summary.",
@@ -634,6 +664,10 @@ const en: Dict = {
   "doctor.fix": "Fix automatically",
   "doctor.wasFixed": " — fixed",
 
+  "master.hello":
+    "Master agent. It sees every profile: paste an admirer list or a letter and say whose it is — it will find the profile or create one, with the men.",
+  "master.scope": "Master agent",
+  "master.scopePath": "every profile",
   "master.title": "Master agent",
   "master.sub":
     "Search across every profile and auto-route raw text: paste a letter and the master finds whose it is, or creates a new dossier.",

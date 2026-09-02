@@ -10,7 +10,8 @@
 //!   profiles/<model_id>/profile.json
 //!   profiles/<model_id>/men/<man_id>.json
 //!   profiles/<model_id>/chats/<man_id>.json
-//!   profiles/<model_id>/agent_log.json
+//!   profiles/<model_id>/agent_log.json      (chat with no dossier open)
+//!   profiles/<model_id>/logs/<man_id>.json  (chat about one man)
 //!   profiles/<model_id>/attachments/...
 //! ```
 //!
@@ -42,6 +43,20 @@ impl Paths {
 
     pub fn secrets_file(&self) -> PathBuf {
         self.root.join("secrets.json")
+    }
+
+    /// The master agent's own conversation, above every profile.
+    pub fn master_log_file(&self) -> PathBuf {
+        self.root.join("master_log.json")
+    }
+
+    pub fn master_log(&self) -> Result<AgentLog> {
+        Ok(read_json::<AgentLog>(&self.master_log_file())?
+            .unwrap_or_else(|| AgentLog::new("master".into(), None)))
+    }
+
+    pub fn write_master_log(&self, log: &AgentLog) -> Result<()> {
+        write_json(&self.master_log_file(), log)
     }
 
     pub fn index_file(&self) -> PathBuf {
@@ -141,8 +156,22 @@ impl Scope {
         self.base.join("profile.json")
     }
 
-    pub fn agent_log_file(&self) -> PathBuf {
-        self.base.join("agent_log.json")
+    /// The copilot conversation. Each dossier has its own; `None` is the
+    /// profile-wide chat shown when no dossier is open.
+    pub fn agent_log_file(&self, man_id: Option<&str>) -> Result<PathBuf> {
+        match man_id {
+            None => Ok(self.base.join("agent_log.json")),
+            Some(id) => {
+                if !is_safe_id(id) {
+                    return Err(AppError::Scope(format!("unsafe man id: {id}")));
+                }
+                Ok(self.logs_dir().join(format!("{id}.json")))
+            }
+        }
+    }
+
+    pub fn logs_dir(&self) -> PathBuf {
+        self.base.join("logs")
     }
 
     pub fn men_dir(&self) -> PathBuf {
@@ -248,19 +277,29 @@ impl Scope {
         write_json(&path, thread)
     }
 
-    pub fn read_agent_log(&self) -> Result<AgentLog> {
-        match read_json::<AgentLog>(&self.agent_log_file())? {
-            Some(log) => Ok(log),
-            None => Ok(AgentLog::new(self.model_id.clone())),
+    pub fn read_agent_log(&self, man_id: Option<&str>) -> Result<AgentLog> {
+        match read_json::<AgentLog>(&self.agent_log_file(man_id)?)? {
+            Some(mut log) => {
+                log.man_id = man_id.map(str::to_string);
+                Ok(log)
+            }
+            None => Ok(AgentLog::new(
+                self.model_id.clone(),
+                man_id.map(str::to_string),
+            )),
         }
     }
 
     pub fn write_agent_log(&self, log: &AgentLog) -> Result<()> {
-        write_json(&self.agent_log_file(), log)
+        let path = self.agent_log_file(log.man_id.as_deref())?;
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        write_json(&path, log)
     }
 
-    pub fn append_agent_entry(&self, entry: AgentEntry) -> Result<()> {
-        let mut log = self.read_agent_log()?;
+    pub fn append_agent_entry(&self, man_id: Option<&str>, entry: AgentEntry) -> Result<()> {
+        let mut log = self.read_agent_log(man_id)?;
         log.entries.push(entry);
         if log.entries.len() > 600 {
             let cut = log.entries.len() - 600;

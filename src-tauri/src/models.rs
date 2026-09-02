@@ -389,6 +389,9 @@ impl ChatThread {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentLog {
     pub model_id: String,
+    /// `None` for the profile-wide conversation.
+    #[serde(default)]
+    pub man_id: Option<String>,
     #[serde(default)]
     pub entries: Vec<AgentEntry>,
     #[serde(default = "schema_version")]
@@ -396,9 +399,10 @@ pub struct AgentLog {
 }
 
 impl AgentLog {
-    pub fn new(model_id: String) -> Self {
+    pub fn new(model_id: String, man_id: Option<String>) -> Self {
         AgentLog {
             model_id,
+            man_id,
             entries: vec![],
             schema_version: SCHEMA_VERSION,
         }

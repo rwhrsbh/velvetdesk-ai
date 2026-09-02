@@ -81,6 +81,11 @@ export function renderScope() {
   const dot = $("scopeDot");
   dot.className = `dot ${store.busy ? "busy" : profile ? "" : "idle"}`;
 
+  if (store.master) {
+    $("scopeLabel").textContent = t("master.scope");
+    $("scopePath").textContent = t("master.scopePath");
+    return;
+  }
   if (!profile) {
     $("scopeLabel").textContent = t("scope.none");
     $("scopePath").textContent = "—";
@@ -177,6 +182,9 @@ export function renderChat() {
         mode?: string;
         key_index?: number;
         turns?: number;
+        /** set while the run is still going */
+        live?: boolean;
+        note?: string;
       };
       const steps = Array.isArray(meta.steps) ? meta.steps.map(stepHtml).join("") : "";
       const extras: string[] = [];
@@ -193,10 +201,15 @@ export function renderChat() {
              </div>`
           : "";
 
+      const working = meta.live
+        ? `<div class="working"><span class="spinner"></span>` +
+          `<span>${escapeHtml(meta.note || t("chat.working"))}</span></div>`
+        : "";
+
       return (
         `<div class="msg ${entry.sender}" data-entry="${escapeHtml(entry.id)}">` +
         `<div class="bubble"><span class="bubble-text">${escapeHtml(entry.text)}</span>` +
-        `${steps}${usageLine(meta.usage, extras)}${actions}</div></div>`
+        `${steps}${working}${usageLine(meta.usage, extras)}${actions}</div></div>`
       );
     })
     .join("");

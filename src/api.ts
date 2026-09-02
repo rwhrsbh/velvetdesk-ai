@@ -1,7 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
+  Backup,
   ContextStats,
+  MasterOutput,
+  TrustedRoot,
   AgentLog,
   Bootstrap,
   ChatThread,
@@ -32,6 +35,8 @@ export interface RunInput {
   log_incoming?: boolean;
   /** Overrides the provider's thinking level for this run only. */
   thinking_effort?: string;
+  /** Act, but keep nothing in the chat log. */
+  temporary?: boolean;
 }
 
 export const api = {
@@ -70,10 +75,28 @@ export const api = {
     text: string;
   }) => invoke<ChatThread>("append_message", { input }),
 
-  getAgentLog: (modelId: string) => invoke<AgentLog>("get_agent_log", { modelId }),
-  clearAgentLog: (modelId: string) => invoke<void>("clear_agent_log", { modelId }),
+  getAgentLog: (modelId: string, manId?: string | null) =>
+    invoke<AgentLog>("get_agent_log", { modelId, manId }),
+  clearAgentLog: (modelId: string, manId?: string | null) =>
+    invoke<void>("clear_agent_log", { modelId, manId }),
 
   runAgent: (input: RunInput) => invoke<RunOutput>("run_agent", { input }),
+  masterChat: (input: {
+    message: string;
+    security?: string;
+    thinking_effort?: string;
+    temporary?: boolean;
+  }) => invoke<MasterOutput>("master_chat", { input }),
+  getMasterLog: () => invoke<AgentLog>("get_master_log"),
+  clearMasterLog: () => invoke<void>("clear_master_log"),
+
+  listTrustedRoots: () => invoke<TrustedRoot[]>("list_trusted_roots"),
+  trustFolder: (path: string, writable = true) =>
+    invoke<TrustedRoot[]>("trust_folder", { path, writable }),
+  revokeFolder: (path: string) => invoke<TrustedRoot[]>("revoke_folder", { path }),
+  listBackups: () => invoke<Backup[]>("list_backups"),
+  restoreBackup: (backupId: string) => invoke<string>("restore_backup", { backupId }),
+
   masterRoute: (raw: string, autoCreate: boolean) =>
     invoke<MasterDecision>("master_route", { raw, autoCreate }),
   globalSearch: (query: string) => invoke<SearchHit[]>("global_search", { query }),

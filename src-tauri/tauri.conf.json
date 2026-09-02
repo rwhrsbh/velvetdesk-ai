@@ -22,8 +22,7 @@
         "resizable": true,
         "fullscreen": false,
         "dragDropEnabled": true,
-        "theme": "Dark",
-        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port=9222 --use-fake-ui-for-media-stream --use-fake-device-for-media-stream"
+        "theme": "Dark"
       }
     ],
     "security": {

@@ -192,6 +192,10 @@ pub struct Settings {
     /// Id of the downloaded model used when the engine is local.
     #[serde(default)]
     pub local_speech_model: String,
+    /// `deviceId` of the microphone to record from. Empty means the system
+    /// default, which is not always the one that actually works.
+    #[serde(default)]
+    pub speech_device: String,
     /// Dictation language: "ru", "uk", "en" — or empty to follow the UI. An
     /// empty language makes Whisper fall back to English and quietly translate,
     /// which is never what an operator dictating Russian wants.
@@ -201,6 +205,10 @@ pub struct Settings {
     /// share of the context window.
     #[serde(default = "default_auto_compact")]
     pub auto_compact_at: f32,
+    /// Folders an agent may read and write outside its own data directory.
+    /// Empty by default: an agent starts isolated and has to ask.
+    #[serde(default)]
+    pub trusted_roots: Vec<crate::workspace::TrustedRoot>,
 }
 
 fn default_auto_compact() -> f32 {
@@ -303,6 +311,8 @@ impl Default for Settings {
             speech_provider: None,
             speech_engine: default_speech_engine(),
             local_speech_model: String::new(),
+            trusted_roots: vec![],
+            speech_device: String::new(),
             speech_language: String::new(),
             auto_compact_at: default_auto_compact(),
         }

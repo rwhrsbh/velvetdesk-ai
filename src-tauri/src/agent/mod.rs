@@ -1,5 +1,7 @@
+pub mod master;
 pub mod prompts;
 pub mod tools;
+pub mod workspace_tools;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -33,6 +35,10 @@ pub struct RunInput {
     /// selector next to the composer.
     #[serde(default)]
     pub thinking_effort: Option<String>,
+    /// A temporary chat: the exchange is never written to the agent log, while
+    /// everything it does — facts, dossiers, messages — is applied as usual.
+    #[serde(default)]
+    pub temporary: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -97,9 +103,17 @@ pub async fn run(deps: &AgentDeps<'_>, input: RunInput) -> Result<RunOutput> {
         }
     }
 
+    // Without an open dossier the agent is given the whole roster, so a
+    // question about "the new admirers" needs no tool call to answer.
+    let roster = if man.is_some() {
+        Vec::new()
+    } else {
+        scope.read_all_men().unwrap_or_default()
+    };
     let system = prompts::build_system(
         &profile,
         man.as_ref(),
+        &roster,
         mode,
         security,
         &deps.settings.global_style_rules,
@@ -183,16 +197,39 @@ pub struct ContextStats {
     pub has_summary: bool,
 }
 
+/// Everything the next request would carry: the system prompt with the profile
+/// and either the dossier or the whole roster, plus the correspondence. Not
+/// just one message — the figure is meant to answer "how full is the window".
 pub fn context_stats(
     scope: &Scope,
     settings: &Settings,
     provider: &ProviderConfig,
     man_id: Option<&str>,
 ) -> Result<ContextStats> {
+    let profile = scope.read_profile()?;
+    let man = man_id.and_then(|id| scope.read_man(id).ok());
+    let roster = if man.is_some() {
+        Vec::new()
+    } else {
+        scope.read_all_men().unwrap_or_default()
+    };
     let thread = man_id.and_then(|id| scope.read_chat(id).ok());
-    let block = prompts::context_block(thread.as_ref(), settings.history_limit);
+
+    let system = prompts::build_system(
+        &profile,
+        man.as_ref(),
+        &roster,
+        settings.agent_mode,
+        settings.security_level,
+        &settings.global_style_rules,
+    );
+    let context = prompts::context_block(thread.as_ref(), settings.history_limit);
+    // The tool declarations travel with every request too, and they are not
+    // small; leaving them out would understate the load by thousands of tokens.
+    let tools = serde_json::to_string(&tools::tool_defs()).unwrap_or_default();
+
     let window = provider.context_window();
-    let used = estimate_tokens(&block);
+    let used = estimate_tokens(&system) + estimate_tokens(&context) + estimate_tokens(&tools);
     Ok(ContextStats {
         used_tokens: used,
         window_tokens: window,
@@ -288,6 +325,7 @@ async fn run_auto(
     mut request: ChatRequest,
 ) -> Result<RunOutput> {
     request.tools = tools::tool_defs();
+    request.tools.extend(workspace_tools::tool_defs());
 
     let mut steps: Vec<RunStep> = vec![];
     let mut pending: Vec<PendingAction> = vec![];
@@ -322,7 +360,19 @@ async fn run_auto(
         }
 
         for call in &response.tool_calls {
-            let outcome = tools::execute(scope, security, &call.name, &call.args);
+            // Files and shell commands live outside the profile sandbox and
+            // are checked against the folders the operator has trusted.
+            let outcome = if workspace_tools::is_workspace_tool(&call.name) {
+                workspace_tools::execute(
+                    deps.paths,
+                    &deps.settings.trusted_roots,
+                    security,
+                    &call.name,
+                    &call.args,
+                )
+            } else {
+                tools::execute(scope, security, &call.name, &call.args)
+            };
             let (result_json, step) = match outcome {
                 Ok(ToolOutcome {
                     result,
@@ -450,17 +500,20 @@ fn finish(
     key_index: usize,
     turns: usize,
 ) -> Result<RunOutput> {
-    let _ = scope.append_agent_entry(AgentEntry::new("user", input.message.clone()));
-    let mut entry = AgentEntry::new("assistant", reply.clone());
-    entry.meta = json!({
-        "mode": mode,
-        "security": security,
-        "man_id": input.man_id,
-        "steps": steps,
-        "pending": pending.len(),
-        "usage": usage,
-    });
-    let _ = scope.append_agent_entry(entry);
+    if !input.temporary {
+        let man = input.man_id.as_deref();
+        let _ = scope.append_agent_entry(man, AgentEntry::new("user", input.message.clone()));
+        let mut entry = AgentEntry::new("assistant", reply.clone());
+        entry.meta = json!({
+            "mode": mode,
+            "security": security,
+            "man_id": input.man_id,
+            "steps": steps,
+            "pending": pending.len(),
+            "usage": usage,
+        });
+        let _ = scope.append_agent_entry(man, entry);
+    }
 
     Ok(RunOutput {
         reply,
@@ -1148,6 +1201,34 @@ mod tests {
         let thread = scope.read_chat("1219749").unwrap();
         assert_eq!(thread.live_messages(5).len(), 5);
         assert!(thread.transcript(5).contains("message number 29"));
+    }
+
+    /// The gauge answers "how full is the window", so it has to count the
+    /// system prompt and the tool declarations, not just the correspondence.
+    #[test]
+    fn context_stats_measure_the_whole_prompt() {
+        let scope = scope();
+        let settings = Settings::default();
+        let provider = ProviderConfig {
+            model: "gemini-2.5-flash".into(),
+            ..settings.providers[0].clone()
+        };
+
+        let empty = context_stats(&scope, &settings, &provider, None).unwrap();
+        assert!(
+            empty.used_tokens > 500,
+            "the system prompt and tools alone are bigger than that: {}",
+            empty.used_tokens
+        );
+
+        thread_with(&scope, 40);
+        let with_thread = context_stats(&scope, &settings, &provider, Some("1219749")).unwrap();
+        assert!(
+            with_thread.used_tokens > empty.used_tokens,
+            "correspondence must add to the count"
+        );
+        assert_eq!(with_thread.window_tokens, 1_048_576);
+        assert!(with_thread.ratio > 0.0 && with_thread.ratio < 1.0);
     }
 
     #[test]

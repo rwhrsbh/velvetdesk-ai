@@ -35,6 +35,12 @@ export interface AppStore {
   thinking: string;
   /** Context usage for the open dossier, refreshed after every run. */
   context: ContextStats | null;
+  /** A temporary chat: nothing said in it is written to the agent log. */
+  temporary: boolean;
+  /** Reasoning text streamed by the current run, shown under a spoiler. */
+  thoughts: string;
+  /** The master chat is open: one conversation across every profile. */
+  master: boolean;
 }
 
 export const store: AppStore = {
@@ -55,6 +61,9 @@ export const store: AppStore = {
   busy: false,
   thinking: "",
   context: null,
+  temporary: false,
+  thoughts: "",
+  master: false,
 };
 
 export function activeProfile(): Profile | null {

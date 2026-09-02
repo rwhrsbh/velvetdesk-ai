@@ -227,15 +227,28 @@ pub fn append_message(state: State<'_, AppState>, input: NewMessage) -> Result<C
     scope.read_chat(&input.man_id)
 }
 
+/// The conversation for one dossier, or the profile-wide one when `man_id` is
+/// absent — each dossier is its own chat.
 #[tauri::command]
-pub fn get_agent_log(state: State<'_, AppState>, model_id: String) -> Result<AgentLog> {
-    state.paths.scope(&model_id)?.read_agent_log()
+pub fn get_agent_log(
+    state: State<'_, AppState>,
+    model_id: String,
+    man_id: Option<String>,
+) -> Result<AgentLog> {
+    state
+        .paths
+        .scope(&model_id)?
+        .read_agent_log(man_id.as_deref())
 }
 
 #[tauri::command]
-pub fn clear_agent_log(state: State<'_, AppState>, model_id: String) -> Result<()> {
+pub fn clear_agent_log(
+    state: State<'_, AppState>,
+    model_id: String,
+    man_id: Option<String>,
+) -> Result<()> {
     let scope = state.paths.scope(&model_id)?;
-    scope.write_agent_log(&AgentLog::new(model_id))
+    scope.write_agent_log(&AgentLog::new(model_id, man_id))
 }
 
 // ---------------------------------------------------------------------------
@@ -327,6 +340,46 @@ pub async fn compact_context(
     agent::context_stats(&scope, &settings, &provider, Some(&man_id))
 }
 
+/// The master chat: one conversation with access to every profile.
+#[tauri::command]
+pub async fn master_chat(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    input: agent::master::MasterInput,
+) -> Result<agent::master::MasterOutput> {
+    let settings = state.settings_view();
+    let provider = state.active_provider()?;
+    let pool = state.pool(&provider.id);
+    let emit = emitter(&app);
+
+    let deps = AgentDeps {
+        paths: &state.paths,
+        settings: &settings,
+        provider: &provider,
+        pool,
+        llm: &state.llm,
+        emit: &emit,
+    };
+
+    let output = agent::master::chat(&deps, input).await?;
+    if !output.pending.is_empty() {
+        state.pending.write().extend(output.pending.clone());
+    }
+    Ok(output)
+}
+
+#[tauri::command]
+pub fn get_master_log(state: State<'_, AppState>) -> Result<AgentLog> {
+    state.paths.master_log()
+}
+
+#[tauri::command]
+pub fn clear_master_log(state: State<'_, AppState>) -> Result<()> {
+    state
+        .paths
+        .write_master_log(&AgentLog::new("master".into(), None))
+}
+
 #[tauri::command]
 pub async fn master_route(
     app: AppHandle,
@@ -380,12 +433,105 @@ pub fn pending_approve(state: State<'_, AppState>, id: String) -> Result<Pending
             .ok_or_else(|| AppError::NotFound(format!("pending action {id}")))?;
         queue.remove(idx)
     };
+    // Granting a folder is the one approval that changes what agents may
+    // reach, so it is written into settings rather than executed.
+    if action.tool == "request_access" {
+        let path = action.args["path"].as_str().unwrap_or_default().to_string();
+        let writable = action.args["writable"].as_bool().unwrap_or(true);
+        let reason = action.args["reason"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        let mut settings = state.settings.write();
+        settings.trusted_roots.retain(|r| r.path != path);
+        settings.trusted_roots.push(crate::workspace::TrustedRoot {
+            path,
+            writable,
+            granted_at: chrono::Utc::now(),
+            reason,
+        });
+        settings.save(&state.paths)?;
+        return Ok(action);
+    }
+
+    if crate::agent::workspace_tools::is_workspace_tool(&action.tool) {
+        let roots = state.settings.read().trusted_roots.clone();
+        crate::agent::workspace_tools::commit(&state.paths, &roots, &action.tool, &action.args)?;
+        return Ok(action);
+    }
+
+    if action.tool == "create_profile" {
+        crate::agent::master::execute(
+            &state.paths,
+            &[],
+            crate::config::SecurityLevel::Yolo,
+            "create_profile",
+            &action.args,
+        )?;
+        storage::rebuild_index(&state.paths)?;
+        return Ok(action);
+    }
+
     let scope = state.paths.scope(&action.model_id)?;
     // Re-plan against current state so an approval never writes stale data.
     let plan = tools::plan_mutation(&scope, &action.tool, &action.args)?;
     tools::commit(&scope, &plan.target)?;
     storage::rebuild_index(&state.paths)?;
     Ok(action)
+}
+
+/// Folders agents may use, and the ability to take one back.
+#[tauri::command]
+pub fn list_trusted_roots(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::workspace::TrustedRoot>> {
+    Ok(state.settings.read().trusted_roots.clone())
+}
+
+#[tauri::command]
+pub fn trust_folder(
+    state: State<'_, AppState>,
+    path: String,
+    writable: Option<bool>,
+) -> Result<Vec<crate::workspace::TrustedRoot>> {
+    if !std::path::Path::new(&path).is_dir() {
+        return Err(AppError::Invalid(format!("{path} — не папка")));
+    }
+    let mut settings = state.settings.write();
+    settings.trusted_roots.retain(|r| r.path != path);
+    settings.trusted_roots.push(crate::workspace::TrustedRoot {
+        path,
+        writable: writable.unwrap_or(true),
+        granted_at: chrono::Utc::now(),
+        reason: "granted by the operator".into(),
+    });
+    settings.save(&state.paths)?;
+    Ok(settings.trusted_roots.clone())
+}
+
+#[tauri::command]
+pub fn revoke_folder(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<Vec<crate::workspace::TrustedRoot>> {
+    let mut settings = state.settings.write();
+    settings.trusted_roots.retain(|r| r.path != path);
+    settings.save(&state.paths)?;
+    Ok(settings.trusted_roots.clone())
+}
+
+/// Copies kept before an agent overwrote or deleted a file.
+#[tauri::command]
+pub fn list_backups(state: State<'_, AppState>) -> Result<Vec<crate::workspace::Backup>> {
+    let mut entries = crate::workspace::read_backups(&state.paths)?.entries;
+    entries.reverse();
+    Ok(entries)
+}
+
+#[tauri::command]
+pub fn restore_backup(state: State<'_, AppState>, backup_id: String) -> Result<String> {
+    let restored = crate::workspace::restore(&state.paths, &backup_id)?;
+    Ok(restored.to_string_lossy().to_string())
 }
 
 #[tauri::command]

@@ -10,10 +10,10 @@ import {
   type MenuEntry,
 } from "./context-menu";
 import { openManForm, openProfileForm } from "./forms";
-import { openDoctorModal, openMasterModal, openPendingModal } from "./modals";
+import { openDoctorModal, openPendingModal } from "./modals";
 import { loadModel, SilentClipError, transcribeLocally } from "./local-whisper";
 import { openKeysModal } from "./provider-modal";
-import { activeMan, activeProfile, makeEntry, pushEntry, store } from "./store";
+import { activeMan, activeProfile, makeEntry, pushEntry, store, type UiEntry } from "./store";
 import type { AgentMode, RunStep, SecurityLevel, Settings } from "./types";
 import {
   renderAll,
@@ -74,8 +74,7 @@ async function selectProfile(modelId: string, redraw = true) {
 
   try {
     store.men = await api.listMen(modelId);
-    const log = await api.getAgentLog(modelId);
-    store.entries = log.entries.slice(-120);
+    await loadChat();
   } catch (error) {
     toast(errorText(error), "error");
     store.men = [];
@@ -85,7 +84,26 @@ async function selectProfile(modelId: string, redraw = true) {
   if (redraw) renderAll();
 }
 
+/**
+ * Load the conversation for whatever is selected.
+ *
+ * Every dossier is its own chat, and the profile has one of its own for when
+ * none is open — switching men switches conversations, the way a messenger
+ * does. A temporary chat is in memory only and must not be overwritten.
+ */
+async function loadChat() {
+  if (!store.activeModelId || store.temporary) return;
+  try {
+    const log = await api.getAgentLog(store.activeModelId, store.activeManId);
+    store.entries = log.entries.slice(-120);
+  } catch (error) {
+    console.error("chat load failed", error);
+    store.entries = [];
+  }
+}
+
 async function selectMan(manId: string | null) {
+  if (store.activeManId === manId) return;
   store.activeManId = manId;
   if (manId && store.activeModelId) {
     try {
@@ -95,6 +113,8 @@ async function selectMan(manId: string | null) {
       toast(errorText(error), "error");
     }
   }
+  await loadChat();
+  renderChat();
   renderMen();
   renderScope();
   void refreshContextGauge();
@@ -128,6 +148,15 @@ function activeProviderReady(): boolean {
 async function sendMessage() {
   const typed = ($("composerInput") as HTMLTextAreaElement).value.trim();
   if (typed.startsWith("/") && (await runSlashCommand(typed))) return;
+
+  if (store.master) {
+    if (!typed || store.busy) return;
+    const input = $("composerInput") as HTMLTextAreaElement;
+    input.value = "";
+    input.style.height = "auto";
+    await sendToMaster(typed);
+    return;
+  }
   const input = $("composerInput") as HTMLTextAreaElement;
   const text = input.value.trim();
   if (!text) return;
@@ -160,6 +189,7 @@ async function sendMessage() {
       channel: store.channel,
       log_incoming: store.logIncoming,
       thinking_effort: store.thinking || undefined,
+      temporary: store.temporary,
     });
 
     store.entries = store.entries.filter((e) => !e.transient);
@@ -172,6 +202,7 @@ async function sendMessage() {
         turns: output.turns,
       }),
     );
+    store.thoughts = "";
 
     if (output.pending.length > 0) {
       toast(t("toast.pendingCount", { n: output.pending.length }), "info");
@@ -343,7 +374,7 @@ async function toggleDictation() {
   }
 
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const stream = await openMicrophone();
     const mime = pickMime();
     recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
     chunks = [];
@@ -358,14 +389,17 @@ async function toggleDictation() {
       const type = recorder?.mimeType || mime || "audio/webm";
       const blob = new Blob(chunks, { type });
       recorder = null;
+      // A silent clip compresses to almost nothing, so check the level first:
+      // otherwise a dead microphone is reported as a too-short recording.
+      const silent = !peakLevel || peakLevel() < 0.01;
+      if (silent) {
+        setMicState("idle");
+        toast(t("toast.silentClip"), "error");
+        return;
+      }
       if (blob.size < 1200) {
         setMicState("idle");
         toast(t("toast.tooShort"), "error");
-        return;
-      }
-      if (peakLevel && peakLevel() < 0.01) {
-        setMicState("idle");
-        toast(t("toast.silentClip"), "error");
         return;
       }
       setMicState("working");
@@ -396,6 +430,56 @@ async function toggleDictation() {
     setMicState("idle");
     toast(micErrorText(error), "error");
   }
+}
+
+/**
+ * Open the chosen microphone, falling back to the default one when the saved
+ * device has gone away (unplugged, or claimed by another app).
+ */
+async function openMicrophone(): Promise<MediaStream> {
+  const deviceId = store.settings?.speech_device ?? "";
+  if (deviceId) {
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        audio: { deviceId: { exact: deviceId } },
+      });
+    } catch (error) {
+      console.warn("saved microphone unavailable, falling back", error);
+    }
+  }
+  return navigator.mediaDevices.getUserMedia({ audio: true });
+}
+
+/**
+ * Microphone picker, opened from the caret on the dictate button. Device
+ * labels only exist once access has been granted at least once, so unnamed
+ * devices get a number instead.
+ */
+async function openMicrophoneMenu(anchor: HTMLElement) {
+  let devices: MediaDeviceInfo[] = [];
+  try {
+    devices = (await navigator.mediaDevices.enumerateDevices()).filter(
+      (d) => d.kind === "audioinput",
+    );
+  } catch {
+    devices = [];
+  }
+  const chosen = store.settings?.speech_device ?? "";
+  const entries: MenuEntry[] = [
+    {
+      label: `${chosen ? "" : "✓ "}${t("composer.micDefault")}`,
+      onSelect: () => void persistSettings({ speech_device: "" }),
+    },
+  ];
+  devices.forEach((device, index) => {
+    const label = device.label || t("composer.micNumbered", { n: index + 1 });
+    entries.push({
+      label: `${device.deviceId === chosen ? "✓ " : ""}${label}`,
+      onSelect: () => void persistSettings({ speech_device: device.deviceId }),
+    });
+  });
+  const box = anchor.getBoundingClientRect();
+  openContextMenu(box.left, Math.max(8, box.top - 12 - entries.length * 28), entries);
 }
 
 /**
@@ -460,7 +544,7 @@ function bindTopbar() {
   $("btnKeys").addEventListener("click", () => void openKeysModal(deps));
   $("providerChip").addEventListener("click", () => void openKeysModal(deps));
   $("btnDoctor").addEventListener("click", () => void openDoctorModal(deps));
-  $("btnMaster").addEventListener("click", () => void openMasterModal(deps));
+  $("btnMaster").addEventListener("click", () => void toggleMasterChat());
   $("btnPending").addEventListener("click", () => void openPendingModal(deps));
   $("btnLang").addEventListener("click", () => applyLanguage(lang() === "ru" ? "en" : "ru", true));
 }
@@ -833,30 +917,53 @@ async function runSlashCommand(raw: string): Promise<boolean> {
     return true;
   }
 
-  if (!store.activeModelId || !store.activeManId) {
-    toast(t("toast.pickMan"), "error");
+  if (!store.activeModelId) {
+    toast(t("toast.pickProfile"), "error");
     return true;
   }
 
   try {
     if (command === "clear") {
-      await api.clearAgentLog(store.activeModelId);
-      const stats = await api.clearContext(store.activeModelId, store.activeManId);
+      // The chat the operator is looking at, plus the correspondence context
+      // when a dossier is open. Dossiers, facts and stored messages are not
+      // touched by either.
+      if (store.master) {
+        await api.clearMasterLog();
+        store.entries = [];
+        pushEntry(makeEntry("system", t("cmd.clearedChat")));
+        renderChat();
+        return true;
+      }
+      if (!store.temporary) await api.clearAgentLog(store.activeModelId, store.activeManId);
       store.entries = [];
-      pushEntry(makeEntry("system", t("cmd.cleared", { n: stats.total_messages })));
+      if (store.activeManId) {
+        const stats = await api.clearContext(store.activeModelId, store.activeManId);
+        pushEntry(makeEntry("system", t("cmd.cleared", { n: stats.total_messages })));
+      } else {
+        pushEntry(makeEntry("system", t("cmd.clearedChat")));
+      }
     } else {
       store.busy = true;
       renderScope();
       pushEntry(makeEntry("system", t("cmd.compacting"), null, true));
       renderChat();
-      const stats = await api.compactContext(store.activeModelId, store.activeManId);
-      store.entries = store.entries.filter((e) => !e.transient);
-      pushEntry(
-        makeEntry(
-          "system",
-          t("cmd.compacted", { live: stats.live_messages, total: stats.total_messages }),
-        ),
-      );
+      if (store.activeManId) {
+        const stats = await api.compactContext(store.activeModelId, store.activeManId);
+        store.entries = store.entries.filter((e) => !e.transient);
+        pushEntry(
+          makeEntry(
+            "system",
+            t("cmd.compacted", { live: stats.live_messages, total: stats.total_messages }),
+          ),
+        );
+      } else {
+        // No dossier open: fold the copilot chat itself into one summary.
+        const summary = await summariseChat();
+        store.entries = store.entries.filter((e) => !e.transient);
+        if (!store.temporary) await api.clearAgentLog(store.activeModelId, store.activeManId);
+        store.entries = [];
+        pushEntry(makeEntry("system", summary));
+      }
     }
   } catch (error) {
     store.entries = store.entries.filter((e) => !e.transient);
@@ -868,6 +975,119 @@ async function runSlashCommand(raw: string): Promise<boolean> {
   renderChat();
   void refreshContextGauge();
   return true;
+}
+
+/**
+ * Fold the visible copilot chat into a few lines. Used by /compact when no
+ * dossier is open — there the chat itself is what has grown long.
+ */
+async function summariseChat(): Promise<string> {
+  const transcript = store.entries
+    .filter((e) => !e.transient && e.text.trim())
+    .map((e) => `${e.sender.toUpperCase()}: ${e.text}`)
+    .join("\n");
+  if (!transcript) return t("cmd.nothingToCompact");
+
+  const output = await api.runAgent({
+    model_id: store.activeModelId!,
+    man_id: null,
+    mode: "act",
+    security: store.security,
+    message: `${t("cmd.summariseInstruction")}\n\n${transcript}`,
+    temporary: true,
+    thinking_effort: store.thinking || undefined,
+  });
+  return output.reply.trim() || t("cmd.nothingToCompact");
+}
+
+/**
+ * Open a throwaway chat, or close it and return to the saved one.
+ *
+ * A temporary chat is not written to the log at all: the copilot still reads
+ * the dossier and still writes facts, notes and messages, but the conversation
+ * itself leaves no trace.
+ */
+async function toggleTemporaryChat() {
+  store.temporary = !store.temporary;
+  $("btnTemporary").classList.toggle("active", store.temporary);
+  store.entries = [];
+
+  if (store.temporary) {
+    pushEntry(makeEntry("system", t("cmd.temporaryStarted")));
+  } else {
+    if (store.activeModelId) {
+      const log = await api.getAgentLog(store.activeModelId, store.activeManId);
+      store.entries = log.entries.map((entry) => ({ ...entry }));
+    }
+    toast(t("cmd.temporaryEnded"), "info");
+  }
+  renderChat();
+}
+
+/**
+ * The master chat: one conversation that spans every profile.
+ *
+ * It is the same agent loop with a wider reach — it can search across
+ * profiles, create one that does not exist yet, and file men under it. Writes
+ * still obey the security level, and a folder grant still needs an answer.
+ */
+async function toggleMasterChat() {
+  store.master = !store.master;
+  $("btnMaster").classList.toggle("active", store.master);
+  store.entries = [];
+
+  if (store.master) {
+    try {
+      const log = await api.getMasterLog();
+      store.entries = log.entries.slice(-120).map((entry) => ({ ...entry }));
+    } catch (error) {
+      console.error("master log", error);
+    }
+    if (store.entries.length === 0) pushEntry(makeEntry("system", t("master.hello")));
+  } else {
+    await loadChat();
+  }
+  renderAll();
+}
+
+async function sendToMaster(text: string) {
+  store.busy = true;
+  ($("btnSend") as HTMLButtonElement).disabled = true;
+  pushEntry(makeEntry("user", text));
+  renderChat();
+  renderScope();
+
+  try {
+    const output = await api.masterChat({
+      message: text,
+      security: store.security,
+      thinking_effort: store.thinking || undefined,
+      temporary: store.temporary,
+    });
+    store.entries = store.entries.filter((e) => !e.transient);
+    pushEntry(
+      makeEntry("assistant", output.reply, {
+        steps: output.steps as unknown as RunStep[],
+        usage: output.usage,
+        key_index: output.key_index,
+        turns: output.turns,
+      }),
+    );
+    if (output.pending.length > 0) {
+      toast(t("toast.pendingCount", { n: output.pending.length }), "info");
+    }
+    store.profiles = await api.listProfiles();
+    store.pending = await api.pendingList();
+    if (store.activeModelId) store.men = await api.listMen(store.activeModelId);
+  } catch (error) {
+    store.entries = store.entries.filter((e) => !e.transient);
+    pushEntry(makeEntry("system", `${t("common.error")}: ${errorText(error)}`));
+    toast(errorText(error), "error");
+  } finally {
+    store.busy = false;
+    ($("btnSend") as HTMLButtonElement).disabled = false;
+    renderAll();
+  }
 }
 
 function bindComposer() {
@@ -889,9 +1109,15 @@ function bindComposer() {
   ($("logIncoming") as HTMLInputElement).addEventListener("change", (event) => {
     store.logIncoming = (event.target as HTMLInputElement).checked;
   });
+
+  $("btnTemporary").addEventListener("click", () => void toggleTemporaryChat());
+
   ($("channelSelect") as HTMLSelectElement).addEventListener("change", (event) => {
     store.channel = (event.target as HTMLSelectElement).value as "chat" | "letter";
   });
+
+  const micMenu = $("btnMicMenu");
+  micMenu.addEventListener("click", () => void openMicrophoneMenu(micMenu));
 
   const speech = $("speechLang") as HTMLSelectElement;
   speech.addEventListener("change", () => {
@@ -931,41 +1157,45 @@ function bindTabs() {
   apply("paneChat");
 }
 
+/**
+ * The bubble a run is currently filling.
+ *
+ * Tool calls used to land as separate centred rows, which pushed the actual
+ * answer around and looked nothing like the finished message. Now a run opens
+ * one assistant bubble and the steps accumulate inside it, so the layout while
+ * working is the layout afterwards.
+ */
+function liveEntry(): UiEntry {
+  const existing = store.entries.find((e) => e.transient && e.sender === "assistant");
+  if (existing) return existing;
+  const entry = makeEntry("assistant", "", { steps: [], live: true }, true);
+  pushEntry(entry);
+  return entry;
+}
+
 function bindAgentEvents() {
   void onAgentEvent((payload) => {
     const kind = String(payload.kind ?? "");
+    const entry = liveEntry();
+    const meta = entry.meta as { steps?: RunStep[]; note?: string; live?: boolean };
+
     if (kind === "step") {
       const step = payload.step as RunStep | undefined;
       if (!step) return;
-      pushEntry(makeEntry("system", step.summary, { steps: [step] }, true));
-      renderChat();
+      meta.steps = [...(meta.steps ?? []), step];
     } else if (kind === "llm_retry") {
-      pushEntry(
-        makeEntry(
-          "system",
-          `${t("chat.key", { n: Number(payload.key_index ?? 0) + 1 })}: ${payload.verdict}`,
-          null,
-          true,
-        ),
-      );
-      renderChat();
+      meta.note = `${t("chat.key", { n: Number(payload.key_index ?? 0) + 1 })}: ${payload.verdict}`;
     } else if (kind === "compacting") {
-      pushEntry(
-        makeEntry(
-          "system",
-          t("cmd.autoCompacting", {
-            used: Number(payload.used ?? 0),
-            window: Number(payload.window ?? 0),
-          }),
-          null,
-          true,
-        ),
-      );
-      renderChat();
+      meta.note = t("cmd.autoCompacting", {
+        used: Number(payload.used ?? 0),
+        window: Number(payload.window ?? 0),
+      });
     } else if (kind === "llm_wait") {
-      pushEntry(makeEntry("system", String(payload.message ?? ""), null, true));
-      renderChat();
+      meta.note = String(payload.message ?? "");
+    } else {
+      return;
     }
+    renderChat();
   });
 }
 

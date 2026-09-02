@@ -86,6 +86,11 @@
         <button class="icon-btn" id="btnDoctor" data-i18n-title="nav.doctor">
           <svg width="16" height="16"><use href="#i-stethoscope" /></svg>
         </button>
+        <button class="icon-btn" id="btnTemporary" data-i18n-title="topbar.temporary">
+          <svg width="17" height="17" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M4 15.5V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H7.5L4 15.5z" stroke-dasharray="2.5 2" />
+          </svg>
+        </button>
         <button class="icon-btn" id="btnLang" data-i18n-title="nav.lang"><span id="langLabel">RU</span></button>
         <button class="icon-btn" id="btnKeys" data-i18n-title="nav.keys">
           <svg width="16" height="16"><use href="#i-key" /></svg>
@@ -131,11 +136,16 @@
             ></textarea>
             <div class="composer-bar">
               <div class="composer-left">
-                <button class="btn btn-secondary btn-mic" id="btnMic" data-i18n-title="composer.dictateHint">
-                  <svg width="15" height="15"><use href="#i-mic" /></svg>
-                  <span id="micLabel" data-i18n="composer.dictate">Диктовать</span>
-                  <span class="mic-level"><span id="micLevel"></span></span>
-                </button>
+                <span class="mic-group">
+                  <button class="btn btn-secondary btn-mic" id="btnMic" data-i18n-title="composer.dictateHint">
+                    <svg width="15" height="15"><use href="#i-mic" /></svg>
+                    <span id="micLabel" data-i18n="composer.dictate">Диктовать</span>
+                    <span class="mic-level"><span id="micLevel"></span></span>
+                  </button>
+                  <button class="btn btn-secondary btn-mic-menu" id="btnMicMenu" data-i18n-title="composer.micDevice">
+                    <svg width="9" height="9" viewBox="0 0 10 10"><path d="M1 3l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  </button>
+                </span>
                 <select class="field-input compact" id="speechLang" data-i18n-title="composer.speechLang">
                   <option value="ru">RU</option>
                   <option value="uk">UK</option>
@@ -155,7 +165,8 @@
                   <option value="letter" data-i18n="composer.letter">письмо</option>
                 </select>
                 <label class="toggle" data-i18n-title="composer.logHint">
-                  <input type="checkbox" id="logIncoming" /> <span data-i18n="composer.log">в историю</span>
+                  <input type="checkbox" id="logIncoming" />
+                  <span data-i18n="composer.log">записать его письмо</span>
                 </label>
               </div>
               <div class="composer-right">
