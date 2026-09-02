@@ -1,5 +1,5 @@
 //! Downloads a real Whisper model from Hugging Face. Ignored by default
-//! because it pulls ~41 MB:
+//! because it pulls ~94 MB:
 //!
 //! ```bash
 //! cargo test --test local_models -- --ignored --nocapture
@@ -15,7 +15,7 @@ fn temp_paths(tag: &str) -> Paths {
 }
 
 #[tokio::test]
-#[ignore = "downloads ~41 MB from Hugging Face"]
+#[ignore = "downloads ~94 MB from Hugging Face"]
 async fn downloads_the_tiny_model_and_serves_it() {
     let paths = temp_paths("tiny");
     let model = whisper::find("whisper-tiny").unwrap();
@@ -49,13 +49,12 @@ async fn downloads_the_tiny_model_and_serves_it() {
         "catalogue size is off: {ratio:.2}x"
     );
 
-    // The webview reads the weights through this resolver.
-    let served = whisper::resolve_asset(
-        &paths,
-        "/onnx-community/whisper-tiny/onnx/encoder_model_quantized.onnx",
-    )
-    .expect("weights must be reachable over the model scheme");
-    assert!(std::fs::metadata(&served).unwrap().len() > 1_000_000);
+    // The webview reads every one of these through this resolver.
+    for file in whisper::required_files() {
+        let served = whisper::resolve_asset(&paths, &format!("/{}/{file}", model.repo))
+            .unwrap_or_else(|| panic!("{file} must be reachable over the model scheme"));
+        assert!(std::fs::metadata(&served).unwrap().len() > 0);
+    }
 
     // A second run is a no-op: nothing is re-downloaded.
     let again = whisper::download(&http, &paths, &model, &|_| {})

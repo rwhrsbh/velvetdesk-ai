@@ -73,6 +73,11 @@ object and nothing else:
     \"boundaries\": [\"never mention his ex-wife\"]
   }
 }
+The top-level patch fields describe the man currently open. Anything about
+somebody else — including a man who has no dossier yet — goes into
+\"men\": [{\"name\": \"...\", \"id\": \"site id if known\", \"age\": 0,
+\"location\": \"...\", \"facts\": [...], \"notes\": [...], \"tags\": [...]}].
+Entries in \"men\" are matched by id, then by name; unknown ones are created.
 Omit any patch field you have nothing new for. Never fabricate facts to fill it."
         }
         AgentMode::Memorize => {
@@ -84,7 +89,10 @@ message. Answer with ONE JSON object and nothing else:
   \"memory_patch\": { ...same shape as ACT, without \\\"reply\\\"... }
 }
 Split dictation into atomic facts. Keep the operator's wording for names,
-numbers and dates. Do not guess anything that was not said."
+numbers and dates. Do not guess anything that was not said.
+If the dictation is about men other than the one currently open — a list of new
+admirers, for instance — put each of them in \"men\" with his name, and never
+drop a fact because no dossier exists yet: an entry in \"men\" creates one."
         }
     }
 }

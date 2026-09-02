@@ -188,7 +188,7 @@ export function renderChat() {
              </div>`
           : "";
 
-      return `<div class="msg ${entry.sender}">
+      return `<div class="msg ${entry.sender}" data-entry="${escapeHtml(entry.id)}">
         <div class="bubble">${escapeHtml(entry.text)}${steps}${usageLine(meta.usage, extras)}${actions}</div>
       </div>`;
     })

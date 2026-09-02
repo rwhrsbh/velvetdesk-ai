@@ -199,9 +199,9 @@ export async function openProfileForm(deps: ModalDeps, existing?: Profile | null
     </details>
 
     <div class="modal-actions">
-      ${p ? `<button class="btn-send danger" id="btnDelete">${t("profile.delete")}</button>` : ""}
-      <button class="btn-send secondary" data-act="close">${t("common.cancel")}</button>
-      <button class="btn-send" id="btnSubmit">${p ? t("common.save") : t("profile.create")}</button>
+      ${p ? `<button class="btn btn-danger" id="btnDelete">${t("profile.delete")}</button>` : ""}
+      <button class="btn btn-secondary" data-act="close">${t("common.cancel")}</button>
+      <button class="btn btn-primary" id="btnSubmit">${p ? t("common.save") : t("profile.create")}</button>
     </div>`);
 
   bindAvatarField(card);
@@ -403,9 +403,9 @@ export async function openManForm(deps: ModalDeps, existing?: Man | null) {
     </details>
 
     <div class="modal-actions">
-      ${m ? `<button class="btn-send danger" id="btnDeleteMan">${t("man.delete")}</button>` : ""}
-      <button class="btn-send secondary" data-act="close">Отмена</button>
-      <button class="btn-send" id="btnSubmitMan">${m ? t("common.save") : t("man.create")}</button>
+      ${m ? `<button class="btn btn-danger" id="btnDeleteMan">${t("man.delete")}</button>` : ""}
+      <button class="btn btn-secondary" data-act="close">${t("common.cancel")}</button>
+      <button class="btn btn-primary" id="btnSubmitMan">${m ? t("common.save") : t("man.create")}</button>
     </div>`);
 
   bindAvatarField(card);

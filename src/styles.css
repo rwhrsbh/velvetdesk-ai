@@ -52,16 +52,19 @@ body {
   flex-direction: column;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
-  user-select: none;
+  /* Content is selectable everywhere, the way an operator expects to be able
+     to grab a letter out of the chat. Only controls opt out below. */
+  user-select: text;
 }
 
-input,
-textarea,
-select,
-code,
-pre,
-.selectable {
-  user-select: text;
+button,
+.tab,
+.seg,
+.dot,
+.avatar,
+.tags-row,
+.ctx-menu {
+  user-select: none;
 }
 
 button {
@@ -747,6 +750,28 @@ select.compact {
   background: rgba(229, 72, 77, 0.1);
 }
 
+.btn-icon {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  color: var(--text-dim);
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  flex: none;
+}
+
+.btn-icon:hover {
+  background: rgba(229, 72, 77, 0.12);
+  border-color: rgba(229, 72, 77, 0.35);
+  color: var(--danger);
+}
+
 .btn-wide {
   width: 100%;
   justify-content: center;
@@ -1187,4 +1212,59 @@ details.advanced[open] {
 
 ::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* --------------------------------------------------------------------------
+   Context menu
+   -------------------------------------------------------------------------- */
+
+.ctx-menu {
+  position: fixed;
+  z-index: 200;
+  min-width: 184px;
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-blur);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 0.5px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+
+.ctx-item {
+  background: transparent;
+  border: none;
+  border-radius: var(--r-sm);
+  padding: 6px 9px;
+  text-align: left;
+  font-size: 12.5px;
+  color: var(--text);
+  cursor: default;
+  white-space: nowrap;
+}
+
+.ctx-item:hover:not(:disabled) {
+  background: var(--accent);
+  color: #fff;
+}
+
+.ctx-item:disabled {
+  color: var(--text-faint);
+}
+
+.ctx-item.danger {
+  color: var(--danger);
+}
+
+.ctx-item.danger:hover:not(:disabled) {
+  background: var(--danger);
+  color: #fff;
+}
+
+.ctx-separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--line);
 }

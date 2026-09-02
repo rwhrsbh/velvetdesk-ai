@@ -145,7 +145,7 @@ pub fn tool_defs() -> Vec<ToolDef> {
         ),
         def(
             "create_man",
-            "Create a new dossier for a man.",
+            "Create a new dossier for a man, with everything already known about him.",
             json!({
                 "type": "object",
                 "properties": {
@@ -153,7 +153,29 @@ pub fn tool_defs() -> Vec<ToolDef> {
                     "id": str_prop("site id, optional"),
                     "age": { "type": "integer" },
                     "location": str_prop("city / country"),
-                    "tags": { "type": "array", "items": { "type": "string" } }
+                    "country": str_prop("country"),
+                    "status": str_prop("one-line status"),
+                    "stage": str_prop("new|warming|attached|dating|cooled"),
+                    "next_action": str_prop("what the operator should do next"),
+                    "tags": { "type": "array", "items": { "type": "string" } },
+                    "triggers": { "type": "array", "items": { "type": "string" } },
+                    "boundaries": { "type": "array", "items": { "type": "string" } },
+                    "facts": {
+                        "type": "array",
+                        "description": "atomic facts known about him already",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "key": { "type": "string" },
+                                "value": { "type": "string" }
+                            }
+                        }
+                    },
+                    "notes": {
+                        "type": "array",
+                        "description": "operator-visible notes",
+                        "items": { "type": "string" }
+                    }
                 },
                 "required": ["name"]
             }),
@@ -467,6 +489,57 @@ fn execute_read(scope: &Scope, tool: &str, args: &Value) -> Result<Value> {
     }
 }
 
+/// Read a `[{key, value}]` (or plain string) list into facts.
+fn fact_list(value: Option<&Value>) -> Vec<Fact> {
+    let Some(Value::Array(items)) = value else {
+        return vec![];
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            let (key, value) = match item {
+                Value::String(text) if !text.trim().is_empty() => {
+                    ("факт".to_string(), text.trim().to_string())
+                }
+                Value::Object(_) => {
+                    let key = arg_str(item, "key").unwrap_or_else(|| "факт".into());
+                    let value = arg_str(item, "value")?;
+                    (key, value)
+                }
+                _ => return None,
+            };
+            Some(Fact {
+                id: new_id(),
+                key,
+                value,
+                source: "agent".into(),
+                created_at: Utc::now(),
+            })
+        })
+        .collect()
+}
+
+/// Read a list of strings (or `{text}` objects) into notes.
+fn note_list(value: Option<&Value>) -> Vec<Note> {
+    let Some(Value::Array(items)) = value else {
+        return vec![];
+    };
+    items
+        .iter()
+        .filter_map(|item| match item {
+            Value::String(text) if !text.trim().is_empty() => Some(text.trim().to_string()),
+            Value::Object(_) => arg_str(item, "text"),
+            _ => None,
+        })
+        .map(|text| Note {
+            id: new_id(),
+            text,
+            author: "agent".into(),
+            created_at: Utc::now(),
+        })
+        .collect()
+}
+
 /// Compute what a mutating tool would change, without writing anything.
 pub fn plan_mutation(scope: &Scope, tool: &str, args: &Value) -> Result<MutationPlan> {
     match tool {
@@ -491,6 +564,12 @@ pub fn plan_mutation(scope: &Scope, tool: &str, args: &Value) -> Result<Mutation
             man.triggers = arg_vec(args, "triggers");
             man.boundaries = arg_vec(args, "boundaries");
             man.status = arg_str(args, "status").unwrap_or_else(|| "Новый контакт".into());
+            man.sentiment = arg_str(args, "sentiment").unwrap_or_default();
+            // Facts and notes are folded into the same action on purpose: a new
+            // dossier plus everything known about him is one approval, and
+            // nothing depends on a dossier that has not been written yet.
+            man.facts = fact_list(args.get("facts"));
+            man.notes = note_list(args.get("notes"));
             Ok(MutationPlan {
                 summary: format!("создать досье {name} ({id})"),
                 before: Value::Null,

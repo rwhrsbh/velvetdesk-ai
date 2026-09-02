@@ -1,7 +1,14 @@
 import { applyStatic, lang, setLang, t, type Lang } from "./i18n";
 import { api, errorText, onAgentEvent } from "./api";
 import type { ModalDeps } from "./deps";
-import { $, bindModalDismiss, toast } from "./dom";
+import { $, bindModalDismiss, confirmDialog, toast } from "./dom";
+import {
+  copyText,
+  editingEntries,
+  openContextMenu,
+  selectionWithin,
+  type MenuEntry,
+} from "./context-menu";
 import { openManForm, openProfileForm } from "./forms";
 import { openDoctorModal, openMasterModal, openPendingModal } from "./modals";
 import { transcribeLocally } from "./local-whisper";
@@ -453,6 +460,215 @@ function bindPanels() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// context menus
+// ---------------------------------------------------------------------------
+
+/** Copy an action that only makes sense when something is selected. */
+function selectionEntry(root: Element): MenuEntry[] {
+  const selected = selectionWithin(root);
+  return selected
+    ? [{ label: t("ctx.copySelection"), onSelect: () => copyText(selected) }, "separator"]
+    : [];
+}
+
+function profileEntries(modelId: string): MenuEntry[] {
+  const profile = store.profiles.find((p) => p.id === modelId);
+  if (!profile) return [];
+  return [
+    { label: t("ctx.open"), onSelect: () => void selectProfile(modelId) },
+    {
+      label: t("ctx.edit"),
+      onSelect: async () => {
+        if (modelId !== store.activeModelId) await selectProfile(modelId);
+        void openProfileForm(deps, activeProfile());
+      },
+    },
+    "separator",
+    { label: t("ctx.copyName"), onSelect: () => copyText(profile.name) },
+    { label: t("ctx.copyId"), onSelect: () => copyText(profile.id) },
+    "separator",
+    { label: t("ctx.addProfile"), onSelect: () => void openProfileForm(deps, null) },
+    {
+      label: t("ctx.deleteProfile"),
+      danger: true,
+      onSelect: async () => {
+        const ok = await confirmDialog({
+          title: t("profile.deleteTitle"),
+          body: t("profile.deleteBody", { name: profile.name }),
+          confirmLabel: t("common.delete"),
+          danger: true,
+        });
+        if (!ok) return;
+        try {
+          await api.deleteProfile(modelId);
+          if (store.activeModelId === modelId) {
+            store.activeModelId = null;
+            store.activeManId = null;
+            store.men = [];
+            store.entries = [];
+          }
+          await refresh();
+          toast(t("toast.profileDeleted"), "success");
+        } catch (error) {
+          toast(errorText(error), "error");
+        }
+      },
+    },
+  ];
+}
+
+function manEntries(manId: string): MenuEntry[] {
+  const man = store.men.find((m) => m.id === manId);
+  if (!man) return [];
+  return [
+    { label: t("ctx.openDossier"), onSelect: () => void selectMan(manId) },
+    {
+      label: t("ctx.edit"),
+      onSelect: async () => {
+        if (manId !== store.activeManId) await selectMan(manId);
+        void openManForm(deps, activeMan());
+      },
+    },
+    "separator",
+    { label: t("ctx.copyName"), onSelect: () => copyText(man.name) },
+    { label: t("ctx.copyId"), onSelect: () => copyText(man.id) },
+    "separator",
+    {
+      label: t("ctx.addMan"),
+      onSelect: () => {
+        if (!store.activeModelId) {
+          toast(t("toast.pickProfile"), "error");
+          return;
+        }
+        void openManForm(deps, null);
+      },
+    },
+    {
+      label: t("ctx.deleteMan"),
+      danger: true,
+      onSelect: async () => {
+        const ok = await confirmDialog({
+          title: t("man.deleteTitle"),
+          body: t("man.deleteBody", { name: man.name }),
+          confirmLabel: t("common.delete"),
+          danger: true,
+        });
+        if (!ok || !store.activeModelId) return;
+        try {
+          await api.deleteMan(store.activeModelId, manId);
+          if (store.activeManId === manId) await selectMan(null);
+          await selectProfile(store.activeModelId);
+          toast(t("toast.manDeleted"), "success");
+        } catch (error) {
+          toast(errorText(error), "error");
+        }
+      },
+    },
+  ];
+}
+
+function messageEntries(bubble: Element, entryId: string | undefined): MenuEntry[] {
+  const entry = store.entries.find((e) => e.id === entryId);
+  const text = entry?.text ?? bubble.textContent?.trim() ?? "";
+  const entries: MenuEntry[] = [
+    ...selectionEntry(bubble),
+    { label: t("ctx.copyText"), disabled: !text, onSelect: () => copyText(text) },
+  ];
+  if (entry?.sender === "assistant" && !entry.transient) {
+    entries.push({
+      label: t("chat.asOutgoing"),
+      onSelect: () => void logAsOutgoing(entry.text),
+    });
+  }
+  if (entry?.meta && Object.keys(entry.meta).length > 0) {
+    entries.push({
+      label: t("ctx.copyJson"),
+      onSelect: () => copyText(JSON.stringify(entry.meta, null, 2)),
+    });
+  }
+  entries.push("separator", {
+    label: t("ctx.clearLog"),
+    danger: true,
+    disabled: !store.activeModelId,
+    onSelect: async () => {
+      const ok = await confirmDialog({
+        title: t("ctx.clearLog"),
+        body: t("ctx.confirmClearLog"),
+        confirmLabel: t("common.delete"),
+        danger: true,
+      });
+      if (!ok || !store.activeModelId) return;
+      await api.clearAgentLog(store.activeModelId);
+      store.entries = [];
+      renderChat();
+    },
+  });
+  return entries;
+}
+
+async function logAsOutgoing(text: string) {
+  if (!store.activeModelId || !store.activeManId) {
+    toast(t("toast.pickMan"), "error");
+    return;
+  }
+  try {
+    await api.appendMessage({
+      model_id: store.activeModelId,
+      man_id: store.activeManId,
+      role: "outgoing",
+      channel: store.channel,
+      text,
+    });
+    toast(t("chat.logged"), "success");
+  } catch (error) {
+    toast(errorText(error), "error");
+  }
+}
+
+function bindContextMenus() {
+  document.addEventListener("contextmenu", (event) => {
+    const target = event.target as HTMLElement | null;
+    if (!target) return;
+
+    // Text fields get the editing menu, including inside modals.
+    const field = target.closest<HTMLInputElement | HTMLTextAreaElement>("input, textarea");
+    if (field && !field.disabled) {
+      event.preventDefault();
+      const entries = editingEntries(field);
+      if (field.id === "prompt") {
+        entries.push("separator", {
+          label: t("ctx.dictate"),
+          onSelect: () => void toggleDictation(),
+        });
+      }
+      openContextMenu(event.clientX, event.clientY, entries);
+      return;
+    }
+
+    let entries: MenuEntry[] = [];
+    const bubble = target.closest(".bubble");
+    const profileRow = target.closest<HTMLElement>("[data-profile]");
+    const manRow = target.closest<HTMLElement>("[data-man]");
+
+    if (bubble) {
+      entries = messageEntries(bubble, target.closest<HTMLElement>("[data-entry]")?.dataset.entry);
+    } else if (profileRow?.dataset.profile) {
+      entries = [...selectionEntry(profileRow), ...profileEntries(profileRow.dataset.profile)];
+    } else if (manRow?.dataset.man) {
+      entries = [...selectionEntry(manRow), ...manEntries(manRow.dataset.man)];
+    } else {
+      // Anywhere else: offer a copy when there is a selection to copy.
+      const selected = window.getSelection()?.toString().trim() ?? "";
+      if (selected) entries = [{ label: t("ctx.copy"), onSelect: () => copyText(selected) }];
+    }
+
+    if (entries.length === 0) return;
+    event.preventDefault();
+    openContextMenu(event.clientX, event.clientY, entries);
+  });
+}
+
 function bindComposer() {
   const input = $("composerInput") as HTMLTextAreaElement;
   $("btnSend").addEventListener("click", () => void sendMessage());
@@ -521,6 +737,7 @@ async function boot() {
   bindComposer();
   bindTabs();
   bindAgentEvents();
+  bindContextMenus();
 
   try {
     const data = await api.bootstrap();

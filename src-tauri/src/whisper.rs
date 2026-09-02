@@ -24,10 +24,18 @@ const CONFIG_FILES: &[&str] = &[
     "tokenizer_config.json",
 ];
 
-/// Quantised weights: encoder plus the merged decoder (dtype `q8`).
+/// Weights: encoder plus the merged decoder, 4-bit (dtype `q4`).
+///
+/// Not the 8-bit exports, which look like the obvious choice at half the size:
+/// ONNX Runtime cannot build a session from any of them — `_quantized`,
+/// `_int8` and `_uint8` all fail with "TransposeDQWeightsForMatMulNBits
+/// Missing required scale". Of the formats that do load (`_q4`, `_fp16`, plain
+/// fp32), `_q4` is the smallest for base and small — 285 MB against 463 MB for
+/// fp16 on small. Verified end to end in a browser on all three sizes, in
+/// English and in Russian.
 const WEIGHT_FILES: &[&str] = &[
-    "onnx/encoder_model_quantized.onnx",
-    "onnx/decoder_model_merged_quantized.onnx",
+    "onnx/encoder_model_q4.onnx",
+    "onnx/decoder_model_merged_q4.onnx",
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,7 +61,7 @@ pub fn catalogue() -> Vec<LocalModel> {
             id: "whisper-tiny".into(),
             repo: "onnx-community/whisper-tiny".into(),
             label: "Whisper tiny".into(),
-            size_bytes: 41_000_000,
+            size_bytes: 94_000_000,
             note: "самая быстрая, ru/uk/en, для коротких заметок".into(),
             installed: false,
             bytes_on_disk: 0,
@@ -62,7 +70,7 @@ pub fn catalogue() -> Vec<LocalModel> {
             id: "whisper-base".into(),
             repo: "onnx-community/whisper-base".into(),
             label: "Whisper base".into(),
-            size_bytes: 76_000_000,
+            size_bytes: 139_000_000,
             note: "баланс скорости и точности".into(),
             installed: false,
             bytes_on_disk: 0,
@@ -71,7 +79,7 @@ pub fn catalogue() -> Vec<LocalModel> {
             id: "whisper-small".into(),
             repo: "onnx-community/whisper-small".into(),
             label: "Whisper small".into(),
-            size_bytes: 240_000_000,
+            size_bytes: 288_000_000,
             note: "лучшее качество для русского и украинского".into(),
             installed: false,
             bytes_on_disk: 0,
@@ -94,7 +102,8 @@ pub fn model_dir(paths: &Paths, model: &LocalModel) -> PathBuf {
     models_dir(paths).join(&model.repo)
 }
 
-fn required_files() -> Vec<String> {
+/// Every file a model needs on disk, in download order.
+pub fn required_files() -> Vec<String> {
     CONFIG_FILES
         .iter()
         .chain(WEIGHT_FILES.iter())

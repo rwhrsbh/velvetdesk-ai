@@ -74,7 +74,15 @@ export async function loadModel(repo: string): Promise<Recogniser> {
 
   const module = await loadRuntime();
   await configure(module);
-  loading = module.pipeline("automatic-speech-recognition", repo, { dtype: "q8" });
+  // `device` is pinned: the vendored ONNX Runtime is the wasm-only build, so
+  // letting transformers.js auto-select WebGPU (navigator.gpu exists in some
+  // webviews) would ask for a backend that is not linked in.
+  loading = module.pipeline("automatic-speech-recognition", repo, {
+    // `q4`, not `q8`: every 8-bit export of these models fails to build a
+    // session in this ONNX Runtime (see WEIGHT_FILES in whisper.rs).
+    dtype: "q4",
+    device: "wasm",
+  });
   try {
     const recogniser = await loading;
     loaded = { repo, recogniser };

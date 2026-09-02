@@ -325,6 +325,10 @@ fn finish(
 
 /// Translate an ACT / MEMORIZE memory patch into ordinary tool calls so that
 /// the security policy and the approval queue behave identically everywhere.
+///
+/// A patch may describe the selected man (its top-level fields) and other men
+/// by name in `men` — dictation often mentions people who have no dossier yet,
+/// and those must land somewhere instead of being dropped.
 pub fn apply_patch(
     scope: &Scope,
     security: SecurityLevel,
@@ -339,16 +343,175 @@ pub fn apply_patch(
         return Ok((steps, pending));
     }
 
-    let Some(man_id) = man_id else {
-        steps.push(RunStep {
-            kind: "warn".into(),
-            tool: None,
-            summary: "Патч памяти пропущен: не выбран мужчина".into(),
-            detail: patch.clone(),
-        });
-        return Ok((steps, pending));
-    };
+    let known = scope.read_all_men().unwrap_or_default();
+    let mut calls: Vec<(String, Value)> = vec![];
 
+    // Men the patch names explicitly: update the ones that exist, create the
+    // rest. A dossier is created together with its facts and notes in a single
+    // action, so nothing here depends on a write still awaiting approval.
+    if let Some(men) = patch.get("men").and_then(|m| m.as_array()) {
+        for entry in men {
+            calls.extend(calls_for_entry(&known, entry));
+        }
+    }
+
+    // The top-level fields belong to the man the operator has open. Without one
+    // they can still be attributed if the patch says whose they are.
+    let about_a_man = MAN_PATCH_FIELDS.iter().any(|f| patch.get(*f).is_some());
+    if about_a_man {
+        match man_id {
+            Some(id) => calls.extend(man_calls(id, patch)),
+            None if patch.get("name").is_some() => calls.extend(calls_for_entry(&known, patch)),
+            None => steps.push(RunStep {
+                kind: "warn".into(),
+                tool: None,
+                summary: "Патч памяти пропущен: не выбран мужчина и в патче нет имени".into(),
+                detail: patch.clone(),
+            }),
+        }
+    }
+
+    for (tool, args) in calls {
+        match tools::execute(scope, security, &tool, &args) {
+            Ok(outcome) => {
+                if let Some(action) = outcome.queued {
+                    pending.push(action);
+                }
+                let step = RunStep {
+                    kind: if outcome.applied {
+                        "patch".into()
+                    } else {
+                        "patch_pending".into()
+                    },
+                    tool: Some(tool),
+                    summary: outcome.summary,
+                    detail: args,
+                };
+                emit(json!({ "kind": "step", "step": step }));
+                steps.push(step);
+            }
+            Err(err) => steps.push(RunStep {
+                kind: "patch_error".into(),
+                tool: Some(tool),
+                summary: err.to_string(),
+                detail: args,
+            }),
+        }
+    }
+
+    Ok((steps, pending))
+}
+
+/// Patch fields that only make sense for one particular man.
+const MAN_PATCH_FIELDS: &[&str] = &[
+    "status",
+    "stage",
+    "sentiment",
+    "next_action",
+    "location",
+    "country",
+    "age",
+    "facts",
+    "notes",
+    "gifts",
+    "tags",
+    "triggers",
+    "boundaries",
+];
+
+/// Fields copied verbatim when a dossier is created from a patch entry.
+const CREATE_FIELDS: &[&str] = &[
+    "name",
+    "id",
+    "age",
+    "location",
+    "country",
+    "status",
+    "stage",
+    "sentiment",
+    "next_action",
+    "tags",
+    "triggers",
+    "boundaries",
+    "facts",
+    "notes",
+];
+
+/// Match a patch entry against the dossiers that already exist: by site id
+/// first, then by name, so repeating a dictation does not fork the CRM.
+fn resolve_man(known: &[Man], entry: &Value) -> Option<String> {
+    let id = entry
+        .get("man_id")
+        .or_else(|| entry.get("id"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    if let Some(id) = id {
+        if let Some(man) = known.iter().find(|m| m.id == id) {
+            return Some(man.id.clone());
+        }
+    }
+    let name = entry.get("name").and_then(|v| v.as_str())?.trim();
+    if name.is_empty() {
+        return None;
+    }
+    known
+        .iter()
+        .find(|m| m.name.trim().eq_ignore_ascii_case(name))
+        .map(|m| m.id.clone())
+}
+
+/// Update an existing dossier, or create it when the patch describes someone
+/// new.
+fn calls_for_entry(known: &[Man], entry: &Value) -> Vec<(String, Value)> {
+    if let Some(id) = resolve_man(known, entry) {
+        return man_calls(&id, entry);
+    }
+    let name = entry
+        .get("name")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .unwrap_or_default();
+    if name.is_empty() {
+        return vec![];
+    }
+    let mut args = serde_json::Map::new();
+    for field in CREATE_FIELDS {
+        if let Some(value) = entry.get(*field) {
+            if !value.is_null() {
+                args.insert((*field).to_string(), value.clone());
+            }
+        }
+    }
+    vec![("create_man".to_string(), Value::Object(args))]
+}
+
+fn gift_calls(patch: &Value) -> Vec<Value> {
+    let Some(gifts) = patch.get("gifts").and_then(|g| g.as_array()) else {
+        return vec![];
+    };
+    let mut out = vec![];
+    for gift in gifts {
+        let title = gift.as_str().map(|s| s.to_string()).or_else(|| {
+            gift.get("title")
+                .and_then(|t| t.as_str())
+                .map(|s| s.to_string())
+        });
+        let Some(title) = title else { continue };
+        let mut args = json!({ "title": title });
+        if let Some(value) = gift.get("value") {
+            args["value"] = value.clone();
+        }
+        if let Some(kind) = gift.get("kind") {
+            args["kind"] = kind.clone();
+        }
+        out.push(args);
+    }
+    out
+}
+
+/// Tool calls that write one man's patch fields onto an existing dossier.
+fn man_calls(man_id: &str, patch: &Value) -> Vec<(String, Value)> {
     let mut calls: Vec<(String, Value)> = vec![];
 
     let mut update = serde_json::Map::new();
@@ -410,24 +573,9 @@ pub fn apply_patch(
         }
     }
 
-    if let Some(gifts) = patch.get("gifts").and_then(|g| g.as_array()) {
-        for gift in gifts {
-            let title = gift.as_str().map(|s| s.to_string()).or_else(|| {
-                gift.get("title")
-                    .and_then(|t| t.as_str())
-                    .map(|s| s.to_string())
-            });
-            if let Some(title) = title {
-                let mut args = json!({ "man_id": man_id, "title": title });
-                if let Some(value) = gift.get("value") {
-                    args["value"] = value.clone();
-                }
-                if let Some(kind) = gift.get("kind") {
-                    args["kind"] = kind.clone();
-                }
-                calls.push(("add_gift".into(), args));
-            }
-        }
+    for mut args in gift_calls(patch) {
+        args["man_id"] = json!(man_id);
+        calls.push(("add_gift".into(), args));
     }
 
     let mut tag_args = json!({ "man_id": man_id });
@@ -445,35 +593,7 @@ pub fn apply_patch(
         calls.push(("add_tags".into(), tag_args));
     }
 
-    for (tool, args) in calls {
-        match tools::execute(scope, security, &tool, &args) {
-            Ok(outcome) => {
-                if let Some(action) = outcome.queued {
-                    pending.push(action);
-                }
-                let step = RunStep {
-                    kind: if outcome.applied {
-                        "patch".into()
-                    } else {
-                        "patch_pending".into()
-                    },
-                    tool: Some(tool),
-                    summary: outcome.summary,
-                    detail: args,
-                };
-                emit(json!({ "kind": "step", "step": step }));
-                steps.push(step);
-            }
-            Err(err) => steps.push(RunStep {
-                kind: "patch_error".into(),
-                tool: Some(tool),
-                summary: err.to_string(),
-                detail: args,
-            }),
-        }
-    }
-
-    Ok((steps, pending))
+    calls
 }
 
 // ---------------------------------------------------------------------------
@@ -699,6 +819,105 @@ mod tests {
         .unwrap();
         assert!(pending.is_empty());
         assert_eq!(steps[0].kind, "warn");
+    }
+
+    /// Dictation about men who have no dossier yet used to be dropped with a
+    /// warning. Each entry now creates one, with its facts attached.
+    #[test]
+    fn patch_creates_dossiers_for_unknown_men() {
+        let scope = scope();
+        let patch = json!({
+            "men": [
+                {
+                    "name": "Влад",
+                    "id": "3786141",
+                    "age": 44,
+                    "location": "Гамбург",
+                    "facts": [{ "key": "работа", "value": "механик" }],
+                    "notes": ["написал из списка интересов"],
+                    "tags": ["новый"]
+                },
+                { "name": "Sven" }
+            ]
+        });
+        let (steps, pending) =
+            apply_patch(&scope, SecurityLevel::Yolo, None, &patch, &|_| {}).unwrap();
+
+        assert!(pending.is_empty());
+        assert!(
+            steps.iter().all(|s| s.kind == "patch"),
+            "unexpected steps: {steps:?}"
+        );
+
+        let vlad = scope.read_man("3786141").unwrap();
+        assert_eq!(vlad.name, "Влад");
+        assert_eq!(vlad.age, Some(44));
+        assert_eq!(vlad.location, "Гамбург");
+        assert_eq!(vlad.facts.len(), 1);
+        assert_eq!(vlad.facts[0].value, "механик");
+        assert_eq!(vlad.notes.len(), 1);
+        assert_eq!(vlad.tags, vec!["новый".to_string()]);
+
+        let men = scope.read_all_men().unwrap();
+        assert!(men.iter().any(|m| m.name == "Sven"));
+        assert_eq!(men.len(), 3, "Hartwig plus the two new ones");
+    }
+
+    /// A second dictation about the same man must land on his dossier instead
+    /// of forking a duplicate — matched by id, and by name when no id is given.
+    #[test]
+    fn patch_matches_existing_men_instead_of_duplicating() {
+        let scope = scope();
+        let patch = json!({
+            "men": [
+                { "name": "hartwig", "facts": [{ "key": "health", "value": "epilepsy" }] },
+                { "name": "Anything", "id": "1219749", "status": "ждёт письма" }
+            ]
+        });
+        apply_patch(&scope, SecurityLevel::Yolo, None, &patch, &|_| {}).unwrap();
+
+        assert_eq!(scope.read_all_men().unwrap().len(), 1);
+        let man = scope.read_man("1219749").unwrap();
+        assert_eq!(man.name, "Hartwig", "a match must not rename him");
+        assert_eq!(man.facts.len(), 1);
+        assert_eq!(man.status, "ждёт письма");
+    }
+
+    /// Under ASK the whole dossier is one queued action, so approving it later
+    /// cannot leave facts pointing at a man who was never written.
+    #[test]
+    fn creating_a_man_under_ask_is_a_single_action() {
+        let scope = scope();
+        let patch = json!({
+            "men": [{
+                "name": "Влад",
+                "facts": [{ "key": "работа", "value": "механик" }],
+                "notes": ["из списка интересов"]
+            }]
+        });
+        let (_steps, pending) =
+            apply_patch(&scope, SecurityLevel::Ask, None, &patch, &|_| {}).unwrap();
+
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].tool, "create_man");
+        assert_eq!(pending[0].after["facts"].as_array().unwrap().len(), 1);
+        assert_eq!(pending[0].after["notes"].as_array().unwrap().len(), 1);
+        assert_eq!(scope.read_all_men().unwrap().len(), 1);
+    }
+
+    /// Without a selected man, a patch that names whom it is about is applied
+    /// rather than skipped.
+    #[test]
+    fn top_level_patch_with_a_name_is_attributed() {
+        let scope = scope();
+        let patch = json!({ "name": "Hartwig", "status": "перезвонит вечером" });
+        let (steps, _) = apply_patch(&scope, SecurityLevel::Yolo, None, &patch, &|_| {}).unwrap();
+
+        assert!(steps.iter().all(|s| s.kind != "warn"));
+        assert_eq!(
+            scope.read_man("1219749").unwrap().status,
+            "перезвонит вечером"
+        );
     }
 
     #[test]

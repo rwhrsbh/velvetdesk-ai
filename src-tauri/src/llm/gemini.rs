@@ -142,6 +142,11 @@ fn build_body(provider: &ProviderConfig, request: &ChatRequest) -> Value {
 }
 
 /// Gemini rejects a few JSON-schema keywords that OpenAI tolerates.
+///
+/// Only *keywords* are dropped. Inside `properties` the keys are property
+/// names chosen by us, so a tool taking an argument called `title` or
+/// `default` must keep it — dropping one there leaves `required` pointing at a
+/// property that no longer exists, which Gemini rejects with HTTP 400.
 fn sanitize_schema(schema: &Value) -> Value {
     match schema {
         Value::Object(map) => {
@@ -153,7 +158,16 @@ fn sanitize_schema(schema: &Value) -> Value {
                 ) {
                     continue;
                 }
-                out.insert(k.clone(), sanitize_schema(v));
+                let value = match (k.as_str(), v) {
+                    ("properties", Value::Object(props)) => Value::Object(
+                        props
+                            .iter()
+                            .map(|(name, sub)| (name.clone(), sanitize_schema(sub)))
+                            .collect(),
+                    ),
+                    _ => sanitize_schema(v),
+                };
+                out.insert(k.clone(), value);
             }
             Value::Object(out)
         }
@@ -289,6 +303,58 @@ mod tests {
         assert!(body["tools"][0]["functionDeclarations"][0]["parameters"]
             .get("additionalProperties")
             .is_none());
+    }
+
+    /// A property may legitimately be called `title` or `default`. Stripping it
+    /// as if it were a schema keyword used to leave `required` dangling, which
+    /// Gemini answered with
+    /// `parameters.required[1]: property is not defined` (HTTP 400).
+    #[test]
+    fn keeps_properties_named_like_schema_keywords() {
+        let mut req = ChatRequest::new("");
+        req.tools.push(ToolDef {
+            name: "add_gift".into(),
+            description: "record a gift".into(),
+            parameters: json!({
+                "type": "object",
+                "title": "dropped, this one is a keyword",
+                "properties": {
+                    "man_id": { "type": "string" },
+                    "title": { "type": "string", "description": "what he sent" },
+                    "default": { "type": "string" }
+                },
+                "required": ["man_id", "title"]
+            }),
+        });
+        let params = build_body(&provider(), &req)["tools"][0]["functionDeclarations"][0]
+            ["parameters"]
+            .clone();
+        assert!(params.get("title").is_none(), "keyword must be stripped");
+        assert!(params["properties"]["title"].is_object());
+        assert!(params["properties"]["default"].is_object());
+    }
+
+    /// Every declared tool must survive sanitising with `required` still fully
+    /// covered by `properties` — otherwise the whole request is rejected.
+    #[test]
+    fn every_tool_stays_consistent_after_sanitising() {
+        let mut req = ChatRequest::new("");
+        req.tools = crate::agent::tools::tool_defs();
+        let body = build_body(&provider(), &req);
+        let declarations = body["tools"][0]["functionDeclarations"].as_array().unwrap();
+        assert_eq!(declarations.len(), req.tools.len());
+        for declaration in declarations {
+            let params = &declaration["parameters"];
+            let properties = params["properties"].as_object().unwrap();
+            for name in params["required"].as_array().unwrap_or(&vec![]) {
+                let name = name.as_str().unwrap();
+                assert!(
+                    properties.contains_key(name),
+                    "{}: required property `{name}` is not defined",
+                    declaration["name"]
+                );
+            }
+        }
     }
 
     #[test]
