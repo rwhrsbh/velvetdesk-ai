@@ -3,7 +3,7 @@
 
 use serde_json::{json, Value};
 
-use super::{CallError, ChatRequest, ChatResponse, Role, ToolCall, Usage};
+use super::{CallError, ChatRequest, ChatResponse, Role, Thinking, ToolCall, Usage};
 use crate::config::ProviderConfig;
 
 pub async fn call(
@@ -72,9 +72,16 @@ fn build_body(provider: &ProviderConfig, request: &ChatRequest) -> Value {
                     parts.push(json!({ "text": msg.content }));
                 }
                 for call in &msg.tool_calls {
-                    parts.push(json!({
+                    let mut part = json!({
                         "functionCall": { "name": call.name, "args": call.args }
-                    }));
+                    });
+                    // Without the signature Gemini 3 rejects the whole request:
+                    // "Function call is missing a thought_signature in
+                    // functionCall parts" (HTTP 400).
+                    if !call.signature.is_empty() {
+                        part["thoughtSignature"] = json!(call.signature);
+                    }
+                    parts.push(part);
                 }
                 if parts.is_empty() {
                     parts.push(json!({ "text": "" }));
@@ -107,6 +114,7 @@ fn build_body(provider: &ProviderConfig, request: &ChatRequest) -> Value {
     if request.force_json {
         generation_config["responseMimeType"] = json!("application/json");
     }
+    apply_thinking(&mut generation_config, &request.thinking);
 
     let mut body = json!({
         "contents": contents,
@@ -139,6 +147,27 @@ fn build_body(provider: &ProviderConfig, request: &ChatRequest) -> Value {
     }
 
     body
+}
+
+/// Gemini takes reasoning controls two ways: a level (`thinkingLevel`, the
+/// current models) and a token budget (`thinkingConfig.thinkingBudget`, which
+/// 2.x models still honour and which is also the only way to switch thinking
+/// off entirely, with 0).
+fn apply_thinking(config: &mut Value, thinking: &Thinking) {
+    if let Some(budget) = thinking.budget_tokens {
+        config["thinkingConfig"] = json!({ "thinkingBudget": budget });
+        return;
+    }
+    let Some(level) = thinking.level() else {
+        return;
+    };
+    match level {
+        "none" | "off" => config["thinkingConfig"] = json!({ "thinkingBudget": 0 }),
+        // Gemini publishes minimal / low / medium / high; anything above high
+        // is the same instruction to it.
+        "xhigh" | "max" => config["thinkingLevel"] = json!("high"),
+        other => config["thinkingLevel"] = json!(other),
+    }
 }
 
 /// Gemini rejects a few JSON-schema keywords that OpenAI tolerates.
@@ -219,10 +248,16 @@ fn parse_response(value: &Value) -> Result<ChatResponse, CallError> {
                     .get("args")
                     .cloned()
                     .unwrap_or(Value::Object(Default::default()));
+                let signature = part
+                    .get("thoughtSignature")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or_default()
+                    .to_string();
                 tool_calls.push(ToolCall {
                     id: format!("gem-{}-{}", name, tool_calls.len()),
                     name,
                     args,
+                    signature,
                 });
             }
         }
@@ -276,6 +311,10 @@ mod tests {
             temperature: 0.8,
             max_output_tokens: None,
             transcribe_model: String::new(),
+            thinking_effort: String::new(),
+            thinking_budget: None,
+            reasoning_dialect: "auto".into(),
+            context_tokens: None,
             key_count: 1,
         }
     }
@@ -355,6 +394,93 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Gemini 3 signs each function call and rejects the follow-up turn unless
+    /// the signature is echoed back: "Function call is missing a
+    /// thought_signature in functionCall parts" (HTTP 400). Parse it, then put
+    /// it back on the wire.
+    #[test]
+    fn thought_signatures_survive_the_round_trip() {
+        let raw = json!({
+            "candidates": [{
+                "content": { "parts": [{
+                    "functionCall": { "name": "list_men", "args": {} },
+                    "thoughtSignature": "Cs4BAdHtim8abc"
+                }] },
+                "finishReason": "STOP"
+            }]
+        });
+        let parsed = parse_response(&raw).unwrap();
+        assert_eq!(parsed.tool_calls[0].signature, "Cs4BAdHtim8abc");
+
+        let mut req = ChatRequest::new("");
+        req.messages.push(LlmMessage {
+            role: Role::Assistant,
+            content: String::new(),
+            tool_calls: parsed.tool_calls.clone(),
+            tool_name: None,
+            tool_call_id: None,
+        });
+        let part = &build_body(&provider(), &req)["contents"][0]["parts"][0];
+        assert_eq!(part["functionCall"]["name"], "list_men");
+        assert_eq!(part["thoughtSignature"], "Cs4BAdHtim8abc");
+    }
+
+    /// A provider that signs nothing must not gain an empty signature field.
+    #[test]
+    fn unsigned_calls_stay_unsigned() {
+        let mut req = ChatRequest::new("");
+        req.messages.push(LlmMessage {
+            role: Role::Assistant,
+            content: String::new(),
+            tool_calls: vec![ToolCall {
+                id: "1".into(),
+                name: "get_man".into(),
+                args: json!({}),
+                signature: String::new(),
+            }],
+            tool_name: None,
+            tool_call_id: None,
+        });
+        let part = &build_body(&provider(), &req)["contents"][0]["parts"][0];
+        assert!(part.get("thoughtSignature").is_none());
+    }
+
+    #[test]
+    fn thinking_level_and_budget_reach_the_request() {
+        let mut req = ChatRequest::new("");
+        req.thinking = Thinking {
+            effort: "high".into(),
+            budget_tokens: None,
+        };
+        let config = build_body(&provider(), &req)["generationConfig"].clone();
+        assert_eq!(config["thinkingLevel"], "high");
+        assert!(config.get("thinkingConfig").is_none());
+
+        // A budget wins over a level, and is the only way to switch thinking
+        // off on the models that still take one.
+        req.thinking = Thinking {
+            effort: "high".into(),
+            budget_tokens: Some(2048),
+        };
+        let config = build_body(&provider(), &req)["generationConfig"].clone();
+        assert_eq!(config["thinkingConfig"]["thinkingBudget"], 2048);
+        assert!(config.get("thinkingLevel").is_none());
+
+        // "none" has no level of its own in the API — it is a zero budget.
+        req.thinking = Thinking {
+            effort: "none".into(),
+            budget_tokens: None,
+        };
+        let config = build_body(&provider(), &req)["generationConfig"].clone();
+        assert_eq!(config["thinkingConfig"]["thinkingBudget"], 0);
+
+        // Nothing chosen must leave the request exactly as it was.
+        req.thinking = Thinking::default();
+        let config = build_body(&provider(), &req)["generationConfig"].clone();
+        assert!(config.get("thinkingLevel").is_none());
+        assert!(config.get("thinkingConfig").is_none());
     }
 
     #[test]

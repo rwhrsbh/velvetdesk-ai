@@ -270,6 +270,63 @@ pub async fn run_agent(
     Ok(output)
 }
 
+/// What the correspondence currently costs, so the UI can show a gauge and
+/// the operator knows when compaction is due.
+#[tauri::command]
+pub fn context_stats(
+    state: State<'_, AppState>,
+    model_id: String,
+    man_id: Option<String>,
+) -> Result<agent::ContextStats> {
+    let settings = state.settings_view();
+    let provider = state.active_provider()?;
+    let scope = state.paths.scope(&model_id)?;
+    agent::context_stats(&scope, &settings, &provider, man_id.as_deref())
+}
+
+/// Drop the correspondence from the prompt without deleting a single message
+/// or a single remembered fact.
+#[tauri::command]
+pub fn clear_context(
+    state: State<'_, AppState>,
+    model_id: String,
+    man_id: String,
+) -> Result<agent::ContextStats> {
+    let scope = state.paths.scope(&model_id)?;
+    agent::clear_context(&scope, &man_id)?;
+    let settings = state.settings_view();
+    let provider = state.active_provider()?;
+    agent::context_stats(&scope, &settings, &provider, Some(&man_id))
+}
+
+/// Summarise the older messages and keep only the tail verbatim.
+#[tauri::command]
+pub async fn compact_context(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    model_id: String,
+    man_id: String,
+    keep_last: Option<usize>,
+) -> Result<agent::ContextStats> {
+    let settings = state.settings_view();
+    let provider = state.active_provider()?;
+    let pool = state.pool(&provider.id);
+    let emit = emitter(&app);
+    let scope = state.paths.scope(&model_id)?;
+
+    let deps = AgentDeps {
+        paths: &state.paths,
+        settings: &settings,
+        provider: &provider,
+        pool,
+        llm: &state.llm,
+        emit: &emit,
+    };
+
+    agent::compact_context(&deps, &scope, &man_id, keep_last.unwrap_or(6)).await?;
+    agent::context_stats(&scope, &settings, &provider, Some(&man_id))
+}
+
 #[tauri::command]
 pub async fn master_route(
     app: AppHandle,
@@ -476,6 +533,7 @@ pub async fn transcribe(
     state: State<'_, AppState>,
     audio_base64: String,
     mime: String,
+    language: Option<String>,
 ) -> Result<String> {
     if audio_base64.trim().is_empty() {
         return Err(AppError::Invalid("пустая запись".into()));
@@ -492,12 +550,18 @@ pub async fn transcribe(
         AppError::NoKeys(format!("у провайдера {} нет рабочего ключа", provider.id))
     })?;
 
+    let language = language.unwrap_or_else(|| {
+        let settings = state.settings.read();
+        settings.speech_language.clone()
+    });
+
     match crate::llm::catalog::transcribe(
         &state.llm.http,
         &provider,
         &lease.key,
         &audio_base64,
         &mime,
+        &language,
     )
     .await
     {

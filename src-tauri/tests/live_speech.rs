@@ -24,6 +24,10 @@ fn gemini(model: &str, speech: &str) -> ProviderConfig {
         extra_headers: vec![],
         temperature: 0.0,
         max_output_tokens: None,
+        thinking_effort: String::new(),
+        thinking_budget: None,
+        reasoning_dialect: "auto".into(),
+        context_tokens: None,
         transcribe_model: speech.into(),
         key_count: 1,
     }
@@ -40,6 +44,10 @@ fn groq(speech: &str) -> ProviderConfig {
         extra_headers: vec![],
         temperature: 0.0,
         max_output_tokens: None,
+        thinking_effort: String::new(),
+        thinking_budget: None,
+        reasoning_dialect: "auto".into(),
+        context_tokens: None,
         transcribe_model: speech.into(),
         key_count: 1,
     }
@@ -200,7 +208,7 @@ async fn gemini_transcribes_speech_through_generate_content() {
         .expect("tts sample for the transcription test");
 
     let provider = gemini("gemini-2.5-flash", "gemini-2.5-flash");
-    let text = catalog::transcribe(&http, &provider, &api_key, &clip, "audio/wav")
+    let text = catalog::transcribe(&http, &provider, &api_key, &clip, "audio/wav", "ru")
         .await
         .unwrap_or_else(|err| panic!("inline transcription failed: {}", err.message()));
 
@@ -225,7 +233,7 @@ async fn gemini_transcribes_speech_through_interactions_api() {
 
     // Dedicated speech model: uploads via Files API, then Interactions.
     let provider = gemini("gemini-2.5-flash", "gemini-3.5-transcribe");
-    let text = catalog::transcribe(&http, &provider, &api_key, &clip, "audio/wav")
+    let text = catalog::transcribe(&http, &provider, &api_key, &clip, "audio/wav", "ru")
         .await
         .unwrap_or_else(|err| panic!("interactions transcription failed: {}", err.message()));
 
@@ -247,9 +255,16 @@ async fn silence_is_reported_as_an_empty_transcript() {
     // A pure tone carries no speech: the app must show "nothing recognised"
     // rather than an error.
     let provider = gemini("gemini-2.5-flash", "gemini-3.5-transcribe");
-    let text = catalog::transcribe(&http, &provider, &api_key, &clip_base64(), "audio/wav")
-        .await
-        .unwrap_or_else(|err| panic!("silent clip must not fail: {}", err.message()));
+    let text = catalog::transcribe(
+        &http,
+        &provider,
+        &api_key,
+        &clip_base64(),
+        "audio/wav",
+        "ru",
+    )
+    .await
+    .unwrap_or_else(|err| panic!("silent clip must not fail: {}", err.message()));
     println!("silent clip transcript: {text:?}");
     assert!(text.trim().is_empty());
 }
@@ -263,7 +278,16 @@ async fn groq_transcribes_through_openai_endpoint() {
     };
     let http = reqwest::Client::new();
     let provider = groq("whisper-large-v3-turbo");
-    match catalog::transcribe(&http, &provider, &api_key, &clip_base64(), "audio/wav").await {
+    match catalog::transcribe(
+        &http,
+        &provider,
+        &api_key,
+        &clip_base64(),
+        "audio/wav",
+        "ru",
+    )
+    .await
+    {
         Ok(text) => println!("groq transcript: {text:?}"),
         Err(err) => panic!("groq transcription failed: {}", err.message()),
     }
@@ -281,7 +305,7 @@ async fn local_server_transcribes() {
     let http = reqwest::Client::new();
     let mut provider = groq(&std::env::var("LOCAL_STT_MODEL").unwrap_or("whisper-1".into()));
     provider.base_url = base;
-    match catalog::transcribe(&http, &provider, "local", &clip_base64(), "audio/wav").await {
+    match catalog::transcribe(&http, &provider, "local", &clip_base64(), "audio/wav", "ru").await {
         Ok(text) => println!("local transcript: {text:?}"),
         Err(err) => panic!("local transcription failed: {}", err.message()),
     }

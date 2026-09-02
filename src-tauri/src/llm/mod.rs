@@ -25,6 +25,10 @@ pub struct ToolCall {
     pub id: String,
     pub name: String,
     pub args: Value,
+    /// Gemini 3 signs every function call it makes and refuses the next turn
+    /// unless the signature comes back with it. Empty for other providers.
+    #[serde(default)]
+    pub signature: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,6 +95,32 @@ pub struct ChatRequest {
     pub max_output_tokens: Option<u32>,
     /// Ask the provider for a raw JSON object (used by ACT / MEMORIZE).
     pub force_json: bool,
+    /// How hard to think on this call.
+    pub thinking: Thinking,
+}
+
+/// Reasoning controls, in the two shapes vendors offer: a level, or a number
+/// of tokens. Empty and `None` mean "leave the provider on its default".
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Thinking {
+    #[serde(default)]
+    pub effort: String,
+    #[serde(default)]
+    pub budget_tokens: Option<i32>,
+}
+
+impl Thinking {
+    pub fn is_default(&self) -> bool {
+        self.effort.trim().is_empty() && self.budget_tokens.is_none()
+    }
+
+    /// Levels every vendor understands, normalised.
+    pub fn level(&self) -> Option<&str> {
+        match self.effort.trim() {
+            "" => None,
+            other => Some(other),
+        }
+    }
 }
 
 impl ChatRequest {
@@ -102,6 +132,7 @@ impl ChatRequest {
             temperature: 0.85,
             max_output_tokens: None,
             force_json: false,
+            thinking: Thinking::default(),
         }
     }
 }

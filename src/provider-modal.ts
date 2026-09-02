@@ -30,6 +30,13 @@ const BASE_URL_PRESETS = [
   "http://localhost:8000/v1",
 ];
 
+/** The catalogue note lives in the dictionaries, keyed by model id. */
+function modelNote(model: LocalModel): string {
+  const key = `local.${model.id}.note`;
+  const translated = t(key);
+  return translated === key ? model.note : translated;
+}
+
 function formatSize(bytes: number): string {
   return `${Math.round(bytes / 1_048_576)} MB`;
 }
@@ -267,7 +274,7 @@ export async function openKeysModal(deps: ModalDeps) {
                     ${escapeHtml(m.label)}
                   </label>
                 </div>
-                <div class="meta">${escapeHtml(m.note)} · ${formatSize(m.size_bytes)}</div>
+                <div class="meta">${escapeHtml(modelNote(m))} \u00b7 ${formatSize(m.size_bytes)}</div>
                 <div class="meta" data-progress="${escapeHtml(m.id)}">${
                   m.installed ? t("keys.modelReady") : ""
                 }</div>
@@ -308,6 +315,39 @@ export async function openKeysModal(deps: ModalDeps) {
           <textarea class="field-area" id="headers" placeholder="HTTP-Referer: https://example.com">${escapeHtml(
             p.extra_headers.map(([k, v]) => `${k}: ${v}`).join("\n"),
           )}</textarea>
+        </div>
+        <div class="field-grid">
+          <div class="field">
+            <label>${t("keys.thinkingBudget")}</label>
+            <input class="field-input" id="thinkingBudget" type="number" min="-1" max="32768" step="128"
+                   placeholder="${t("keys.thinkingBudgetHint")}"
+                   value="${p.thinking_budget ?? ""}" />
+          </div>
+          <div class="field">
+            <label>${t("keys.contextTokens")}</label>
+            <input class="field-input" id="contextTokens" type="number" min="1024" step="1024"
+                   placeholder="${t("keys.contextAuto")}" value="${p.context_tokens ?? ""}" />
+          </div>
+        </div>
+        <div class="field-grid">
+          <div class="field">
+            <label>${t("keys.dialect")}</label>
+            <select class="field-input" id="reasoningDialect" ${isGemini ? "disabled" : ""}>
+              ${["auto", "openai", "openrouter", "qwen"]
+                .map(
+                  (d) =>
+                    `<option value="${d}" ${p.reasoning_dialect === d ? "selected" : ""}>${
+                      d === "auto" ? t("keys.dialectAuto") : d
+                    }</option>`,
+                )
+                .join("")}
+            </select>
+          </div>
+          <div class="field">
+            <label>${t("keys.autoCompact")}</label>
+            <input class="field-input" id="autoCompact" type="number" min="30" max="99"
+                   value="${Math.round((settings.auto_compact_at ?? 0.85) * 100)}" />
+          </div>
         </div>
         <div class="field-grid">
           <div class="field"><label>${t("keys.history")}</label>
@@ -517,12 +557,27 @@ export async function openKeysModal(deps: ModalDeps) {
         Number(card.querySelector<HTMLInputElement>("#historyLimit")?.value) || settings.history_limit;
       settings.max_tool_turns =
         Number(card.querySelector<HTMLInputElement>("#maxTurns")?.value) || settings.max_tool_turns;
+      const compactPercent = Number(card.querySelector<HTMLInputElement>("#autoCompact")?.value);
+      if (compactPercent >= 30 && compactPercent <= 99) {
+        settings.auto_compact_at = compactPercent / 100;
+      }
+
+      const numberOrNull = (id: string): number | null => {
+        const raw = card.querySelector<HTMLInputElement>(id)?.value.trim() ?? "";
+        if (!raw) return null;
+        const value = Number(raw);
+        return Number.isFinite(value) ? value : null;
+      };
 
       await persist({
         model,
         base_url: card.querySelector<HTMLInputElement>("#baseUrl")?.value.trim() ?? p.base_url,
         api_version: card.querySelector<HTMLInputElement>("#apiVersion")?.value.trim() ?? p.api_version,
         temperature: Number(card.querySelector<HTMLInputElement>("#temperature")?.value ?? p.temperature),
+        thinking_budget: numberOrNull("#thinkingBudget"),
+        context_tokens: numberOrNull("#contextTokens"),
+        reasoning_dialect:
+          card.querySelector<HTMLSelectElement>("#reasoningDialect")?.value ?? p.reasoning_dialect,
         extra_headers: (card.querySelector<HTMLTextAreaElement>("#headers")?.value ?? "")
           .split("\n")
           .map((line) => line.trim())

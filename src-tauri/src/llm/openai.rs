@@ -3,7 +3,7 @@
 
 use serde_json::{json, Value};
 
-use super::{CallError, ChatRequest, ChatResponse, Role, ToolCall, Usage};
+use super::{CallError, ChatRequest, ChatResponse, Role, Thinking, ToolCall, Usage};
 use crate::config::ProviderConfig;
 
 pub async fn call(
@@ -125,7 +125,57 @@ fn build_body(provider: &ProviderConfig, request: &ChatRequest) -> Value {
         body["tool_choice"] = json!("auto");
     }
 
+    apply_thinking(&mut body, provider, &request.thinking);
+
     body
+}
+
+/// OpenAI-compatible endpoints spell reasoning control three different ways,
+/// and sending the wrong one is a 400 rather than a silent no-op — OpenAI
+/// rejects unknown body parameters. The dialect comes from the provider
+/// settings, inferred from the endpoint unless the operator picked one.
+fn apply_thinking(body: &mut Value, provider: &ProviderConfig, thinking: &Thinking) {
+    if thinking.is_default() {
+        return;
+    }
+    match provider.dialect() {
+        // OpenRouter's unified `reasoning` object, which it translates for
+        // whichever upstream model is behind the request.
+        "openrouter" => {
+            let mut reasoning = json!({});
+            if let Some(budget) = thinking.budget_tokens {
+                reasoning["max_tokens"] = json!(budget);
+            }
+            match thinking.level() {
+                Some("none") | Some("off") => reasoning["enabled"] = json!(false),
+                Some(level) => reasoning["effort"] = json!(level),
+                None => {}
+            }
+            body["reasoning"] = reasoning;
+        }
+        // Alibaba's models: an on/off switch plus a token budget.
+        "qwen" => {
+            match thinking.level() {
+                Some("none") | Some("off") => {
+                    body["enable_thinking"] = json!(false);
+                }
+                Some(_) => body["enable_thinking"] = json!(true),
+                None => {}
+            }
+            if let Some(budget) = thinking.budget_tokens {
+                body["enable_thinking"] = json!(budget != 0);
+                body["thinking_budget"] = json!(budget);
+            }
+        }
+        // Plain OpenAI (and Groq, Azure, most local servers): a single level.
+        // A budget has no equivalent here, so it is left out rather than
+        // guessed at.
+        _ => {
+            if let Some(level) = thinking.level() {
+                body["reasoning_effort"] = json!(level);
+            }
+        }
+    }
 }
 
 fn parse_response(value: &Value) -> Result<ChatResponse, CallError> {
@@ -179,6 +229,7 @@ fn parse_response(value: &Value) -> Result<ChatResponse, CallError> {
                     .unwrap_or_else(|| format!("call-{i}")),
                 name,
                 args,
+                signature: String::new(),
             });
         }
     }
@@ -231,7 +282,67 @@ mod tests {
             temperature: 0.7,
             max_output_tokens: Some(2048),
             transcribe_model: String::new(),
+            thinking_effort: String::new(),
+            thinking_budget: None,
+            reasoning_dialect: "auto".into(),
+            context_tokens: None,
             key_count: 1,
+        }
+    }
+
+    fn provider_at(url: &str) -> ProviderConfig {
+        let mut p = provider();
+        p.base_url = url.into();
+        p
+    }
+
+    /// Each endpoint gets the spelling it understands — sending OpenAI a
+    /// `reasoning` object, or OpenRouter a `reasoning_effort`, is a 400.
+    #[test]
+    fn reasoning_uses_the_dialect_of_the_endpoint() {
+        let mut req = ChatRequest::new("");
+        req.thinking = Thinking {
+            effort: "high".into(),
+            budget_tokens: None,
+        };
+
+        let openai = build_body(&provider_at("https://api.openai.com/v1"), &req);
+        assert_eq!(openai["reasoning_effort"], "high");
+        assert!(openai.get("reasoning").is_none());
+
+        let router = build_body(&provider_at("https://openrouter.ai/api/v1"), &req);
+        assert_eq!(router["reasoning"]["effort"], "high");
+        assert!(router.get("reasoning_effort").is_none());
+
+        let qwen = build_body(
+            &provider_at("https://dashscope.aliyuncs.com/compatible-mode/v1"),
+            &req,
+        );
+        assert_eq!(qwen["enable_thinking"], true);
+
+        // A budget is only meaningful where it is supported.
+        req.thinking = Thinking {
+            effort: String::new(),
+            budget_tokens: Some(4096),
+        };
+        let router = build_body(&provider_at("https://openrouter.ai/api/v1"), &req);
+        assert_eq!(router["reasoning"]["max_tokens"], 4096);
+        let openai = build_body(&provider_at("https://api.openai.com/v1"), &req);
+        assert!(openai.get("reasoning_effort").is_none());
+    }
+
+    /// Nothing chosen must not add a single field.
+    #[test]
+    fn default_thinking_adds_nothing() {
+        let req = ChatRequest::new("");
+        let body = build_body(&provider_at("https://api.openai.com/v1"), &req);
+        for key in [
+            "reasoning",
+            "reasoning_effort",
+            "enable_thinking",
+            "thinking_budget",
+        ] {
+            assert!(body.get(key).is_none(), "{key} must be absent");
         }
     }
 

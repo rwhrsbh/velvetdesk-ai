@@ -61,10 +61,16 @@ pub fn run() {
             }
         })
         .setup(|app| {
-            let base = app
-                .path()
-                .app_data_dir()
-                .map_err(|e| format!("no app data dir: {e}"))?;
+            // A separate data directory can be requested with VELVETDESK_DATA_DIR:
+            // it keeps a development or test run from touching the operator's
+            // real profiles, which live in the platform app-data directory.
+            let base = match std::env::var_os("VELVETDESK_DATA_DIR") {
+                Some(dir) if !dir.is_empty() => std::path::PathBuf::from(dir),
+                _ => app
+                    .path()
+                    .app_data_dir()
+                    .map_err(|e| format!("no app data dir: {e}"))?,
+            };
             let paths = Paths::new(base).map_err(|e| e.to_string())?;
             // Warm the index so the first render is instant.
             let _ = storage::rebuild_index(&paths);
@@ -89,6 +95,9 @@ pub fn run() {
             commands::get_agent_log,
             commands::clear_agent_log,
             commands::run_agent,
+            commands::context_stats,
+            commands::clear_context,
+            commands::compact_context,
             commands::master_route,
             commands::global_search,
             commands::rebuild_index,

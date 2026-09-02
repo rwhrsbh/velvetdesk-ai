@@ -34,9 +34,84 @@ pub struct ProviderConfig {
     /// Gemini and `whisper-1` for OpenAI-compatible endpoints.
     #[serde(default)]
     pub transcribe_model: String,
+    /// How hard the model should think. Empty means "provider default"; the
+    /// rest are the levels every vendor now agrees on:
+    /// none | minimal | low | medium | high | xhigh.
+    #[serde(default)]
+    pub thinking_effort: String,
+    /// Thinking budget in tokens, for models that take a number instead of a
+    /// level (Gemini 2.x, Qwen). `-1` asks Gemini to decide for itself.
+    #[serde(default)]
+    pub thinking_budget: Option<i32>,
+    /// Which spelling of the reasoning knob this endpoint understands:
+    /// auto | openai | openrouter | qwen. Ignored for Gemini, which is native.
+    #[serde(default = "default_dialect")]
+    pub reasoning_dialect: String,
+    /// Context window in tokens. Empty falls back to a guess from the model
+    /// name, which is what drives automatic compaction.
+    #[serde(default)]
+    pub context_tokens: Option<u32>,
     /// Number of keys stored for this provider (mirrored from secrets).
     #[serde(default, skip_deserializing)]
     pub key_count: usize,
+}
+
+fn default_dialect() -> String {
+    "auto".into()
+}
+
+/// Rough context windows, by the part of the model name that gives it away.
+/// Only used when the operator has not typed a number of their own.
+const CONTEXT_GUESSES: &[(&str, u32)] = &[
+    ("gemini-3", 1_048_576),
+    ("gemini-2.5", 1_048_576),
+    ("gemini-2.0", 1_048_576),
+    ("gemini-1.5", 1_048_576),
+    ("gemini", 32_768),
+    ("gpt-5", 400_000),
+    ("gpt-4.1", 1_047_576),
+    ("gpt-4o", 128_000),
+    ("o3", 200_000),
+    ("o4", 200_000),
+    ("claude", 200_000),
+    ("deepseek", 128_000),
+    ("qwen", 131_072),
+    ("llama-4", 131_072),
+    ("llama", 32_768),
+    ("mistral", 32_768),
+    ("kimi", 131_072),
+];
+
+impl ProviderConfig {
+    /// Context window used for the "how full is it" figure and for deciding
+    /// when to compact.
+    pub fn context_window(&self) -> u32 {
+        if let Some(explicit) = self.context_tokens.filter(|n| *n > 0) {
+            return explicit;
+        }
+        let model = self.model.to_lowercase();
+        CONTEXT_GUESSES
+            .iter()
+            .find(|(needle, _)| model.contains(needle))
+            .map(|(_, size)| *size)
+            .unwrap_or(128_000)
+    }
+
+    /// The reasoning spelling to use, inferred from the endpoint when the
+    /// operator left it on "auto".
+    pub fn dialect(&self) -> &str {
+        if self.reasoning_dialect != "auto" && !self.reasoning_dialect.is_empty() {
+            return &self.reasoning_dialect;
+        }
+        let url = self.base_url.to_lowercase();
+        if url.contains("openrouter") {
+            "openrouter"
+        } else if url.contains("dashscope") || url.contains("aliyun") || url.contains("qwen") {
+            "qwen"
+        } else {
+            "openai"
+        }
+    }
 }
 
 impl ProviderConfig {
@@ -117,6 +192,19 @@ pub struct Settings {
     /// Id of the downloaded model used when the engine is local.
     #[serde(default)]
     pub local_speech_model: String,
+    /// Dictation language: "ru", "uk", "en" — or empty to follow the UI. An
+    /// empty language makes Whisper fall back to English and quietly translate,
+    /// which is never what an operator dictating Russian wants.
+    #[serde(default)]
+    pub speech_language: String,
+    /// Compact the correspondence automatically once the prompt reaches this
+    /// share of the context window.
+    #[serde(default = "default_auto_compact")]
+    pub auto_compact_at: f32,
+}
+
+fn default_auto_compact() -> f32 {
+    0.85
 }
 
 fn default_mode() -> AgentMode {
@@ -162,6 +250,10 @@ impl Default for Settings {
                     temperature: 0.85,
                     max_output_tokens: None,
                     transcribe_model: String::new(),
+                    thinking_effort: String::new(),
+                    thinking_budget: None,
+                    reasoning_dialect: default_dialect(),
+                    context_tokens: None,
                     key_count: 0,
                 },
                 ProviderConfig {
@@ -175,6 +267,10 @@ impl Default for Settings {
                     temperature: 0.85,
                     max_output_tokens: None,
                     transcribe_model: String::new(),
+                    thinking_effort: String::new(),
+                    thinking_budget: None,
+                    reasoning_dialect: default_dialect(),
+                    context_tokens: None,
                     key_count: 0,
                 },
                 ProviderConfig {
@@ -188,6 +284,10 @@ impl Default for Settings {
                     temperature: 0.85,
                     max_output_tokens: None,
                     transcribe_model: "whisper-large-v3-turbo".into(),
+                    thinking_effort: String::new(),
+                    thinking_budget: None,
+                    reasoning_dialect: default_dialect(),
+                    context_tokens: None,
                     key_count: 0,
                 },
             ],
@@ -203,6 +303,8 @@ impl Default for Settings {
             speech_provider: None,
             speech_engine: default_speech_engine(),
             local_speech_model: String::new(),
+            speech_language: String::new(),
+            auto_compact_at: default_auto_compact(),
         }
     }
 }

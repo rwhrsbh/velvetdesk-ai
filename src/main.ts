@@ -11,7 +11,7 @@ import {
 } from "./context-menu";
 import { openManForm, openProfileForm } from "./forms";
 import { openDoctorModal, openMasterModal, openPendingModal } from "./modals";
-import { transcribeLocally } from "./local-whisper";
+import { loadModel, SilentClipError, transcribeLocally } from "./local-whisper";
 import { openKeysModal } from "./provider-modal";
 import { activeMan, activeProfile, makeEntry, pushEntry, store } from "./store";
 import type { AgentMode, RunStep, SecurityLevel, Settings } from "./types";
@@ -39,6 +39,7 @@ async function loadIndexCounts() {
 }
 
 async function refresh() {
+  void refreshLocalModels();
   const [profiles, settings, pending] = await Promise.all([
     api.listProfiles(),
     api.getSettings(),
@@ -96,6 +97,7 @@ async function selectMan(manId: string | null) {
   }
   renderMen();
   renderScope();
+  void refreshContextGauge();
 }
 
 async function persistSettings(patch: Partial<Settings>) {
@@ -107,6 +109,7 @@ async function persistSettings(patch: Partial<Settings>) {
   } catch (error) {
     console.error("settings save failed", error);
   }
+  if ("speech_engine" in patch || "local_speech_model" in patch) warmLocalModel();
 }
 
 const deps: ModalDeps = { refresh, selectProfile: (id) => selectProfile(id), selectMan };
@@ -123,6 +126,8 @@ function activeProviderReady(): boolean {
 }
 
 async function sendMessage() {
+  const typed = ($("composerInput") as HTMLTextAreaElement).value.trim();
+  if (typed.startsWith("/") && (await runSlashCommand(typed))) return;
   const input = $("composerInput") as HTMLTextAreaElement;
   const text = input.value.trim();
   if (!text) return;
@@ -154,6 +159,7 @@ async function sendMessage() {
       message: text,
       channel: store.channel,
       log_incoming: store.logIncoming,
+      thinking_effort: store.thinking || undefined,
     });
 
     store.entries = store.entries.filter((e) => !e.transient);
@@ -180,6 +186,7 @@ async function sendMessage() {
     store.busy = false;
     ($("btnSend") as HTMLButtonElement).disabled = false;
     renderAll();
+    void refreshContextGauge();
   }
 }
 
@@ -204,22 +211,97 @@ async function refreshLocalModels() {
   } catch (error) {
     console.error("local models", error);
   }
+  warmLocalModel();
+}
+
+let warming: Promise<unknown> | null = null;
+
+/**
+ * Load the offline recogniser ahead of time.
+ *
+ * Building a session takes a few seconds; doing it on the first press made the
+ * button look dead. Whenever on-device dictation is the chosen engine the model
+ * is warmed in the background, so pressing Dictate starts recording at once.
+ */
+function warmLocalModel() {
+  if (store.settings?.speech_engine !== "local" || warming) return;
+  const repo = localModelRepo();
+  if (!repo) return;
+  warming = loadModel(repo)
+    .catch((error) => console.error("whisper warm-up failed", error))
+    .finally(() => {
+      warming = null;
+    });
+}
+
+/**
+ * Language for dictation: the operator's choice, or the interface language.
+ * Never empty — Whisper treats "no language" as English and silently
+ * translates, which turns dictated Russian into English prose.
+ */
+function speechLanguage(): string {
+  const chosen = store.settings?.speech_language?.trim();
+  if (chosen) return chosen;
+  return lang();
 }
 
 /** Run the clip through whichever engine the operator picked. */
 async function transcribeClip(blob: Blob, mime: string): Promise<string> {
+  const language = speechLanguage();
   if (store.settings?.speech_engine === "local") {
     const repo = localModelRepo();
     if (!repo) throw new Error(t("toast.localNoModel"));
     $("micLabel").textContent = t("composer.loadingModel");
-    return transcribeLocally(repo, blob);
+    return transcribeLocally(repo, blob, { language });
   }
   const base64 = await blobToBase64(blob);
-  return api.transcribe(base64, mime.split(";")[0]);
+  return api.transcribe(base64, mime.split(";")[0], language);
+}
+
+/**
+ * Live input level, shown while recording.
+ *
+ * Without it a dead microphone looks exactly like a working one until the
+ * transcript comes back as nonsense.
+ */
+let meter: { context: AudioContext; timer: number } | null = null;
+
+function startMeter(stream: MediaStream) {
+  stopMeter();
+  const context = new AudioContext();
+  const analyser = context.createAnalyser();
+  analyser.fftSize = 1024;
+  context.createMediaStreamSource(stream).connect(analyser);
+  const samples = new Float32Array(analyser.fftSize);
+  const bar = $("micLevel");
+  let peak = 0;
+
+  const timer = window.setInterval(() => {
+    analyser.getFloatTimeDomainData(samples);
+    let sum = 0;
+    for (let i = 0; i < samples.length; i += 1) sum += samples[i] * samples[i];
+    const rms = Math.sqrt(sum / samples.length);
+    peak = Math.max(peak, rms);
+    // Speech sits around 0.05–0.2 RMS; scale so normal talking fills the bar.
+    bar.style.width = `${Math.min(100, Math.round(rms * 600))}%`;
+  }, 100);
+
+  meter = { context, timer };
+  return () => peak;
+}
+
+function stopMeter() {
+  if (!meter) return;
+  window.clearInterval(meter.timer);
+  void meter.context.close();
+  meter = null;
+  const bar = document.getElementById("micLevel");
+  if (bar) bar.style.width = "0%";
 }
 
 let recorder: MediaRecorder | null = null;
 let chunks: Blob[] = [];
+let peakLevel: (() => number) | null = null;
 
 function micButton() {
   return $("btnMic") as HTMLButtonElement;
@@ -271,6 +353,7 @@ async function toggleDictation() {
     };
 
     recorder.onstop = async () => {
+      stopMeter();
       stream.getTracks().forEach((track) => track.stop());
       const type = recorder?.mimeType || mime || "audio/webm";
       const blob = new Blob(chunks, { type });
@@ -278,6 +361,11 @@ async function toggleDictation() {
       if (blob.size < 1200) {
         setMicState("idle");
         toast(t("toast.tooShort"), "error");
+        return;
+      }
+      if (peakLevel && peakLevel() < 0.01) {
+        setMicState("idle");
+        toast(t("toast.silentClip"), "error");
         return;
       }
       setMicState("working");
@@ -292,17 +380,42 @@ async function toggleDictation() {
           toast(t("toast.nothingHeard"), "error");
         }
       } catch (error) {
-        toast(errorText(error), "error");
+        toast(
+          error instanceof SilentClipError ? t("toast.silentClip") : errorText(error),
+          "error",
+        );
       } finally {
         setMicState("idle");
       }
     };
 
     recorder.start();
+    peakLevel = startMeter(stream);
     setMicState("recording");
   } catch (error) {
     setMicState("idle");
-    toast(t("toast.micDenied", { error: errorText(error) }), "error");
+    toast(micErrorText(error), "error");
+  }
+}
+
+/**
+ * getUserMedia fails for three quite different reasons and the fix differs
+ * every time, so the message has to say which one it was.
+ */
+function micErrorText(error: unknown): string {
+  const name = (error as { name?: string })?.name ?? "";
+  switch (name) {
+    case "NotAllowedError":
+    case "SecurityError":
+      return t("toast.micBlocked");
+    case "NotFoundError":
+    case "OverconstrainedError":
+      return t("toast.micMissing");
+    case "NotReadableError":
+    case "AbortError":
+      return t("toast.micBusy");
+    default:
+      return t("toast.micDenied", { error: errorText(error) });
   }
 }
 
@@ -636,7 +749,7 @@ function bindContextMenus() {
     if (field && !field.disabled) {
       event.preventDefault();
       const entries = editingEntries(field);
-      if (field.id === "prompt") {
+      if (field.id === "composerInput") {
         entries.push("separator", {
           label: t("ctx.dictate"),
           onSelect: () => void toggleDictation(),
@@ -669,6 +782,94 @@ function bindContextMenus() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// context: the gauge, /clear and /compact
+// ---------------------------------------------------------------------------
+
+/** Redraw the "how full is the model's context" gauge for the open dossier. */
+async function refreshContextGauge() {
+  const gauge = $("ctxGauge");
+  if (!store.activeModelId || !store.activeManId) {
+    gauge.hidden = true;
+    return;
+  }
+  try {
+    const stats = await api.contextStats(store.activeModelId, store.activeManId);
+    store.context = stats;
+    const percent = Math.min(100, Math.round(stats.ratio * 100));
+    gauge.hidden = false;
+    gauge.classList.toggle("warn", stats.ratio >= (store.settings?.auto_compact_at ?? 0.85));
+    $("ctxFill").style.width = `${percent}%`;
+    $("ctxLabel").textContent = `${percent}%`;
+    gauge.title = t("composer.contextDetail", {
+      used: stats.used_tokens,
+      window: stats.window_tokens,
+      live: stats.live_messages,
+      total: stats.total_messages,
+    });
+  } catch {
+    gauge.hidden = true;
+  }
+}
+
+/**
+ * Commands typed into the composer.
+ *
+ * They act on what the model reads, never on what it has remembered: a dossier,
+ * its facts and every stored message survive both of these.
+ */
+async function runSlashCommand(raw: string): Promise<boolean> {
+  const [name] = raw.trim().slice(1).split(/\s+/);
+  const command = name.toLowerCase();
+  if (!["clear", "compact", "help"].includes(command)) return false;
+
+  const input = $("composerInput") as HTMLTextAreaElement;
+  input.value = "";
+  input.dispatchEvent(new Event("input"));
+
+  if (command === "help") {
+    pushEntry(makeEntry("system", t("cmd.help")));
+    renderChat();
+    return true;
+  }
+
+  if (!store.activeModelId || !store.activeManId) {
+    toast(t("toast.pickMan"), "error");
+    return true;
+  }
+
+  try {
+    if (command === "clear") {
+      await api.clearAgentLog(store.activeModelId);
+      const stats = await api.clearContext(store.activeModelId, store.activeManId);
+      store.entries = [];
+      pushEntry(makeEntry("system", t("cmd.cleared", { n: stats.total_messages })));
+    } else {
+      store.busy = true;
+      renderScope();
+      pushEntry(makeEntry("system", t("cmd.compacting"), null, true));
+      renderChat();
+      const stats = await api.compactContext(store.activeModelId, store.activeManId);
+      store.entries = store.entries.filter((e) => !e.transient);
+      pushEntry(
+        makeEntry(
+          "system",
+          t("cmd.compacted", { live: stats.live_messages, total: stats.total_messages }),
+        ),
+      );
+    }
+  } catch (error) {
+    store.entries = store.entries.filter((e) => !e.transient);
+    toast(errorText(error), "error");
+  } finally {
+    store.busy = false;
+    renderScope();
+  }
+  renderChat();
+  void refreshContextGauge();
+  return true;
+}
+
 function bindComposer() {
   const input = $("composerInput") as HTMLTextAreaElement;
   $("btnSend").addEventListener("click", () => void sendMessage());
@@ -691,6 +892,31 @@ function bindComposer() {
   ($("channelSelect") as HTMLSelectElement).addEventListener("change", (event) => {
     store.channel = (event.target as HTMLSelectElement).value as "chat" | "letter";
   });
+
+  const speech = $("speechLang") as HTMLSelectElement;
+  speech.addEventListener("change", () => {
+    void persistSettings({ speech_language: speech.value });
+  });
+
+  const thinking = $("thinkingSelect") as HTMLSelectElement;
+  thinking.addEventListener("change", () => {
+    store.thinking = thinking.value;
+    // Kept on the provider so the choice survives a restart.
+    const provider = activeProvider();
+    if (provider) void saveProviderThinking(provider.id, thinking.value);
+  });
+}
+
+function activeProvider() {
+  return store.settings?.providers.find((p) => p.id === store.settings?.active_provider) ?? null;
+}
+
+async function saveProviderThinking(providerId: string, effort: string) {
+  if (!store.settings) return;
+  const providers = store.settings.providers.map((p) =>
+    p.id === providerId ? { ...p, thinking_effort: effort } : p,
+  );
+  await persistSettings({ providers });
 }
 
 function bindTabs() {
@@ -723,6 +949,19 @@ function bindAgentEvents() {
         ),
       );
       renderChat();
+    } else if (kind === "compacting") {
+      pushEntry(
+        makeEntry(
+          "system",
+          t("cmd.autoCompacting", {
+            used: Number(payload.used ?? 0),
+            window: Number(payload.window ?? 0),
+          }),
+          null,
+          true,
+        ),
+      );
+      renderChat();
     } else if (kind === "llm_wait") {
       pushEntry(makeEntry("system", String(payload.message ?? ""), null, true));
       renderChat();
@@ -748,7 +987,17 @@ async function boot() {
     store.mode = data.settings.agent_mode;
     store.security = data.settings.security_level;
     applyLanguage(data.settings.ui_language === "en" ? "en" : "ru");
+
+    const speech = $("speechLang") as HTMLSelectElement;
+    speech.value = data.settings.speech_language || (data.settings.ui_language === "en" ? "en" : "ru");
+    const thinking = $("thinkingSelect") as HTMLSelectElement;
+    store.thinking =
+      data.settings.providers.find((p) => p.id === data.settings.active_provider)
+        ?.thinking_effort ?? "";
+    thinking.value = store.thinking;
     setIndexCounts(data.index.models.map((m) => [m.id, m.men.length] as [string, number]));
+
+    void refreshLocalModels();
 
     const preferred = data.settings.active_model_id ?? data.profiles[0]?.id ?? null;
     if (preferred) await selectProfile(preferred, false);

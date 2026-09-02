@@ -178,8 +178,16 @@ export interface ProviderConfig {
   temperature: number;
   max_output_tokens: number | null;
   transcribe_model: string;
+  thinking_effort: string;
+  thinking_budget: number | null;
+  reasoning_dialect: string;
+  context_tokens: number | null;
   key_count: number;
 }
+
+/** Levels every provider understands, in the order shown to the operator. */
+export const THINKING_LEVELS = ["", "none", "low", "medium", "high", "xhigh"] as const;
+export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 
 export interface Settings {
   providers: ProviderConfig[];
@@ -195,6 +203,18 @@ export interface Settings {
   speech_provider: string | null;
   speech_engine: "provider" | "local";
   local_speech_model: string;
+  speech_language: string;
+  auto_compact_at: number;
+}
+
+/** How much of the context window the correspondence currently occupies. */
+export interface ContextStats {
+  used_tokens: number;
+  window_tokens: number;
+  ratio: number;
+  live_messages: number;
+  total_messages: number;
+  has_summary: boolean;
 }
 
 export interface LocalModel {

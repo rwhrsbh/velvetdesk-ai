@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
+  ContextStats,
   AgentLog,
   Bootstrap,
   ChatThread,
@@ -29,6 +30,8 @@ export interface RunInput {
   message: string;
   channel?: string;
   log_incoming?: boolean;
+  /** Overrides the provider's thinking level for this run only. */
+  thinking_effort?: string;
 }
 
 export const api = {
@@ -95,8 +98,15 @@ export const api = {
     invoke<KeyStatus[]>("remove_key", { providerId, index }),
   listProviderModels: (providerId: string) =>
     invoke<ModelCatalog>("list_provider_models", { providerId }),
-  transcribe: (audioBase64: string, mime: string) =>
-    invoke<string>("transcribe", { audioBase64, mime }),
+  contextStats: (modelId: string, manId: string | null) =>
+    invoke<ContextStats>("context_stats", { modelId, manId }),
+  clearContext: (modelId: string, manId: string) =>
+    invoke<ContextStats>("clear_context", { modelId, manId }),
+  compactContext: (modelId: string, manId: string, keepLast?: number) =>
+    invoke<ContextStats>("compact_context", { modelId, manId, keepLast }),
+
+  transcribe: (audioBase64: string, mime: string, language?: string) =>
+    invoke<string>("transcribe", { audioBase64, mime, language }),
   listLocalModels: () => invoke<LocalModel[]>("list_local_models"),
   downloadLocalModel: (modelId: string) => invoke<LocalModel>("download_local_model", { modelId }),
   deleteLocalModel: (modelId: string) => invoke<LocalModel[]>("delete_local_model", { modelId }),

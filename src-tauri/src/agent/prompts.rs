@@ -132,16 +132,33 @@ pub fn build_system(
 
 /// Conversation context appended to the operator's request.
 pub fn context_block(thread: Option<&ChatThread>, limit: usize) -> String {
-    match thread {
-        Some(t) if !t.messages.is_empty() => {
-            format!(
-                "Recent correspondence (oldest first):\n{}\n",
-                t.transcript(limit)
-            )
-        }
-        _ => String::new(),
+    let Some(thread) = thread else {
+        return String::new();
+    };
+    let mut block = String::new();
+    if !thread.context_summary.trim().is_empty() {
+        block.push_str(&format!(
+            "Earlier correspondence, summarised:\n{}\n\n",
+            thread.context_summary.trim()
+        ));
     }
+    let transcript = thread.transcript(limit);
+    if !transcript.is_empty() {
+        block.push_str(&format!(
+            "Recent correspondence (oldest first):\n{transcript}\n"
+        ));
+    }
+    block
 }
+
+/// Asks for the summary that replaces the messages dropped by compaction.
+pub const COMPACTOR: &str = "\
+You compress a dating-agency correspondence so the copilot can keep working
+with a fraction of the tokens. Preserve, in Russian, as terse bullet lines:
+who he is and what he wants, agreed facts and dates, gifts and money, promises
+made by either side, open questions, and the current tone of the relationship.
+Drop small talk, greetings and anything already obvious from the dossier.
+Never invent anything. Answer with the summary only — no preface, no JSON.";
 
 /// Master agent: routes a raw pasted blob to the right profile / man.
 pub const MASTER_ROUTER: &str = "\

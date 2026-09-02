@@ -134,7 +134,22 @@
                 <button class="btn btn-secondary btn-mic" id="btnMic" data-i18n-title="composer.dictateHint">
                   <svg width="15" height="15"><use href="#i-mic" /></svg>
                   <span id="micLabel" data-i18n="composer.dictate">Диктовать</span>
+                  <span class="mic-level"><span id="micLevel"></span></span>
                 </button>
+                <select class="field-input compact" id="speechLang" data-i18n-title="composer.speechLang">
+                  <option value="ru">RU</option>
+                  <option value="uk">UK</option>
+                  <option value="en">EN</option>
+                  <option value="de">DE</option>
+                </select>
+                <select class="field-input compact" id="thinkingSelect" data-i18n-title="composer.thinkingHint">
+                  <option value="" data-i18n="thinking.auto">думает: авто</option>
+                  <option value="none" data-i18n="thinking.none">без раздумий</option>
+                  <option value="low" data-i18n="thinking.low">коротко</option>
+                  <option value="medium" data-i18n="thinking.medium">средне</option>
+                  <option value="high" data-i18n="thinking.high">глубоко</option>
+                  <option value="xhigh" data-i18n="thinking.xhigh">максимум</option>
+                </select>
                 <select class="field-input compact" id="channelSelect" data-i18n-title="composer.channel">
                   <option value="chat" data-i18n="composer.chat">чат</option>
                   <option value="letter" data-i18n="composer.letter">письмо</option>
@@ -143,7 +158,13 @@
                   <input type="checkbox" id="logIncoming" /> <span data-i18n="composer.log">в историю</span>
                 </label>
               </div>
-              <button class="btn btn-primary" id="btnSend" data-i18n="composer.send">Выполнить</button>
+              <div class="composer-right">
+                <span class="ctx-gauge" id="ctxGauge" hidden data-i18n-title="composer.contextHint">
+                  <span class="ctx-bar"><span id="ctxFill"></span></span>
+                  <span id="ctxLabel"></span>
+                </span>
+                <button class="btn btn-primary" id="btnSend" data-i18n="composer.send">Выполнить</button>
+              </div>
             </div>
           </div>
         </div>

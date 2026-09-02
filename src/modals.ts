@@ -16,19 +16,20 @@ function doctorBody(report: DoctorReport): string {
     t("doctor.chats", { n: report.chats_checked }),
   ];
   if (report.fixes_applied) counts.push(t("doctor.fixed", { n: report.fixes_applied }));
-  return `
-    <div class="modal-sub">${escapeHtml(t("doctor.checked", { parts: counts.join(" · ") }))}</div>
-    <div class="code-block">
-      ${report.issues
-        .map(
-          (issue) => `<div class="doctor-line">
-            <span class="lvl ${issue.level}">${issue.level.toUpperCase()}</span>
-            <span>${escapeHtml(issue.message)}${issue.fixed ? t("doctor.wasFixed") : ""}<br />
-              <span style="color:var(--text-faint)">${escapeHtml(issue.path)}</span></span>
-          </div>`,
-        )
-        .join("")}
-    </div>`;
+  const lines = report.issues
+    .map(
+      (issue) =>
+        `<div class="doctor-line">` +
+        `<span class="lvl ${issue.level}">${issue.level.toUpperCase()}</span>` +
+        `<span class="doctor-text">${escapeHtml(issue.message)}${issue.fixed ? t("doctor.wasFixed") : ""}` +
+        `<span class="doctor-path">${escapeHtml(issue.path)}</span></span>` +
+        `</div>`,
+    )
+    .join("");
+  return (
+    `<div class="modal-sub">${escapeHtml(t("doctor.checked", { parts: counts.join(" \u00b7 ") }))}</div>` +
+    `<div class="doctor-list">${lines}</div>`
+  );
 }
 
 export async function openDoctorModal(deps: ModalDeps) {

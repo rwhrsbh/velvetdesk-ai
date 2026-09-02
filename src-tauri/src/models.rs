@@ -333,6 +333,14 @@ pub struct ChatThread {
     pub man_id: String,
     #[serde(default)]
     pub messages: Vec<ChatMessage>,
+    /// Everything before `context_from` boiled down to a few lines. Written by
+    /// compaction; nothing is deleted, the older messages simply stop being
+    /// sent to the model.
+    #[serde(default)]
+    pub context_summary: String,
+    /// Index of the first message that still goes into the prompt.
+    #[serde(default)]
+    pub context_from: usize,
     #[serde(default = "now")]
     pub updated_at: DateTime<Utc>,
     #[serde(default = "schema_version")]
@@ -345,14 +353,24 @@ impl ChatThread {
             model_id,
             man_id,
             messages: vec![],
+            context_summary: String::new(),
+            context_from: 0,
             updated_at: now(),
             schema_version: SCHEMA_VERSION,
         }
     }
 
+    /// Messages the model is allowed to see: everything after the last
+    /// context reset, capped at `limit`.
+    pub fn live_messages(&self, limit: usize) -> &[ChatMessage] {
+        let from = self.context_from.min(self.messages.len());
+        let live = &self.messages[from..];
+        let start = live.len().saturating_sub(limit);
+        &live[start..]
+    }
+
     pub fn transcript(&self, limit: usize) -> String {
-        let start = self.messages.len().saturating_sub(limit);
-        self.messages[start..]
+        self.live_messages(limit)
             .iter()
             .map(|m| {
                 let who = match m.role {

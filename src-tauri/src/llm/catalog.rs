@@ -293,14 +293,28 @@ pub async fn transcribe(
     api_key: &str,
     audio_base64: &str,
     mime: &str,
+    language: &str,
 ) -> Result<String, CallError> {
     match provider.kind {
         ProviderKind::Gemini => {
-            transcribe_gemini(http, provider, api_key, audio_base64, mime).await
+            transcribe_gemini(http, provider, api_key, audio_base64, mime, language).await
         }
         ProviderKind::OpenaiCompatible => {
-            transcribe_openai(http, provider, api_key, audio_base64, mime).await
+            transcribe_openai(http, provider, api_key, audio_base64, mime, language).await
         }
+    }
+}
+
+/// Spelled out for the prompt-driven path — a two-letter code means little to
+/// a chat model, a language name means exactly one thing.
+fn language_name(code: &str) -> Option<&'static str> {
+    match code.trim().to_lowercase().as_str() {
+        "ru" => Some("Russian"),
+        "uk" => Some("Ukrainian"),
+        "en" => Some("English"),
+        "de" => Some("German"),
+        "pl" => Some("Polish"),
+        _ => None,
     }
 }
 
@@ -310,15 +324,25 @@ async fn transcribe_gemini(
     api_key: &str,
     audio_base64: &str,
     mime: &str,
+    language: &str,
 ) -> Result<String, CallError> {
     // The dedicated speech models (gemini-*-transcribe) are not served by
     // generateContent: the clip has to be uploaded through the Files API and
     // then referenced from an Interactions request.
     if is_transcribe_model(&provider.speech_model()) {
         let uri = upload_audio(http, provider, api_key, audio_base64, mime).await?;
-        return interactions_transcribe(http, provider, api_key, &uri, mime).await;
+        return interactions_transcribe(http, provider, api_key, &uri, mime, language).await;
     }
-    transcribe_gemini_inline(http, provider, api_key, audio_base64, mime).await
+    transcribe_gemini_inline(http, provider, api_key, audio_base64, mime, language).await
+}
+
+/// The instruction sent with the clip, naming the language when we know it so
+/// the model transcribes rather than translates.
+fn transcribe_prompt(language: &str) -> String {
+    match language_name(language) {
+        Some(name) => format!("{TRANSCRIBE_PROMPT} The speech is in {name}; transcribe it in {name} and never translate it."),
+        None => TRANSCRIBE_PROMPT.to_string(),
+    }
 }
 
 /// Multimodal chat models take the clip inline, in one request.
@@ -328,6 +352,7 @@ async fn transcribe_gemini_inline(
     api_key: &str,
     audio_base64: &str,
     mime: &str,
+    language: &str,
 ) -> Result<String, CallError> {
     let base = provider.base_url.trim_end_matches('/');
     let version = if provider.api_version.is_empty() {
@@ -344,7 +369,7 @@ async fn transcribe_gemini_inline(
             "role": "user",
             "parts": [
                 { "inline_data": { "mime_type": mime, "data": audio_base64 } },
-                { "text": TRANSCRIBE_PROMPT }
+                { "text": transcribe_prompt(language) }
             ]
         }],
         "generationConfig": { "temperature": 0.0 }
@@ -465,6 +490,7 @@ async fn interactions_transcribe(
     api_key: &str,
     file_uri: &str,
     mime: &str,
+    language: &str,
 ) -> Result<String, CallError> {
     let base = provider.base_url.trim_end_matches('/');
     let version = if provider.api_version.is_empty() {
@@ -472,14 +498,16 @@ async fn interactions_transcribe(
     } else {
         provider.api_version.as_str()
     };
+    let mut transcription_config = json!({ "mode": { "type": "verbatim" } });
+    // Naming the language keeps the model from guessing — and from answering a
+    // Russian dictation in English.
+    if language_name(language).is_some() {
+        transcription_config["language_code"] = json!(language.trim().to_lowercase());
+    }
     let body = json!({
         "model": provider.speech_model(),
         "input": [{ "type": "audio", "uri": file_uri, "mime_type": mime }],
-        "generation_config": {
-            "transcription_config": {
-                "mode": { "type": "verbatim" }
-            }
-        }
+        "generation_config": { "transcription_config": transcription_config }
     });
 
     let response = http
@@ -557,6 +585,7 @@ async fn transcribe_openai(
     api_key: &str,
     audio_base64: &str,
     mime: &str,
+    language: &str,
 ) -> Result<String, CallError> {
     use base64::Engine;
 
@@ -576,9 +605,14 @@ async fn transcribe_openai(
         .file_name(format!("dictation.{extension}"))
         .mime_str(mime)
         .map_err(|e| CallError::Parse(e.to_string()))?;
-    let form = reqwest::multipart::Form::new()
+    let mut form = reqwest::multipart::Form::new()
         .text("model", provider.speech_model())
         .part("file", part);
+    // Every Whisper-compatible endpoint takes an ISO-639-1 code here, and
+    // accuracy improves measurably when it is given one.
+    if language_name(language).is_some() {
+        form = form.text("language", language.trim().to_lowercase());
+    }
 
     let base = provider.base_url.trim_end_matches('/');
     let url = format!("{base}/audio/transcriptions");

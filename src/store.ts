@@ -2,6 +2,7 @@ import type {
   AgentEntry,
   AgentMode,
   AppInfo,
+  ContextStats,
   Man,
   PendingAction,
   Profile,
@@ -30,6 +31,10 @@ export interface AppStore {
   menFilter: string;
   profileFilter: string;
   busy: boolean;
+  /** Thinking level chosen next to the composer; empty means the provider decides. */
+  thinking: string;
+  /** Context usage for the open dossier, refreshed after every run. */
+  context: ContextStats | null;
 }
 
 export const store: AppStore = {
@@ -48,6 +53,8 @@ export const store: AppStore = {
   menFilter: "",
   profileFilter: "",
   busy: false,
+  thinking: "",
+  context: null,
 };
 
 export function activeProfile(): Profile | null {

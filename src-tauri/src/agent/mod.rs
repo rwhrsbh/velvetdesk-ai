@@ -8,7 +8,7 @@ use std::sync::Arc;
 use crate::config::{AgentMode, ProviderConfig, SecurityLevel, Settings};
 use crate::error::{AppError, Result};
 use crate::llm::keypool::KeyPool;
-use crate::llm::{extract_json_object, ChatRequest, LlmClient, LlmMessage, Usage};
+use crate::llm::{extract_json_object, ChatRequest, LlmClient, LlmMessage, Thinking, Usage};
 use crate::models::*;
 use crate::storage::{Paths, Scope};
 use tools::{PendingAction, ToolOutcome};
@@ -29,6 +29,10 @@ pub struct RunInput {
     /// When true the operator's text is stored as an incoming message first.
     #[serde(default)]
     pub log_incoming: bool,
+    /// Overrides the provider's thinking level for this run only — the
+    /// selector next to the composer.
+    #[serde(default)]
+    pub thinking_effort: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -101,6 +105,23 @@ pub async fn run(deps: &AgentDeps<'_>, input: RunInput) -> Result<RunOutput> {
         &deps.settings.global_style_rules,
     );
 
+    // Compact before assembling the prompt when the correspondence has grown
+    // past the operator's threshold, so a long thread degrades into a summary
+    // instead of a provider error.
+    let mut thread = thread;
+    if let Some(man_id) = input.man_id.as_deref() {
+        let stats = context_stats(&scope, deps.settings, deps.provider, Some(man_id))?;
+        if stats.ratio >= deps.settings.auto_compact_at && stats.live_messages > 6 {
+            (deps.emit)(json!({
+                "kind": "compacting",
+                "used": stats.used_tokens,
+                "window": stats.window_tokens,
+            }));
+            let _ = compact_context(deps, &scope, man_id, 6).await;
+            thread = scope.read_chat(man_id).ok();
+        }
+    }
+
     let mut user_block = String::new();
     let ctx = prompts::context_block(thread.as_ref(), deps.settings.history_limit);
     if !ctx.is_empty() {
@@ -116,6 +137,7 @@ pub async fn run(deps: &AgentDeps<'_>, input: RunInput) -> Result<RunOutput> {
     let mut request = ChatRequest::new(system);
     request.temperature = deps.provider.temperature;
     request.max_output_tokens = deps.provider.max_output_tokens;
+    request.thinking = thinking_for(deps.provider, input.thinking_effort.as_deref());
     request.messages.push(LlmMessage::user(user_block));
 
     match mode {
@@ -124,6 +146,137 @@ pub async fn run(deps: &AgentDeps<'_>, input: RunInput) -> Result<RunOutput> {
             run_single_turn(deps, &scope, security, mode, input, request).await
         }
     }
+}
+
+/// The thinking settings for one run: the provider's own, unless the operator
+/// picked a level for this message.
+fn thinking_for(provider: &ProviderConfig, override_effort: Option<&str>) -> Thinking {
+    match override_effort.map(str::trim).filter(|e| !e.is_empty()) {
+        // An explicit level wins over a stored budget: the two would otherwise
+        // contradict each other on providers that accept both.
+        Some(effort) => Thinking {
+            effort: effort.to_string(),
+            budget_tokens: None,
+        },
+        None => Thinking {
+            effort: provider.thinking_effort.clone(),
+            budget_tokens: provider.thinking_budget,
+        },
+    }
+}
+
+/// Cheap token estimate — a quarter of the characters, which is close enough
+/// for deciding when to compact and costs no API call.
+pub fn estimate_tokens(text: &str) -> usize {
+    text.chars().count().div_ceil(4)
+}
+
+/// How much of the context window one man's correspondence is using.
+#[derive(Debug, Clone, Serialize)]
+pub struct ContextStats {
+    pub used_tokens: usize,
+    pub window_tokens: u32,
+    pub ratio: f32,
+    /// Messages currently sent to the model.
+    pub live_messages: usize,
+    pub total_messages: usize,
+    pub has_summary: bool,
+}
+
+pub fn context_stats(
+    scope: &Scope,
+    settings: &Settings,
+    provider: &ProviderConfig,
+    man_id: Option<&str>,
+) -> Result<ContextStats> {
+    let thread = man_id.and_then(|id| scope.read_chat(id).ok());
+    let block = prompts::context_block(thread.as_ref(), settings.history_limit);
+    let window = provider.context_window();
+    let used = estimate_tokens(&block);
+    Ok(ContextStats {
+        used_tokens: used,
+        window_tokens: window,
+        ratio: used as f32 / window.max(1) as f32,
+        live_messages: thread
+            .as_ref()
+            .map(|t| t.live_messages(settings.history_limit).len())
+            .unwrap_or(0),
+        total_messages: thread.as_ref().map(|t| t.messages.len()).unwrap_or(0),
+        has_summary: thread
+            .as_ref()
+            .map(|t| !t.context_summary.trim().is_empty())
+            .unwrap_or(false),
+    })
+}
+
+/// Forget the correspondence the model has been reading, keeping every message
+/// on disk and every stored fact untouched.
+pub fn clear_context(scope: &Scope, man_id: &str) -> Result<ContextStats2> {
+    let mut thread = scope.read_chat(man_id)?;
+    thread.context_from = thread.messages.len();
+    thread.context_summary.clear();
+    scope.write_chat(&thread)?;
+    Ok(ContextStats2 {
+        dropped: thread.messages.len(),
+    })
+}
+
+/// Result of a context reset: how many messages left the prompt.
+#[derive(Debug, Clone, Serialize)]
+pub struct ContextStats2 {
+    pub dropped: usize,
+}
+
+/// Replace the older half of the correspondence with a summary the model
+/// writes itself. Nothing is deleted — `context_from` just moves forward.
+pub async fn compact_context(
+    deps: &AgentDeps<'_>,
+    scope: &Scope,
+    man_id: &str,
+    keep_last: usize,
+) -> Result<String> {
+    let mut thread = scope.read_chat(man_id)?;
+    let live = thread.messages.len().saturating_sub(thread.context_from);
+    if live <= keep_last {
+        return Ok(thread.context_summary.clone());
+    }
+    let cut = thread.messages.len() - keep_last;
+    let older: Vec<String> = thread.messages[thread.context_from..cut]
+        .iter()
+        .map(|m| {
+            let who = match m.role {
+                crate::models::MsgRole::Incoming => "HIM",
+                crate::models::MsgRole::Outgoing => "HER",
+                crate::models::MsgRole::Note => "OPERATOR-NOTE",
+            };
+            format!("{who}: {}", m.text)
+        })
+        .collect();
+
+    let mut request = ChatRequest::new(prompts::COMPACTOR);
+    request.temperature = 0.2;
+    let previous = if thread.context_summary.trim().is_empty() {
+        String::new()
+    } else {
+        format!(
+            "Summary so far (fold the new material into it):\n{}\n\n",
+            thread.context_summary.trim()
+        )
+    };
+    request.messages.push(LlmMessage::user(format!(
+        "{previous}Messages to compress:\n{}",
+        older.join("\n")
+    )));
+
+    let response = deps
+        .llm
+        .chat(deps.provider, deps.pool.clone(), &request, deps.emit)
+        .await?;
+
+    thread.context_summary = response.text.trim().to_string();
+    thread.context_from = cut;
+    scope.write_chat(&thread)?;
+    Ok(thread.context_summary.clone())
 }
 
 async fn run_auto(
@@ -755,6 +908,7 @@ pub async fn master_route(
 mod tests {
     use super::*;
     use crate::storage::Paths;
+    use chrono::Utc;
 
     fn scope() -> Scope {
         let dir = std::env::temp_dir().join(format!("velvet-agent-{}", new_id()));
@@ -918,6 +1072,89 @@ mod tests {
             scope.read_man("1219749").unwrap().status,
             "перезвонит вечером"
         );
+    }
+
+    fn thread_with(scope: &Scope, messages: usize) -> ChatThread {
+        let mut thread = scope
+            .read_chat("1219749")
+            .unwrap_or_else(|_| ChatThread::new("2428653".into(), "1219749".into()));
+        for i in 0..messages {
+            thread.messages.push(ChatMessage {
+                id: new_id(),
+                role: if i % 2 == 0 {
+                    MsgRole::Incoming
+                } else {
+                    MsgRole::Outgoing
+                },
+                text: format!("message number {i} about the weather in Osnabrück"),
+                channel: Channel::default(),
+                ts: Utc::now(),
+            });
+        }
+        scope.write_chat(&thread).unwrap();
+        thread
+    }
+
+    /// Clearing the context hides the correspondence from the model without
+    /// losing a single message — that is the whole point of the command.
+    #[test]
+    fn clearing_context_keeps_every_message_on_disk() {
+        let scope = scope();
+        thread_with(&scope, 12);
+
+        clear_context(&scope, "1219749").unwrap();
+
+        let thread = scope.read_chat("1219749").unwrap();
+        assert_eq!(thread.messages.len(), 12, "nothing may be deleted");
+        assert_eq!(thread.live_messages(40).len(), 0, "nothing may be sent");
+        assert!(prompts::context_block(Some(&thread), 40).is_empty());
+
+        // A later message is visible again.
+        let mut thread = thread;
+        thread.messages.push(ChatMessage {
+            id: new_id(),
+            role: MsgRole::Incoming,
+            text: "и ещё одно".into(),
+            channel: Channel::default(),
+            ts: Utc::now(),
+        });
+        assert_eq!(thread.live_messages(40).len(), 1);
+    }
+
+    /// The summary written by compaction replaces the older messages in the
+    /// prompt and the tail stays verbatim.
+    #[test]
+    fn a_summary_stands_in_for_the_older_messages() {
+        let scope = scope();
+        let mut thread = thread_with(&scope, 20);
+        thread.context_summary = "Он на пенсии, обещал приехать в субботу.".into();
+        thread.context_from = 14;
+        scope.write_chat(&thread).unwrap();
+
+        let thread = scope.read_chat("1219749").unwrap();
+        assert_eq!(thread.live_messages(40).len(), 6);
+
+        let block = prompts::context_block(Some(&thread), 40);
+        assert!(block.contains("Он на пенсии"));
+        assert!(block.contains("message number 19"));
+        assert!(!block.contains("message number 3"), "compacted away");
+    }
+
+    /// The history limit still applies on top of the reset point.
+    #[test]
+    fn history_limit_caps_the_live_window() {
+        let scope = scope();
+        thread_with(&scope, 30);
+        let thread = scope.read_chat("1219749").unwrap();
+        assert_eq!(thread.live_messages(5).len(), 5);
+        assert!(thread.transcript(5).contains("message number 29"));
+    }
+
+    #[test]
+    fn token_estimate_tracks_length() {
+        assert_eq!(estimate_tokens(""), 0);
+        assert_eq!(estimate_tokens("abcd"), 1);
+        assert_eq!(estimate_tokens("abcde"), 2);
     }
 
     #[test]

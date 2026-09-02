@@ -137,24 +137,29 @@ function usageLine(usage: Usage | undefined, extra: string[]): string {
   if (!usage) return "";
   const total = usage.total_tokens || usage.prompt_tokens + usage.completion_tokens;
   const bits = [t("chat.tokens", { n: total }), ...extra].filter(Boolean);
-  return `<div class="usage">${escapeHtml(bits.join(" · "))}</div>`;
+  return `<div class="usage">${escapeHtml(bits.join(" \u00b7 "))}</div>`;
 }
 
+/// One line per step: a coloured dot, what ran, what it did. The markup is
+/// written without indentation on purpose — the bubble renders text as
+/// `pre-wrap`, so any newline inside it would show up as blank space.
 function stepHtml(step: RunStep): string {
   const cls = step.kind.includes("error")
     ? "error"
     : step.kind.includes("pending")
       ? "pending"
       : "";
-  const state = step.kind.includes("pending")
-    ? t("chat.pending")
-    : step.kind.includes("error")
-      ? t("chat.failed")
-      : t("chat.done");
-  return `<div class="step ${cls}">
-    <div class="step-head"><span>${escapeHtml(step.tool ?? step.kind)}</span><span>${escapeHtml(state)}</span></div>
-    <div>${escapeHtml(step.summary)}</div>
-  </div>`;
+  const badge = step.kind.includes("pending")
+    ? `<span class="step-badge">${escapeHtml(t("chat.pending"))}</span>`
+    : "";
+  const tool = step.tool ? `<span class="step-tool">${escapeHtml(step.tool)}</span>` : "";
+  return (
+    `<div class="step ${cls}">` +
+    tool +
+    `<span class="step-text">${escapeHtml(step.summary)}</span>` +
+    badge +
+    `</div>`
+  );
 }
 
 export function renderChat() {
@@ -188,9 +193,11 @@ export function renderChat() {
              </div>`
           : "";
 
-      return `<div class="msg ${entry.sender}" data-entry="${escapeHtml(entry.id)}">
-        <div class="bubble">${escapeHtml(entry.text)}${steps}${usageLine(meta.usage, extras)}${actions}</div>
-      </div>`;
+      return (
+        `<div class="msg ${entry.sender}" data-entry="${escapeHtml(entry.id)}">` +
+        `<div class="bubble"><span class="bubble-text">${escapeHtml(entry.text)}</span>` +
+        `${steps}${usageLine(meta.usage, extras)}${actions}</div></div>`
+      );
     })
     .join("");
   container.scrollTop = container.scrollHeight;

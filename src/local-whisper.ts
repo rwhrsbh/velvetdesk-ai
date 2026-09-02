@@ -33,8 +33,11 @@ let loading: Promise<Recogniser> | null = null;
  */
 async function loadRuntime(): Promise<TransformersModule> {
   if (runtime) return runtime;
-  // Built as a URL so the bundler and the type-checker both leave it alone.
-  const url = "/vendor/transformers.web.js";
+  // Resolved against the document rather than written as a literal: a literal
+  // path is still statically analysable, and the dev server rewrites it to
+  // `/vendor/transformers.web.js?import`, which it then fails to serve
+  // ("Failed to fetch dynamically imported module").
+  const url = new URL("vendor/transformers.web.js", document.baseURI).href;
   runtime = (await import(/* @vite-ignore */ url)) as unknown as TransformersModule;
   return runtime;
 }
@@ -121,8 +124,28 @@ export async function decodeAudio(blob: Blob): Promise<Float32Array> {
 }
 
 export interface LocalTranscribeOptions {
-  /** BCP-47-ish hint: "ru", "uk", "en". Empty means auto-detect. */
+  /** "ru", "uk", "en". Whisper falls back to English — and translates — when
+   *  nothing is given, so callers should always pass one. */
   language?: string;
+}
+
+/** Root-mean-square level of a clip, 0 … 1. */
+export function loudness(samples: Float32Array): number {
+  if (samples.length === 0) return 0;
+  let sum = 0;
+  for (let i = 0; i < samples.length; i += 1) sum += samples[i] * samples[i];
+  return Math.sqrt(sum / samples.length);
+}
+
+/** Below this a clip carries no speech; Whisper answers silence with
+ *  hallucinations like "You" or "Thank you." rather than an empty string. */
+export const SILENCE_RMS = 0.004;
+
+export class SilentClipError extends Error {
+  constructor() {
+    super("silent clip");
+    this.name = "SilentClipError";
+  }
 }
 
 /** Transcribe a recorded clip entirely on this device. */
@@ -134,11 +157,16 @@ export async function transcribeLocally(
   const recogniser = await loadModel(repo);
   const samples = await decodeAudio(blob);
 
+  // A silent clip is worth reporting as such: feeding it to Whisper produces
+  // confident nonsense instead of nothing.
+  if (loudness(samples) < SILENCE_RMS) throw new SilentClipError();
+
   const output = await recogniser(samples, {
     // Long clips are processed in chunks with overlap so nothing is lost.
     chunk_length_s: 30,
     stride_length_s: 5,
     language: options.language || undefined,
+    // Always transcribe: "translate" would turn dictated Russian into English.
     task: "transcribe",
   });
 

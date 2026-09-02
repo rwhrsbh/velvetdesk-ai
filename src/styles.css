@@ -555,8 +555,13 @@ input[type="range"] {
   padding: 10px 13px;
   font-size: 13px;
   line-height: 1.6;
-  white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* Only the message text preserves newlines — the surrounding markup must not,
+   or every template indent renders as blank space. */
+.bubble-text {
+  white-space: pre-wrap;
 }
 
 .msg.assistant .bubble {
@@ -599,20 +604,40 @@ input[type="range"] {
 }
 
 .step {
-  border-left: 2px solid var(--line);
-  padding: 4px 0 4px 10px;
-  margin-top: 8px;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 7px;
+  border-left: 2px solid var(--ok);
+  padding: 2px 0 2px 9px;
+  margin-top: 5px;
   font-size: 12px;
   color: var(--text-dim);
 }
 
-.step-head {
+.step:first-of-type {
+  margin-top: 9px;
+}
+
+.step-tool {
   font-family: var(--mono);
   font-size: 11px;
   color: var(--text-faint);
-  display: flex;
-  gap: 8px;
-  justify-content: space-between;
+  flex: 0 0 auto;
+}
+
+.step-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.step-badge {
+  flex: 0 0 auto;
+  font-size: 10.5px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: rgba(255, 159, 10, 0.14);
+  color: var(--warn);
 }
 
 .step.pending {
@@ -775,6 +800,65 @@ select.compact {
 .btn-wide {
   width: 100%;
   justify-content: center;
+}
+
+.composer-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* How full the model's context is for the open dossier. */
+.ctx-gauge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-faint);
+  font-family: var(--mono);
+}
+
+.ctx-bar {
+  width: 46px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--surface-hi);
+  overflow: hidden;
+}
+
+.ctx-bar > span {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.25s ease;
+}
+
+.ctx-gauge.warn .ctx-bar > span {
+  background: var(--warn);
+}
+
+/* Input level, visible only while recording: a dead microphone otherwise
+   looks exactly like a working one. */
+.mic-level {
+  display: none;
+  width: 34px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.25);
+  overflow: hidden;
+}
+
+.btn-mic.recording .mic-level {
+  display: block;
+}
+
+.mic-level > span {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: #fff;
+  transition: width 0.1s linear;
 }
 
 .btn-mic.recording {
@@ -1052,13 +1136,35 @@ details.advanced[open] {
 }
 
 /* doctor */
+.doctor-list {
+  background: var(--sunken);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-sm);
+  padding: 4px 10px;
+  max-height: 300px;
+  overflow: auto;
+}
+
 .doctor-line {
   display: flex;
   gap: 9px;
-  align-items: flex-start;
+  align-items: baseline;
   padding: 7px 0;
   font-size: 12.5px;
   border-bottom: 1px solid var(--line-soft);
+}
+
+.doctor-text {
+  min-width: 0;
+  word-break: break-word;
+}
+
+.doctor-path {
+  display: block;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-top: 2px;
 }
 
 .doctor-line:last-child {
