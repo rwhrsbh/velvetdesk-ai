@@ -479,6 +479,9 @@ pub fn trust_folder(
             json!({ "path": path }),
         ));
     }
+    // Stored as picked, not as canonicalised: the extended-length form Windows
+    // returns reads as a different folder to everyone who sees it.
+    let path = crate::workspace::display_path(std::path::Path::new(&path));
     let mut settings = state.settings.write();
     settings.trusted_roots.retain(|r| r.path != path);
     settings.trusted_roots.push(crate::workspace::TrustedRoot {

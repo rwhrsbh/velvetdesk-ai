@@ -27,13 +27,25 @@ pub async fn call(
 
     let (mut status, mut text) = post(http, &url, api_key, provider, &body).await?;
 
-    // Model names do not always tell the whole truth about which spelling of
-    // the thinking control an endpoint accepts, so a rejection of the field is
-    // retried once with the other one instead of surfacing as an error.
-    if status.as_u16() == 400
-        && rejected_thinking_field(&text)
-        && flip_thinking(&mut body, provider, &request.thinking)
-    {
+    // Model names do not tell the whole truth about which fields an endpoint
+    // accepts. When one is rejected by name, a thinking control is retried in
+    // its other spelling and anything else is dropped — twice at most, which
+    // covers "no thought summaries here" followed by "no levels either".
+    for _ in 0..2 {
+        if status.as_u16() != 400 {
+            break;
+        }
+        let Some(field) = rejected_field(&text) else {
+            break;
+        };
+        let recovered = if is_thinking_field(&field) {
+            flip_thinking(&mut body, provider, &request.thinking)
+        } else {
+            drop_field(&mut body, &field)
+        };
+        if !recovered {
+            break;
+        }
         let retry = post(http, &url, api_key, provider, &body).await?;
         status = retry.0;
         text = retry.1;
@@ -111,16 +123,24 @@ pub async fn call_streaming(
 
     let mut response = send(http, &url, api_key, provider, &body).await?;
 
-    // The thinking fields are the ones an endpoint is most likely to reject;
-    // retry once with the other spelling, exactly as the plain call does.
-    if response.status().as_u16() == 400 {
+    // Same recovery as the plain call. Thought summaries in particular are not
+    // offered by every model, and losing the summary beats losing the answer.
+    for _ in 0..2 {
+        if response.status().as_u16() != 400 {
+            break;
+        }
         let text = response
             .text()
             .await
             .map_err(|e| CallError::Transport(e.to_string()))?;
-        if !(rejected_thinking_field(&text)
-            && flip_thinking(&mut body, provider, &request.thinking))
-        {
+        let recovered = match rejected_field(&text) {
+            Some(field) if is_thinking_field(&field) => {
+                flip_thinking(&mut body, provider, &request.thinking)
+            }
+            Some(field) => drop_field(&mut body, &field),
+            None => false,
+        };
+        if !recovered {
             return Err(CallError::Status {
                 code: 400,
                 body: text,
@@ -208,6 +228,12 @@ pub async fn call_streaming(
 /// unterminated stays in the buffer for the next one.
 pub(crate) fn take_events(buffer: &mut String) -> Vec<Value> {
     let mut events = vec![];
+    // Servers differ on line endings and Gemini sends CRLF: looking only
+    // for a bare blank line found no separator at all, and the answer came
+    // back empty with nothing to explain it.
+    if buffer.contains('\r') {
+        buffer.retain(|c| c != '\r');
+    }
     while let Some(cut) = buffer.find("\n\n") {
         let event = buffer[..cut].to_string();
         buffer.drain(..cut + 2);
@@ -249,12 +275,12 @@ async fn send(
 }
 
 /// Ask for thought summaries in whichever way this generation spells it.
-fn request_thoughts(body: &mut Value, provider: &ProviderConfig) {
+fn request_thoughts(body: &mut Value, _provider: &ProviderConfig) {
     let config = &mut body["generationConfig"];
-    if takes_thinking_level(&provider.model) {
-        config["thinkingSummaries"] = json!("auto");
-    } else if let Some(thinking) = config.get_mut("thinkingConfig") {
+    if let Some(thinking) = config.get_mut("thinkingConfig") {
         thinking["includeThoughts"] = json!(true);
+    } else if config.get("thinkingLevel").is_some() {
+        config["thinkingSummaries"] = json!("auto");
     }
 }
 
@@ -350,36 +376,59 @@ fn build_body(provider: &ProviderConfig, request: &ChatRequest) -> Value {
     body
 }
 
-/// Gemini spells the reasoning control two incompatible ways, and sending the
-/// wrong one is a hard 400 ("Unknown name \"thinkingLevel\""):
+/// Gemini spells the reasoning control two ways, and sending the one an
+/// endpoint does not know is a hard 400 ("Unknown name \"thinkingLevel\""):
 ///
-/// * Gemini 3 and newer: `generationConfig.thinkingLevel`, a named level.
-/// * Gemini 2.x: `generationConfig.thinkingConfig.thinkingBudget`, a number of
-///   tokens — also the only way to switch thinking off, with 0.
+/// * `generationConfig.thinkingConfig.thinkingBudget` — a number of tokens.
+/// * `generationConfig.thinkingLevel` — a named level.
 ///
-/// The model name decides, and [`call`] retries with the other spelling if the
-/// endpoint disagrees with that guess.
+/// The budget is what actually works: probing this API found `thinkingLevel`
+/// rejected by every model it serves, 3.x included, while a budget was accepted
+/// everywhere. So the budget goes out by default and [`call`] retries with the
+/// level if some endpoint ever asks for it.
 fn apply_thinking(config: &mut Value, provider: &ProviderConfig, thinking: &Thinking) {
     if thinking.is_default() {
         return;
     }
-    if takes_thinking_level(&provider.model) {
-        set_thinking_level(config, thinking);
-    } else {
-        set_thinking_budget(config, provider, thinking);
-    }
+    set_thinking_budget(config, provider, thinking);
 }
 
-/// Gemini 3 and later take a level; everything older takes a budget.
-fn takes_thinking_level(model: &str) -> bool {
-    let model = model.to_lowercase();
-    let Some(rest) = model.strip_prefix("gemini-") else {
-        return false;
-    };
-    rest.split(['.', '-'])
-        .next()
-        .and_then(|major| major.parse::<u32>().ok())
-        .is_some_and(|major| major >= 3)
+/// Major version of a Gemini model name, when it has one.
+fn generation(model: &str) -> Option<u32> {
+    model
+        .to_lowercase()
+        .strip_prefix("gemini-")?
+        .split(['.', '-'])
+        .next()?
+        .parse::<u32>()
+        .ok()
+}
+
+/// Budgets a model actually accepts, which the documentation does not say and
+/// the API answers with a 400. Measured, per family:
+///
+/// * `2.5-pro` — 128 … 32768, and it cannot stop thinking.
+/// * `2.5-flash-lite` — 0, or 512 … 24576; 128 is refused.
+/// * `3.x` lite models — no 0 either; the smallest accepted is 128.
+/// * everything else — 0 … 24576.
+///
+/// `-1` is Gemini's "decide for yourself" and is passed through untouched.
+fn clamp_budget(model: &str, budget: i32) -> i32 {
+    if budget < 0 {
+        return budget;
+    }
+    let name = model.to_lowercase();
+    if name.contains("2.5-pro") {
+        return budget.clamp(128, 32768);
+    }
+    if name.contains("lite") {
+        return match generation(&name) {
+            Some(major) if major >= 3 => budget.max(128),
+            _ if budget == 0 => 0,
+            _ => budget.clamp(512, 24576),
+        };
+    }
+    budget.clamp(0, 24576)
 }
 
 fn set_thinking_level(config: &mut Value, thinking: &Thinking) {
@@ -406,14 +455,7 @@ fn set_thinking_budget(config: &mut Value, provider: &ProviderConfig, thinking: 
         (None, Some(level)) => level_to_budget(level),
         (None, None) => return,
     };
-    // 2.5 Pro cannot stop thinking and rejects anything under 128.
-    let budget = if provider.model.to_lowercase().contains("2.5-pro") && (0..128).contains(&budget)
-    {
-        128
-    } else {
-        budget
-    };
-    config["thinkingConfig"] = json!({ "thinkingBudget": budget });
+    config["thinkingConfig"] = json!({ "thinkingBudget": clamp_budget(&provider.model, budget) });
 }
 
 /// Levels as token budgets, within the 0–24576 range Flash accepts.
@@ -439,13 +481,50 @@ fn budget_to_level(budget: i32) -> &'static str {
     }
 }
 
-/// True when a 400 is the endpoint rejecting the thinking field we picked.
-fn rejected_thinking_field(body: &str) -> bool {
-    let body = body.to_lowercase();
-    body.contains("unknown name")
-        && (body.contains("thinkinglevel") || body.contains("thinking_level"))
-        || body.contains("unknown name") && body.contains("thinkingconfig")
-        || body.contains("unknown name") && body.contains("thinking_config")
+/// The field an "Unknown name" rejection is complaining about.
+///
+/// Gemini's generation config differs between models and API versions, and
+/// being told is the only way to learn which fields a given endpoint knows.
+/// The error names one, which is enough to drop it and try again.
+fn rejected_field(body: &str) -> Option<String> {
+    if !body.to_lowercase().contains("unknown name") {
+        return None;
+    }
+    let after_label = &body[body.find("Unknown name")? + "Unknown name".len()..];
+    let quoted = after_label.trim_start().trim_start_matches('\\');
+    let mut chars = quoted.char_indices();
+    let (_, quote) = chars.next()?;
+    if quote != '"' && quote != '\'' {
+        return None;
+    }
+    let rest = &quoted[quote.len_utf8()..];
+    let end = rest.find(quote)?;
+    let name = rest[..end].trim().trim_end_matches('\\').to_string();
+    (!name.is_empty()).then_some(name)
+}
+
+/// True when the named field is a thinking control, which has a second
+/// spelling worth trying before giving up on it.
+fn is_thinking_field(name: &str) -> bool {
+    matches!(
+        name.to_lowercase().replace('_', "").as_str(),
+        "thinkinglevel" | "thinkingconfig"
+    )
+}
+
+/// Remove a field the endpoint does not know, wherever it sits in the
+/// generation config. False when there was nothing to remove.
+fn drop_field(body: &mut Value, name: &str) -> bool {
+    fn remove(value: &mut Value, name: &str) -> bool {
+        let Some(map) = value.as_object_mut() else {
+            return false;
+        };
+        if map.remove(name).is_some() {
+            return true;
+        }
+        map.values_mut().any(|nested| remove(nested, name))
+    }
+    remove(&mut body["generationConfig"], name)
 }
 
 /// Swap `thinkingLevel` for `thinkingConfig` or the other way round.
@@ -758,89 +837,103 @@ mod tests {
         build_body(&model(name), &req)["generationConfig"].clone()
     }
 
-    /// Gemini 3 takes a named level; 2.x rejects that field outright with
-    /// `Unknown name "thinkingLevel"` and wants a token budget instead.
+    /// Probing this API found `thinkingLevel` refused by every model it serves,
+    /// 3.x included, while a budget was accepted everywhere. So a budget is
+    /// what goes out, for every generation.
     #[test]
-    fn each_generation_gets_the_field_it_accepts() {
+    fn every_generation_is_given_a_budget() {
         let high = Thinking {
             effort: "high".into(),
             budget_tokens: None,
         };
 
-        for new_model in [
+        for name in [
             "gemini-3.5-flash",
-            "gemini-3-pro-preview",
-            "gemini-4.0-flash",
-            "models/gemini-3.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
         ] {
-            let name = new_model.trim_start_matches("models/");
             let config = config_for(name, high.clone());
-            assert_eq!(config["thinkingLevel"], "high", "{name}");
-            assert!(config.get("thinkingConfig").is_none(), "{name}");
-        }
-
-        for old_model in ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"] {
-            let config = config_for(old_model, high.clone());
-            assert!(config.get("thinkingLevel").is_none(), "{old_model}");
-            assert_eq!(
-                config["thinkingConfig"]["thinkingBudget"], 24576,
-                "{old_model}"
+            assert!(
+                config.get("thinkingLevel").is_none(),
+                "{name} must not be sent a level"
             );
+            assert_eq!(config["thinkingConfig"]["thinkingBudget"], 24576, "{name}");
         }
     }
 
-    /// Switching thinking off means a zero budget on 2.x — except on 2.5 Pro,
-    /// which cannot stop thinking and rejects anything below 128.
+    /// Each family refuses a different set of numbers — measured, not
+    /// documented — and the app has to stay inside them.
     #[test]
-    fn thinking_off_respects_the_model_floor() {
+    fn a_budget_stays_inside_what_the_model_accepts() {
         let off = Thinking {
             effort: "none".into(),
             budget_tokens: None,
         };
+
+        // Flash takes a zero budget and stops thinking.
         assert_eq!(
             config_for("gemini-2.5-flash", off.clone())["thinkingConfig"]["thinkingBudget"],
             0
         );
+        // 2.5 Pro cannot stop, and refuses anything under 128.
         assert_eq!(
             config_for("gemini-2.5-pro", off.clone())["thinkingConfig"]["thinkingBudget"],
             128
         );
-        // On Gemini 3 the nearest thing to "off" is the minimal level.
+        // The 3.x lite models answer 0 with "invalid argument".
         assert_eq!(
-            config_for("gemini-3.5-flash", off)["thinkingLevel"],
-            "minimal"
+            config_for("gemini-3.5-flash-lite", off.clone())["thinkingConfig"]["thinkingBudget"],
+            128
+        );
+        // 2.5 flash-lite takes 0, but nothing between 1 and 511.
+        assert_eq!(
+            config_for("gemini-2.5-flash-lite", off)["thinkingConfig"]["thinkingBudget"],
+            0
+        );
+        assert_eq!(
+            config_for(
+                "gemini-2.5-flash-lite",
+                Thinking {
+                    effort: String::new(),
+                    budget_tokens: Some(128),
+                }
+            )["thinkingConfig"]["thinkingBudget"],
+            512
+        );
+        // "Decide for yourself" passes through untouched.
+        assert_eq!(
+            config_for(
+                "gemini-2.5-flash",
+                Thinking {
+                    effort: String::new(),
+                    budget_tokens: Some(-1),
+                }
+            )["thinkingConfig"]["thinkingBudget"],
+            -1
         );
     }
 
-    /// A budget typed by the operator is honoured as-is on 2.x, and mapped to
-    /// the nearest level on 3.x rather than being sent as an unknown field.
+    /// Levels are the operator's vocabulary; they become numbers on the wire.
     #[test]
-    fn a_budget_is_translated_for_the_newer_models() {
-        let budget = |n: i32| Thinking {
-            effort: String::new(),
-            budget_tokens: Some(n),
+    fn levels_become_budgets() {
+        let budget_for = |name: &str| {
+            config_for(
+                "gemini-2.5-flash",
+                Thinking {
+                    effort: name.into(),
+                    budget_tokens: None,
+                },
+            )["thinkingConfig"]["thinkingBudget"]
+                .clone()
         };
-        assert_eq!(
-            config_for("gemini-2.5-flash", budget(4096))["thinkingConfig"]["thinkingBudget"],
-            4096
-        );
-        assert_eq!(
-            config_for("gemini-3.5-flash", budget(512))["thinkingLevel"],
-            "minimal"
-        );
-        assert_eq!(
-            config_for("gemini-3.5-flash", budget(20000))["thinkingLevel"],
-            "high"
-        );
-        // -1 is Gemini's "decide for yourself".
-        assert_eq!(
-            config_for("gemini-3.5-flash", budget(-1))["thinkingLevel"],
-            "medium"
-        );
-        assert_eq!(
-            config_for("gemini-2.5-flash", budget(-1))["thinkingConfig"]["thinkingBudget"],
-            -1
-        );
+
+        assert_eq!(budget_for("none"), 0);
+        assert_eq!(budget_for("minimal"), 512);
+        assert_eq!(budget_for("low"), 2048);
+        assert_eq!(budget_for("medium"), 8192);
+        assert_eq!(budget_for("high"), 24576);
+        assert_eq!(budget_for("xhigh"), 24576);
     }
 
     /// The 400 that says the field is unknown is recognised, and the retry
@@ -848,10 +941,9 @@ mod tests {
     #[test]
     fn a_rejected_field_is_swapped_for_the_other_one() {
         let error = r#"{"error":{"code":400,"message":"Invalid JSON payload received. Unknown name \"thinkingLevel\" at 'generation_config': Cannot find field.","status":"INVALID_ARGUMENT"}}"#;
-        assert!(rejected_thinking_field(error));
-        assert!(!rejected_thinking_field(
-            r#"{"error":{"message":"quota exceeded"}}"#
-        ));
+        assert_eq!(rejected_field(error).as_deref(), Some("thinkingLevel"));
+        assert!(is_thinking_field("thinkingLevel"));
+        assert!(rejected_field(r#"{"error":{"message":"quota exceeded"}}"#).is_none());
 
         let thinking = Thinking {
             effort: "high".into(),
@@ -861,20 +953,23 @@ mod tests {
         req.thinking = thinking.clone();
         let provider = model("gemini-3.5-flash");
         let mut body = build_body(&provider, &req);
-        assert_eq!(body["generationConfig"]["thinkingLevel"], "high");
-
-        assert!(flip_thinking(&mut body, &provider, &thinking));
-        assert!(body["generationConfig"].get("thinkingLevel").is_none());
+        // A budget goes out by default, since that is what the API accepts.
         assert_eq!(
             body["generationConfig"]["thinkingConfig"]["thinkingBudget"],
             24576
         );
 
-        // And back the other way for an endpoint that only knows levels.
-        let provider = model("gemini-2.5-flash");
-        let mut body = build_body(&provider, &req);
+        // An endpoint that only knows levels gets one on the retry.
         assert!(flip_thinking(&mut body, &provider, &thinking));
+        assert!(body["generationConfig"].get("thinkingConfig").is_none());
         assert_eq!(body["generationConfig"]["thinkingLevel"], "high");
+
+        // And back again, if that spelling is refused too.
+        assert!(flip_thinking(&mut body, &provider, &thinking));
+        assert_eq!(
+            body["generationConfig"]["thinkingConfig"]["thinkingBudget"],
+            24576
+        );
     }
 
     /// An explicit budget still wins over a level on the models that take one,
@@ -897,6 +992,71 @@ mod tests {
 
     /// A stream arrives in arbitrary pieces: an event split across two chunks
     /// must still be read exactly once, and only when it is whole.
+    /// Not every model offers thought summaries, and the ones that do not say
+    /// so by name. The field is dropped and the request goes through.
+    #[test]
+    fn an_unknown_field_is_dropped_and_the_request_retried() {
+        let error = r#"{"error":{"code":400,"message":"Invalid JSON payload received. Unknown name \"thinkingSummaries\" at 'generation_config': Cannot find field.","status":"INVALID_ARGUMENT"}}"#;
+        let field = rejected_field(error).expect("the rejection names its field");
+        assert_eq!(field, "thinkingSummaries");
+        assert!(!is_thinking_field(&field), "it has no second spelling");
+
+        let mut req = ChatRequest::new("");
+        req.thinking = Thinking {
+            effort: "high".into(),
+            budget_tokens: None,
+        };
+        let provider = model("gemini-3.5-flash");
+        let mut body = build_body(&provider, &req);
+        // Summaries ride along with whichever control is in use.
+        body["generationConfig"]["thinkingSummaries"] = json!("auto");
+
+        assert!(drop_field(&mut body, &field));
+        assert!(body["generationConfig"].get("thinkingSummaries").is_none());
+        // Only the rejected field goes; what was asked for stays.
+        assert_eq!(
+            body["generationConfig"]["thinkingConfig"]["thinkingBudget"],
+            24576
+        );
+        assert!(!drop_field(&mut body, &field), "nothing left to drop");
+    }
+
+    /// `includeThoughts` sits inside `thinkingConfig` on the older models, so
+    /// the search has to go a level down.
+    #[test]
+    fn a_nested_field_is_dropped() {
+        let mut req = ChatRequest::new("");
+        req.thinking = Thinking {
+            effort: "medium".into(),
+            budget_tokens: None,
+        };
+        let provider = model("gemini-2.5-flash");
+        let mut body = build_body(&provider, &req);
+        request_thoughts(&mut body, &provider);
+        assert_eq!(
+            body["generationConfig"]["thinkingConfig"]["includeThoughts"],
+            true
+        );
+
+        assert!(drop_field(&mut body, "includeThoughts"));
+        assert!(body["generationConfig"]["thinkingConfig"]
+            .get("includeThoughts")
+            .is_none());
+        assert!(body["generationConfig"]["thinkingConfig"]["thinkingBudget"].is_number());
+    }
+
+    /// Gemini separates its events with CRLF, and the whole answer went
+    /// missing until that was handled.
+    #[test]
+    fn carriage_returns_do_not_hide_events() {
+        let mut buffer = String::from("data: {\"a\":1}\r\n\r\ndata: {\"b\":2}\r\n\r\n");
+        let events = take_events(&mut buffer);
+        assert_eq!(events.len(), 2, "CRLF events were missed");
+        assert_eq!(events[0]["a"], 1);
+        assert_eq!(events[1]["b"], 2);
+        assert!(buffer.is_empty());
+    }
+
     #[test]
     fn events_are_only_taken_when_complete() {
         let mut buffer = String::from("data: {\"a\":1}\n\ndata: {\"b\"");

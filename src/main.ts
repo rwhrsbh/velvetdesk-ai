@@ -557,9 +557,18 @@ function bindTopbar() {
 }
 
 /** Switch UI language, redraw everything and remember the choice. */
+/** Re-render the notes the app wrote, in the language now selected. */
+function retranslateEntries() {
+  for (const entry of store.entries) {
+    const meta = entry.meta as { key?: string; params?: Record<string, string | number> } | null;
+    if (meta?.key) entry.text = t(meta.key, meta.params ?? {});
+  }
+}
+
 function applyLanguage(next: Lang, persist = false) {
   setLang(next);
   applyStatic();
+  retranslateEntries();
   $("langLabel").textContent = next.toUpperCase();
   if (store.settings) renderAll();
   if (persist) void persistSettings({ ui_language: next });
@@ -877,6 +886,17 @@ function bindContextMenus() {
   });
 }
 
+/**
+ * A note from the app itself, remembered by key.
+ *
+ * The text is rendered now so the message reads immediately, and the key is
+ * kept so it is rendered again — in the new language — when the interface
+ * switches.
+ */
+function systemNote(key: string, params: Record<string, string | number> = {}) {
+  return makeEntry("system", t(key, params), { key, params });
+}
+
 // ---------------------------------------------------------------------------
 // context: the gauge, /clear and /compact
 // ---------------------------------------------------------------------------
@@ -923,7 +943,7 @@ async function runSlashCommand(raw: string): Promise<boolean> {
   input.dispatchEvent(new Event("input"));
 
   if (command === "help") {
-    pushEntry(makeEntry("system", t("cmd.help")));
+    pushEntry(systemNote("cmd.help"));
     renderChat();
     return true;
   }
@@ -941,7 +961,7 @@ async function runSlashCommand(raw: string): Promise<boolean> {
       if (store.master) {
         await api.clearMasterLog();
         store.entries = [];
-        pushEntry(makeEntry("system", t("cmd.clearedChat")));
+        pushEntry(systemNote("cmd.clearedChat"));
         renderChat();
         return true;
       }
@@ -949,14 +969,14 @@ async function runSlashCommand(raw: string): Promise<boolean> {
       store.entries = [];
       if (store.activeManId) {
         const stats = await api.clearContext(store.activeModelId, store.activeManId);
-        pushEntry(makeEntry("system", t("cmd.cleared", { n: stats.total_messages })));
+        pushEntry(systemNote("cmd.cleared", { n: stats.total_messages }));
       } else {
-        pushEntry(makeEntry("system", t("cmd.clearedChat")));
+        pushEntry(systemNote("cmd.clearedChat"));
       }
     } else {
       store.busy = true;
       renderScope();
-      pushEntry(makeEntry("system", t("cmd.compacting"), null, true));
+      pushEntry(makeEntry("system", t("cmd.compacting"), { key: "cmd.compacting" }, true));
       renderChat();
       if (store.activeManId) {
         const stats = await api.compactContext(store.activeModelId, store.activeManId);
@@ -1024,7 +1044,7 @@ async function toggleTemporaryChat() {
   store.entries = [];
 
   if (store.temporary) {
-    pushEntry(makeEntry("system", t("cmd.temporaryStarted")));
+    pushEntry(systemNote("cmd.temporaryStarted"));
   } else {
     if (store.activeModelId) {
       const log = await api.getAgentLog(store.activeModelId, store.activeManId);
@@ -1054,7 +1074,7 @@ async function toggleMasterChat() {
     } catch (error) {
       console.error("master log", error);
     }
-    if (store.entries.length === 0) pushEntry(makeEntry("system", t("master.hello")));
+    if (store.entries.length === 0) pushEntry(systemNote("master.hello"));
   } else {
     await loadChat();
   }
@@ -1261,15 +1281,10 @@ async function boot() {
     renderAll();
 
     if (data.profiles.length === 0) {
-      pushEntry(
-        makeEntry(
-          "system",
-          t("hint.firstRun"),
-        ),
-      );
+      pushEntry(systemNote("hint.firstRun"));
       renderChat();
     } else if (!activeProviderReady()) {
-      pushEntry(makeEntry("system", t("hint.noKey")));
+      pushEntry(systemNote("hint.noKey"));
       renderChat();
     }
   } catch (error) {

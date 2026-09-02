@@ -106,10 +106,12 @@ drop a fact because no dossier exists yet: an entry in \"men\" creates one."
 }
 
 /// Full system prompt for a scoped model-agent run.
+#[allow(clippy::too_many_arguments)]
 pub fn build_system(
     profile: &Profile,
     man: Option<&Man>,
     roster: &[Man],
+    folders: &[crate::workspace::TrustedRoot],
     mode: AgentMode,
     security: SecurityLevel,
     global_rules: &str,
@@ -132,6 +134,7 @@ pub fn build_system(
         "Storage sandbox: profiles/{}/ — you cannot read or write any other profile.\n\n",
         profile.id
     ));
+    out.push_str(&folders_block(folders));
     out.push_str(&format!(
         "Operator language: {}. Everything addressed to the operator — summaries, \
          explanations, questions — is written in it. Messages to a man stay in his \
@@ -145,6 +148,36 @@ pub fn build_system(
         out.push_str("\n\nHouse rules from the operator:\n");
         out.push_str(global_rules.trim());
     }
+    out
+}
+
+/// The folders on disk this agent may use.
+///
+/// Without this an agent has no idea a folder was granted: it guesses relative
+/// paths, gets refused, and asks for access it already has.
+fn folders_block(folders: &[crate::workspace::TrustedRoot]) -> String {
+    if folders.is_empty() {
+        return "Files: you can only reach your own data directory. For anything else on \
+                disk, call request_access with an absolute path and wait for the operator \
+                to answer.\n\n"
+            .to_string();
+    }
+    let mut out = String::from("Folders you may use, with absolute paths:\n");
+    for folder in folders {
+        out.push_str(&format!(
+            "- {} ({})\n",
+            folder.path,
+            if folder.writable {
+                "read and write"
+            } else {
+                "read only"
+            }
+        ));
+    }
+    out.push_str(
+        "Always pass absolute paths from this list — relative ones are refused. For any \
+         other folder, call request_access and wait for the operator to answer.\n\n",
+    );
     out
 }
 

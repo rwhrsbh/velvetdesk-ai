@@ -199,14 +199,17 @@ npm run android:dev      # телефон / эмулятор
 
 | Провайдер | Что уходит на провод |
 | --- | --- |
-| Gemini 3+ | `generationConfig.thinkingLevel` |
-| Gemini 2.x | `generationConfig.thinkingConfig.thinkingBudget` (уровень переводится в токены) |
+| Gemini | `generationConfig.thinkingConfig.thinkingBudget` — уровень переводится в токены |
 | OpenAI, Groq, Azure | `reasoning_effort` |
 | OpenRouter | `reasoning: { effort }` или `{ max_tokens }` |
 | Qwen / DashScope | `enable_thinking` + `thinking_budget` |
 
-Перепутанное поле — это HTTP 400, поэтому выбор делается по названию модели, а если
-endpoint всё же не согласен, запрос повторяется с другим написанием.
+Про Gemini: в документации у моделей 3.x значится `thinkingLevel`, но живая проверка
+показала, что API отвергает это поле у всех моделей, включая 3.x, — работает только
+бюджет. Границы бюджета у каждой модели свои и тоже проверены запросами: `2.5-pro`
+не умеет не думать и требует ≥128, `2.5-flash-lite` берёт 0 либо ≥512, а лайт-модели
+3.x отвергают 0. Приложение держится внутри этих границ, а если endpoint всё же
+назовёт поле неизвестным — повторяет запрос с другим написанием или без него.
 
 ### Выбор модели
 

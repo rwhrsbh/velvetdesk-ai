@@ -45,6 +45,20 @@ fn now() -> chrono::DateTime<Utc> {
     Utc::now()
 }
 
+/// A path as a person would write it.
+///
+/// Canonicalising on Windows produces the extended-length form,
+/// `\\?\C:\Users\…`. Storing that is fine; showing it is not — it ends up in
+/// prompts and in the interface, where it reads as a different path from the
+/// one the operator picked.
+pub fn display_path(path: &Path) -> String {
+    let text = path.to_string_lossy();
+    text.strip_prefix(r"\\?\UNC\")
+        .map(|rest| format!(r"\\{rest}"))
+        .or_else(|| text.strip_prefix(r"\\?\").map(str::to_string))
+        .unwrap_or_else(|| text.to_string())
+}
+
 /// What a path is allowed to be used for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Access {
@@ -310,6 +324,20 @@ mod tests {
         // Restoring kept a copy of the clobbered version too.
         let index = read_backups(&paths).unwrap();
         assert_eq!(index.entries.len(), 2);
+    }
+
+    /// The extended-length prefix belongs to the filesystem call, not to the
+    /// operator's screen or the model's prompt.
+    #[test]
+    fn a_path_is_shown_the_way_it_was_typed() {
+        let plain = PathBuf::from(r"C:\Users\ops\letters");
+        assert_eq!(display_path(&plain), r"C:\Users\ops\letters");
+
+        let extended = PathBuf::from(r"\\?\C:\Users\ops\letters");
+        assert_eq!(display_path(&extended), r"C:\Users\ops\letters");
+
+        let share = PathBuf::from(r"\\?\UNC\server\share\file.txt");
+        assert_eq!(display_path(&share), r"\\server\share\file.txt");
     }
 
     #[test]

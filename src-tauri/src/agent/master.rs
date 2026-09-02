@@ -269,8 +269,33 @@ pub async fn chat(deps: &AgentDeps<'_>, input: MasterInput) -> Result<MasterOutp
         .collect();
 
     let security = input.security.unwrap_or(deps.settings.security_level);
+    let folders = if deps.settings.trusted_roots.is_empty() {
+        String::new()
+    } else {
+        let list: Vec<String> = deps
+            .settings
+            .trusted_roots
+            .iter()
+            .map(|root| {
+                format!(
+                    "- {} ({})",
+                    root.path,
+                    if root.writable {
+                        "read and write"
+                    } else {
+                        "read only"
+                    }
+                )
+            })
+            .collect();
+        format!(
+            "\n\nFolders you may use, with absolute paths:\n{}\nAnything else needs \
+             request_access and a human answer.",
+            list.join("\n")
+        )
+    };
     let mut request = ChatRequest::new(format!(
-        "{MASTER_SYSTEM}\n\nOperator language: {}.\n\nProfiles in this installation:\n{}\n\n{}",
+        "{MASTER_SYSTEM}{folders}\n\nOperator language: {}.\n\nProfiles in this installation:\n{}\n\n{}",
         super::prompts::operator_language(&deps.settings.ui_language),
         serde_json::to_string_pretty(&roster)?,
         super::prompts::security_block(security)

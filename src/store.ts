@@ -107,6 +107,13 @@ export function pushEntry(entry: UiEntry) {
   if (store.entries.length > 400) store.entries.splice(0, store.entries.length - 400);
 }
 
+/**
+ * One line of the conversation.
+ *
+ * A message the app writes itself keeps the key it came from, so switching the
+ * interface language re-renders it rather than leaving yesterday's language on
+ * screen.
+ */
 export function makeEntry(
   sender: UiEntry["sender"],
   text: string,

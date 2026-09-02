@@ -281,8 +281,8 @@ fn fs_list(paths: &Paths, roots: &[TrustedRoot], args: &Value) -> Result<ToolOut
         json!({ "path": dir.to_string_lossy(), "entries": entries }),
         Phrase::new(
             "step.fsList",
-            json!({ "path": dir.to_string_lossy() }),
-            format!("список {}", dir.display()),
+            json!({ "path": workspace::display_path(&dir) }),
+            format!("список {}", workspace::display_path(&dir)),
         ),
     ))
 }
@@ -315,8 +315,8 @@ fn fs_read(paths: &Paths, roots: &[TrustedRoot], args: &Value) -> Result<ToolOut
         json!({ "path": file.to_string_lossy(), "content": content, "truncated": truncated }),
         Phrase::new(
             "step.fsRead",
-            json!({ "path": file.to_string_lossy() }),
-            format!("чтение {}", file.display()),
+            json!({ "path": workspace::display_path(&file) }),
+            format!("чтение {}", workspace::display_path(&file)),
         ),
     ))
 }
@@ -346,8 +346,8 @@ fn fs_write(paths: &Paths, roots: &[TrustedRoot], args: &Value) -> Result<ToolOu
         }),
         Phrase::new(
             "step.fsWritten",
-            json!({ "path": file.to_string_lossy() }),
-            format!("записан {}", file.display()),
+            json!({ "path": workspace::display_path(&file) }),
+            format!("записан {}", workspace::display_path(&file)),
         ),
     ))
 }
@@ -384,8 +384,8 @@ fn fs_edit(paths: &Paths, roots: &[TrustedRoot], args: &Value) -> Result<ToolOut
         }),
         Phrase::new(
             "step.fsEdited",
-            json!({ "path": file.to_string_lossy() }),
-            format!("правка {}", file.display()),
+            json!({ "path": workspace::display_path(&file) }),
+            format!("правка {}", workspace::display_path(&file)),
         ),
     ))
 }
@@ -409,8 +409,8 @@ fn fs_delete(paths: &Paths, roots: &[TrustedRoot], args: &Value) -> Result<ToolO
         }),
         Phrase::new(
             "step.fsDeleted",
-            json!({ "path": file.to_string_lossy() }),
-            format!("удалён {}", file.display()),
+            json!({ "path": workspace::display_path(&file) }),
+            format!("удалён {}", workspace::display_path(&file)),
         ),
     ))
 }
@@ -623,7 +623,7 @@ mod tests {
             &roots,
             SecurityLevel::Yolo,
             "fs_delete",
-            &json!({ "path": file.to_string_lossy() }),
+            &json!({ "path": workspace::display_path(&file) }),
         )
         .unwrap();
         assert!(!file.exists());
