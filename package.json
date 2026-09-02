@@ -6,7 +6,8 @@
   "description": "VelvetDesk AI — cross-platform agency copilot built on Tauri 2",
   "scripts": {
     "dev": "node scripts/copy-ort.mjs && vite",
-    "build": "node scripts/copy-ort.mjs && tsc --noEmit && vite build",
+    "build": "node scripts/copy-ort.mjs && node scripts/check-i18n.mjs && tsc --noEmit && vite build",
+    "check:i18n": "node scripts/check-i18n.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
     "desktop:dev": "tauri dev",

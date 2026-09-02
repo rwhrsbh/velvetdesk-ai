@@ -101,6 +101,9 @@ export interface RunStep {
   kind: string;
   tool: string | null;
   summary: string;
+  /** Dictionary key for `summary`; `params` fills its placeholders. */
+  key?: string;
+  params?: Record<string, string | number>;
   detail: unknown;
 }
 
@@ -112,6 +115,8 @@ export interface Usage {
 
 export interface PendingAction {
   id: string;
+  key?: string;
+  params?: Record<string, string | number>;
   model_id: string;
   tool: string;
   args: Record<string, unknown>;
@@ -124,6 +129,8 @@ export interface PendingAction {
 
 export interface RunOutput {
   reply: string;
+  /** Set when the reply is the app's own words; the dictionary holds them. */
+  reply_key?: string;
   /** The model's own summary of its reasoning, when it reports one. */
   thoughts: string;
   mode: AgentMode;

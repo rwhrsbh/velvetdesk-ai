@@ -45,6 +45,13 @@ pub struct RunInput {
 pub struct RunStep {
     pub kind: String,
     pub tool: Option<String>,
+    /// Dictionary key for `summary`, with `params` filling its placeholders.
+    /// The core never writes prose: the interface holds the wording, in
+    /// whichever language it runs.
+    #[serde(default)]
+    pub key: String,
+    #[serde(default)]
+    pub params: Value,
     pub summary: String,
     pub detail: Value,
 }
@@ -52,6 +59,10 @@ pub struct RunStep {
 #[derive(Debug, Clone, Serialize)]
 pub struct RunOutput {
     pub reply: String,
+    /// Set when the reply is the app's own words rather than the model's, so
+    /// the interface can say them in its language.
+    #[serde(default)]
+    pub reply_key: String,
     /// The model's own summary of its reasoning, when it reports one.
     #[serde(default)]
     pub thoughts: String,
@@ -120,6 +131,7 @@ pub async fn run(deps: &AgentDeps<'_>, input: RunInput) -> Result<RunOutput> {
         mode,
         security,
         &deps.settings.global_style_rules,
+        &deps.settings.ui_language,
     );
 
     // Compact before assembling the prompt when the correspondence has grown
@@ -225,6 +237,7 @@ pub fn context_stats(
         settings.agent_mode,
         settings.security_level,
         &settings.global_style_rules,
+        &settings.ui_language,
     );
     let context = prompts::context_block(thread.as_ref(), settings.history_limit);
     // The tool declarations travel with every request too, and they are not
@@ -293,7 +306,11 @@ pub async fn compact_context(
         })
         .collect();
 
-    let mut request = ChatRequest::new(prompts::COMPACTOR);
+    let mut request = ChatRequest::new(format!(
+        "{}\n\nWrite the summary in {}.",
+        prompts::COMPACTOR,
+        prompts::operator_language(&deps.settings.ui_language)
+    ));
     request.temperature = 0.2;
     let previous = if thread.context_summary.trim().is_empty() {
         String::new()
@@ -336,6 +353,7 @@ async fn run_auto(
     let mut key_index = 0usize;
     let mut reply = String::new();
     let mut thoughts = String::new();
+    let mut reply_key = String::new();
     let mut turns = 0usize;
 
     for turn in 0..deps.settings.max_tool_turns.max(1) {
@@ -390,6 +408,7 @@ async fn run_auto(
                 Ok(ToolOutcome {
                     result,
                     summary,
+                    phrase,
                     queued,
                     applied,
                     risk,
@@ -406,6 +425,8 @@ async fn run_auto(
                         },
                         tool: Some(tool.clone()),
                         summary: summary.clone(),
+                        key: phrase.key,
+                        params: phrase.params,
                         detail: json!({ "args": call.args, "risk": risk, "applied": applied }),
                     };
                     (result, step)
@@ -418,6 +439,8 @@ async fn run_auto(
                             kind: "tool_error".into(),
                             tool: Some(call.name.clone()),
                             summary: message,
+                            key: String::new(),
+                            params: Value::Null,
                             detail: json!({ "args": call.args }),
                         },
                     )
@@ -432,12 +455,13 @@ async fn run_auto(
     }
 
     if reply.trim().is_empty() {
-        reply =
-            "Инструменты отработали, но модель не вернула текст ответа. Проверь шаги ниже.".into();
+        reply_key = "chat.noReplyText".to_string();
+        reply = "Инструменты отработали, но модель не вернула текст ответа.".into();
     }
 
     finish(
-        scope, mode, security, input, reply, thoughts, steps, pending, usage, key_index, turns,
+        scope, mode, security, input, reply, reply_key, thoughts, steps, pending, usage, key_index,
+        turns,
     )
 }
 
@@ -465,12 +489,16 @@ async fn run_single_turn(
         ))
     })?;
 
+    let mut reply_key = String::new();
     let reply = match mode {
         AgentMode::Memorize => parsed
             .get("summary")
             .and_then(|s| s.as_str())
-            .unwrap_or("Факты записаны.")
-            .to_string(),
+            .map(str::to_string)
+            .unwrap_or_else(|| {
+                reply_key = "chat.factsStored".to_string();
+                "Факты записаны.".to_string()
+            }),
         _ => parsed
             .get("reply")
             .and_then(|s| s.as_str())
@@ -492,6 +520,7 @@ async fn run_single_turn(
         security,
         input,
         reply,
+        reply_key,
         response.thoughts,
         steps,
         pending,
@@ -508,6 +537,7 @@ fn finish(
     security: SecurityLevel,
     input: RunInput,
     reply: String,
+    reply_key: String,
     thoughts: String,
     steps: Vec<RunStep>,
     pending: Vec<PendingAction>,
@@ -533,6 +563,7 @@ fn finish(
 
     Ok(RunOutput {
         reply,
+        reply_key,
         thoughts,
         mode,
         security,
@@ -589,6 +620,8 @@ pub fn apply_patch(
                 kind: "warn".into(),
                 tool: None,
                 summary: "Патч памяти пропущен: не выбран мужчина и в патче нет имени".into(),
+                key: "step.patchUnattributed".into(),
+                params: json!({}),
                 detail: patch.clone(),
             }),
         }
@@ -608,6 +641,8 @@ pub fn apply_patch(
                     },
                     tool: Some(tool),
                     summary: outcome.summary,
+                    key: outcome.phrase.key,
+                    params: outcome.phrase.params,
                     detail: args,
                 };
                 emit(json!({ "kind": "step", "step": step }));
@@ -617,6 +652,8 @@ pub fn apply_patch(
                 kind: "patch_error".into(),
                 tool: Some(tool),
                 summary: err.to_string(),
+                key: String::new(),
+                params: Value::Null,
                 detail: args,
             }),
         }

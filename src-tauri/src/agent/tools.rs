@@ -49,9 +49,33 @@ pub struct PendingAction {
     pub args: Value,
     pub risk: Risk,
     pub summary: String,
+    /// Dictionary key for `summary`; see [`crate::agent::RunStep`].
+    #[serde(default)]
+    pub key: String,
+    #[serde(default)]
+    pub params: Value,
     pub before: Value,
     pub after: Value,
     pub created_at: chrono::DateTime<Utc>,
+}
+
+/// A named description of what a tool did, which the interface translates.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Phrase {
+    pub key: String,
+    pub params: Value,
+    /// Plain wording, used when the interface has no entry for the key.
+    pub text: String,
+}
+
+impl Phrase {
+    pub fn new(key: &str, params: Value, text: String) -> Self {
+        Phrase {
+            key: key.to_string(),
+            params,
+            text,
+        }
+    }
 }
 
 /// What a mutating tool would write.
@@ -66,6 +90,7 @@ pub enum MutTarget {
 #[derive(Debug, Clone)]
 pub struct MutationPlan {
     pub summary: String,
+    pub phrase: Phrase,
     pub before: Value,
     pub after: Value,
     pub target: MutTarget,
@@ -75,6 +100,9 @@ pub struct MutationPlan {
 pub struct ToolOutcome {
     pub tool: String,
     pub risk: Risk,
+    /// Named wording for `summary`, translated by the interface.
+    #[serde(default)]
+    pub phrase: Phrase,
     /// JSON string handed back to the model.
     pub result: Value,
     pub applied: bool,
@@ -379,13 +407,19 @@ pub fn execute(
 
     if risk == Risk::Read {
         let result = execute_read(scope, tool, args)?;
+        let phrase = Phrase::new(
+            "step.read",
+            json!({ "tool": tool }),
+            format!("read: {tool}"),
+        );
         return Ok(ToolOutcome {
             tool: tool.to_string(),
             risk,
             result,
             applied: true,
             queued: None,
-            summary: format!("read: {tool}"),
+            summary: phrase.text.clone(),
+            phrase,
         });
     }
 
@@ -400,6 +434,7 @@ pub fn execute(
             applied: true,
             queued: None,
             summary: plan.summary,
+            phrase: plan.phrase,
         })
     } else {
         let pending = PendingAction {
@@ -409,6 +444,8 @@ pub fn execute(
             args: args.clone(),
             risk,
             summary: plan.summary.clone(),
+            key: plan.phrase.key.clone(),
+            params: plan.phrase.params.clone(),
             before: plan.before,
             after: plan.after,
             created_at: Utc::now(),
@@ -426,6 +463,7 @@ pub fn execute(
             applied: false,
             queued: Some(pending),
             summary: plan.summary,
+            phrase: plan.phrase,
         })
     }
 }
@@ -499,10 +537,10 @@ fn fact_list(value: Option<&Value>) -> Vec<Fact> {
         .filter_map(|item| {
             let (key, value) = match item {
                 Value::String(text) if !text.trim().is_empty() => {
-                    ("факт".to_string(), text.trim().to_string())
+                    ("fact".to_string(), text.trim().to_string())
                 }
                 Value::Object(_) => {
-                    let key = arg_str(item, "key").unwrap_or_else(|| "факт".into());
+                    let key = arg_str(item, "key").unwrap_or_else(|| "fact".into());
                     let value = arg_str(item, "value")?;
                     (key, value)
                 }
@@ -572,6 +610,11 @@ pub fn plan_mutation(scope: &Scope, tool: &str, args: &Value) -> Result<Mutation
             man.notes = note_list(args.get("notes"));
             Ok(MutationPlan {
                 summary: format!("создать досье {name} ({id})"),
+                phrase: Phrase::new(
+                    "step.createMan",
+                    json!({ "name": name, "id": id }),
+                    format!("создать досье {name} ({id})"),
+                ),
                 before: Value::Null,
                 after: serde_json::to_value(&man)?,
                 target: MutTarget::Man(Box::new(man)),
@@ -622,6 +665,11 @@ pub fn plan_mutation(scope: &Scope, tool: &str, args: &Value) -> Result<Mutation
             man.updated_at = Utc::now();
             Ok(MutationPlan {
                 summary: format!("обновить {} — {}", man.name, changed.join(", ")),
+                phrase: Phrase::new(
+                    "step.updateMan",
+                    json!({ "name": man.name, "fields": changed.join(", ") }),
+                    format!("обновить {} — {}", man.name, changed.join(", ")),
+                ),
                 before: serde_json::to_value(&before)?,
                 after: serde_json::to_value(&man)?,
                 target: MutTarget::Man(Box::new(man)),
@@ -653,6 +701,11 @@ pub fn plan_mutation(scope: &Scope, tool: &str, args: &Value) -> Result<Mutation
             man.updated_at = Utc::now();
             Ok(MutationPlan {
                 summary: format!("факт {} → {}: {}", man.name, key, value),
+                phrase: Phrase::new(
+                    "step.fact",
+                    json!({ "name": man.name, "key": key, "value": value }),
+                    format!("факт {} → {}: {}", man.name, key, value),
+                ),
                 before: serde_json::to_value(&before)?,
                 after: serde_json::to_value(&man)?,
                 target: MutTarget::Man(Box::new(man)),
@@ -673,6 +726,11 @@ pub fn plan_mutation(scope: &Scope, tool: &str, args: &Value) -> Result<Mutation
             man.updated_at = Utc::now();
             Ok(MutationPlan {
                 summary: format!("заметка {}: {}", man.name, truncate(&text, 60)),
+                phrase: Phrase::new(
+                    "step.note",
+                    json!({ "name": man.name, "text": truncate(&text, 60) }),
+                    format!("заметка {}: {}", man.name, truncate(&text, 60)),
+                ),
                 before: serde_json::to_value(&before)?,
                 after: serde_json::to_value(&man)?,
                 target: MutTarget::Man(Box::new(man)),
@@ -695,6 +753,11 @@ pub fn plan_mutation(scope: &Scope, tool: &str, args: &Value) -> Result<Mutation
             man.updated_at = Utc::now();
             Ok(MutationPlan {
                 summary: format!("подарок {} → {}", man.name, title),
+                phrase: Phrase::new(
+                    "step.gift",
+                    json!({ "name": man.name, "title": title }),
+                    format!("подарок {} → {}", man.name, title),
+                ),
                 before: serde_json::to_value(&before)?,
                 after: serde_json::to_value(&man)?,
                 target: MutTarget::Man(Box::new(man)),
@@ -714,6 +777,11 @@ pub fn plan_mutation(scope: &Scope, tool: &str, args: &Value) -> Result<Mutation
             man.updated_at = Utc::now();
             Ok(MutationPlan {
                 summary: format!("метки {} (+{added})", man.name),
+                phrase: Phrase::new(
+                    "step.tags",
+                    json!({ "name": man.name, "n": added }),
+                    format!("метки {} (+{added})", man.name),
+                ),
                 before: serde_json::to_value(&before)?,
                 after: serde_json::to_value(&man)?,
                 target: MutTarget::Man(Box::new(man)),
@@ -745,6 +813,11 @@ pub fn plan_mutation(scope: &Scope, tool: &str, args: &Value) -> Result<Mutation
             thread.updated_at = Utc::now();
             Ok(MutationPlan {
                 summary: format!("в переписку {id}: {}", truncate(&text, 60)),
+                phrase: Phrase::new(
+                    "step.appendChat",
+                    json!({ "id": id, "text": truncate(&text, 60) }),
+                    format!("в переписку {id}: {}", truncate(&text, 60)),
+                ),
                 before: json!({ "messages": before.messages.len() }),
                 after: json!({ "messages": thread.messages.len(), "added": text }),
                 target: MutTarget::Chat(Box::new(thread)),
@@ -798,6 +871,11 @@ pub fn plan_mutation(scope: &Scope, tool: &str, args: &Value) -> Result<Mutation
             profile.updated_at = Utc::now();
             Ok(MutationPlan {
                 summary: format!("профиль {} — {}", profile.name, changed.join(", ")),
+                phrase: Phrase::new(
+                    "step.updateProfile",
+                    json!({ "name": profile.name, "fields": changed.join(", ") }),
+                    format!("профиль {} — {}", profile.name, changed.join(", ")),
+                ),
                 before: serde_json::to_value(&before)?,
                 after: serde_json::to_value(&profile)?,
                 target: MutTarget::Profile(Box::new(profile)),
@@ -812,6 +890,11 @@ pub fn plan_mutation(scope: &Scope, tool: &str, args: &Value) -> Result<Mutation
             profile.updated_at = Utc::now();
             Ok(MutationPlan {
                 summary: format!("переписать персону {}", profile.name),
+                phrase: Phrase::new(
+                    "step.replacePersona",
+                    json!({ "name": profile.name }),
+                    format!("переписать персону {}", profile.name),
+                ),
                 before: json!({ "system_prompt_override": before.system_prompt_override }),
                 after: json!({ "system_prompt_override": text }),
                 target: MutTarget::Profile(Box::new(profile)),
@@ -822,6 +905,11 @@ pub fn plan_mutation(scope: &Scope, tool: &str, args: &Value) -> Result<Mutation
             let before = scope.read_man(&id)?;
             Ok(MutationPlan {
                 summary: format!("УДАЛИТЬ досье {} ({})", before.name, id),
+                phrase: Phrase::new(
+                    "step.deleteMan",
+                    json!({ "name": before.name, "id": id }),
+                    format!("УДАЛИТЬ досье {} ({})", before.name, id),
+                ),
                 before: serde_json::to_value(&before)?,
                 after: Value::Null,
                 target: MutTarget::DeleteMan(id),

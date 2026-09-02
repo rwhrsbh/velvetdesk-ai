@@ -9,7 +9,7 @@
 use serde_json::{json, Value};
 use std::time::Duration;
 
-use super::tools::{PendingAction, Risk, ToolOutcome};
+use super::tools::{PendingAction, Phrase, Risk, ToolOutcome};
 use crate::config::SecurityLevel;
 use crate::error::{AppError, Result};
 use crate::llm::ToolDef;
@@ -175,32 +175,48 @@ fn arg_str(args: &Value, key: &str) -> Result<String> {
         .ok_or_else(|| AppError::Invalid(format!("{key} is required")))
 }
 
-fn summary_for(tool: &str, args: &Value) -> String {
+fn summary_for(tool: &str, args: &Value) -> Phrase {
     let path = args
         .get("path")
         .or_else(|| args.get("cwd"))
         .and_then(|v| v.as_str())
         .unwrap_or("");
+    let command = args.get("command").and_then(|c| c.as_str()).unwrap_or("");
     match tool {
-        "fs_write" => format!("записать файл {path}"),
-        "fs_edit" => format!("правка файла {path}"),
-        "fs_delete" => format!("удалить файл {path}"),
-        "shell" => format!(
-            "выполнить: {}",
-            args.get("command").and_then(|c| c.as_str()).unwrap_or("")
+        "fs_write" => Phrase::new(
+            "step.fsWrite",
+            json!({ "path": path }),
+            format!("записать файл {path}"),
         ),
-        other => other.to_string(),
+        "fs_edit" => Phrase::new(
+            "step.fsEdit",
+            json!({ "path": path }),
+            format!("правка файла {path}"),
+        ),
+        "fs_delete" => Phrase::new(
+            "step.fsDelete",
+            json!({ "path": path }),
+            format!("удалить файл {path}"),
+        ),
+        "shell" => Phrase::new(
+            "step.shellRun",
+            json!({ "command": command }),
+            format!("выполнить: {command}"),
+        ),
+        other => Phrase::new("", json!({}), other.to_string()),
     }
 }
 
-fn queued(tool: &str, args: &Value, risk: Risk, summary: String) -> ToolOutcome {
+fn queued(tool: &str, args: &Value, risk: Risk, phrase: Phrase) -> ToolOutcome {
     let pending = PendingAction {
         id: new_id(),
         model_id: String::new(),
         tool: tool.to_string(),
         args: args.clone(),
         risk,
-        summary: summary.clone(),
+        summary: phrase.text.clone(),
+        key: phrase.key.clone(),
+        params: phrase.params.clone(),
         before: Value::Null,
         after: args.clone(),
         created_at: chrono::Utc::now(),
@@ -211,18 +227,20 @@ fn queued(tool: &str, args: &Value, risk: Risk, summary: String) -> ToolOutcome 
         result: json!({ "ok": true, "applied": false, "pending_approval": true }),
         applied: false,
         queued: Some(pending),
-        summary,
+        summary: phrase.text.clone(),
+        phrase,
     }
 }
 
-fn done(tool: &str, risk: Risk, result: Value, summary: String) -> ToolOutcome {
+fn done(tool: &str, risk: Risk, result: Value, phrase: Phrase) -> ToolOutcome {
     ToolOutcome {
         tool: tool.to_string(),
         risk,
         result,
         applied: true,
         queued: None,
-        summary,
+        summary: phrase.text.clone(),
+        phrase,
     }
 }
 
@@ -261,7 +279,11 @@ fn fs_list(paths: &Paths, roots: &[TrustedRoot], args: &Value) -> Result<ToolOut
         "fs_list",
         Risk::Read,
         json!({ "path": dir.to_string_lossy(), "entries": entries }),
-        format!("список {}", dir.display()),
+        Phrase::new(
+            "step.fsList",
+            json!({ "path": dir.to_string_lossy() }),
+            format!("список {}", dir.display()),
+        ),
     ))
 }
 
@@ -291,7 +313,11 @@ fn fs_read(paths: &Paths, roots: &[TrustedRoot], args: &Value) -> Result<ToolOut
         "fs_read",
         Risk::Read,
         json!({ "path": file.to_string_lossy(), "content": content, "truncated": truncated }),
-        format!("чтение {}", file.display()),
+        Phrase::new(
+            "step.fsRead",
+            json!({ "path": file.to_string_lossy() }),
+            format!("чтение {}", file.display()),
+        ),
     ))
 }
 
@@ -318,7 +344,11 @@ fn fs_write(paths: &Paths, roots: &[TrustedRoot], args: &Value) -> Result<ToolOu
             "bytes": content.len(),
             "backup": backup.as_ref().map(|b| b.id.clone()),
         }),
-        format!("записан {}", file.display()),
+        Phrase::new(
+            "step.fsWritten",
+            json!({ "path": file.to_string_lossy() }),
+            format!("записан {}", file.display()),
+        ),
     ))
 }
 
@@ -352,7 +382,11 @@ fn fs_edit(paths: &Paths, roots: &[TrustedRoot], args: &Value) -> Result<ToolOut
             "path": file.to_string_lossy(),
             "backup": backup.as_ref().map(|b| b.id.clone()),
         }),
-        format!("правка {}", file.display()),
+        Phrase::new(
+            "step.fsEdited",
+            json!({ "path": file.to_string_lossy() }),
+            format!("правка {}", file.display()),
+        ),
     ))
 }
 
@@ -373,7 +407,11 @@ fn fs_delete(paths: &Paths, roots: &[TrustedRoot], args: &Value) -> Result<ToolO
             "backup": backup.as_ref().map(|b| b.id.clone()),
             "restorable": backup.is_some(),
         }),
-        format!("удалён {}", file.display()),
+        Phrase::new(
+            "step.fsDeleted",
+            json!({ "path": file.to_string_lossy() }),
+            format!("удалён {}", file.display()),
+        ),
     ))
 }
 
@@ -422,7 +460,11 @@ fn shell(paths: &Paths, roots: &[TrustedRoot], args: &Value) -> Result<ToolOutco
             "stderr": stderr,
             "truncated": out_cut || err_cut,
         }),
-        format!("выполнено: {command}"),
+        Phrase::new(
+            "step.shellDone",
+            json!({ "command": command, "code": output.status.code() }),
+            format!("выполнено: {command}"),
+        ),
     ))
 }
 
@@ -481,14 +523,19 @@ fn request_access(args: &Value) -> Result<ToolOutcome> {
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
 
-    let summary = format!(
-        "доступ к папке {path} ({}) — {reason}",
-        if writable {
-            "чтение и запись"
-        } else {
-            "чтение"
-        }
+    let phrase = Phrase::new(
+        "step.requestAccess",
+        json!({ "path": path, "reason": reason, "writable": writable }),
+        format!(
+            "доступ к папке {path} ({}) — {reason}",
+            if writable {
+                "чтение и запись"
+            } else {
+                "чтение"
+            }
+        ),
     );
+    let summary = phrase.text.clone();
     let pending = PendingAction {
         id: new_id(),
         model_id: String::new(),
@@ -496,6 +543,8 @@ fn request_access(args: &Value) -> Result<ToolOutcome> {
         args: json!({ "path": path, "reason": reason, "writable": writable }),
         risk: Risk::Destructive,
         summary: summary.clone(),
+        key: phrase.key.clone(),
+        params: phrase.params.clone(),
         before: Value::Null,
         after: json!({ "path": path, "writable": writable, "reason": reason }),
         created_at: chrono::Utc::now(),
@@ -513,6 +562,7 @@ fn request_access(args: &Value) -> Result<ToolOutcome> {
         applied: false,
         queued: Some(pending),
         summary,
+        phrase,
     })
 }
 

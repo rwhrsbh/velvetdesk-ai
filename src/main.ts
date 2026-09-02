@@ -196,8 +196,11 @@ async function sendMessage() {
     const thoughts =
       output.thoughts || ((streamed?.meta as { thoughts?: string })?.thoughts ?? "");
     store.entries = store.entries.filter((e) => !e.transient);
+    // A reply the app wrote itself arrives as a key, so it reads in the
+    // interface language rather than the one the core was written in.
+    const reply = output.reply_key ? t(output.reply_key) : output.reply;
     pushEntry(
-      makeEntry("assistant", output.reply, {
+      makeEntry("assistant", reply, {
         steps: output.steps as unknown as RunStep[],
         usage: output.usage,
         mode: output.mode,
@@ -215,7 +218,7 @@ async function sendMessage() {
     store.pending = await api.pendingList();
   } catch (error) {
     store.entries = store.entries.filter((e) => !e.transient);
-    pushEntry(makeEntry("system", `Ошибка: ${errorText(error)}`));
+    pushEntry(makeEntry("system", t("chat.error", { message: errorText(error) })));
     toast(errorText(error), "error");
   } finally {
     store.busy = false;
@@ -1089,7 +1092,7 @@ async function sendToMaster(text: string) {
     if (store.activeModelId) store.men = await api.listMen(store.activeModelId);
   } catch (error) {
     store.entries = store.entries.filter((e) => !e.transient);
-    pushEntry(makeEntry("system", `${t("common.error")}: ${errorText(error)}`));
+    pushEntry(makeEntry("system", t("chat.error", { message: errorText(error) })));
     toast(errorText(error), "error");
   } finally {
     store.busy = false;

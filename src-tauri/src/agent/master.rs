@@ -36,7 +36,7 @@ Rules:
 - Keep names and ids verbatim, including their capitalisation.
 - Ask the operator only for what you genuinely cannot infer, and ask once, in
   one short message, after you have done everything you can.
-- Answer in the operator's language, plainly, in one or two sentences. No
+- Answer in the operator language named below, plainly, in one or two sentences. No
   summaries of your own tool calls.";
 
 /// Tools that reach across profiles. The scoped ones are reused verbatim, with
@@ -157,6 +157,11 @@ fn read_outcome(tool: &str, result: Value) -> tools::ToolOutcome {
         applied: true,
         queued: None,
         summary: format!("read: {tool}"),
+        phrase: tools::Phrase::new(
+            "step.read",
+            json!({ "tool": tool }),
+            format!("read: {tool}"),
+        ),
     }
 }
 
@@ -181,7 +186,10 @@ fn create_profile(
 
     let scope = paths.scope(&id)?;
     if scope.profile_file().exists() {
-        return Err(AppError::Invalid(format!("профиль {id} уже существует")));
+        return Err(AppError::message(
+            "error.profileExists",
+            json!({ "id": id }),
+        ));
     }
 
     let mut profile = Profile::new(id.clone(), name.to_string());
@@ -207,7 +215,12 @@ fn create_profile(
         }
     }
 
-    let summary = format!("создать анкету {name} ({id})");
+    let phrase = tools::Phrase::new(
+        "step.createProfile",
+        json!({ "name": name, "id": id }),
+        format!("создать анкету {name} ({id})"),
+    );
+    let summary = phrase.text.clone();
     if !tools::is_allowed(security, tools::Risk::Write) {
         let pending = PendingAction {
             id: crate::models::new_id(),
@@ -216,6 +229,8 @@ fn create_profile(
             args: args.clone(),
             risk: tools::Risk::Write,
             summary: summary.clone(),
+            key: phrase.key.clone(),
+            params: phrase.params.clone(),
             before: Value::Null,
             after: serde_json::to_value(&profile)?,
             created_at: chrono::Utc::now(),
@@ -227,6 +242,7 @@ fn create_profile(
             applied: false,
             queued: Some(pending),
             summary,
+            phrase,
         });
     }
 
@@ -239,6 +255,7 @@ fn create_profile(
         applied: true,
         queued: None,
         summary,
+        phrase,
     })
 }
 
@@ -253,7 +270,8 @@ pub async fn chat(deps: &AgentDeps<'_>, input: MasterInput) -> Result<MasterOutp
 
     let security = input.security.unwrap_or(deps.settings.security_level);
     let mut request = ChatRequest::new(format!(
-        "{MASTER_SYSTEM}\n\nProfiles in this installation:\n{}\n\n{}",
+        "{MASTER_SYSTEM}\n\nOperator language: {}.\n\nProfiles in this installation:\n{}\n\n{}",
+        super::prompts::operator_language(&deps.settings.ui_language),
         serde_json::to_string_pretty(&roster)?,
         super::prompts::security_block(security)
     ));
@@ -328,6 +346,8 @@ pub async fn chat(deps: &AgentDeps<'_>, input: MasterInput) -> Result<MasterOutp
                         },
                         tool: Some(call.name.clone()),
                         summary: outcome.summary.clone(),
+                        key: outcome.phrase.key.clone(),
+                        params: outcome.phrase.params.clone(),
                         detail: call.args.clone(),
                     };
                     (outcome.result, step)
@@ -338,6 +358,8 @@ pub async fn chat(deps: &AgentDeps<'_>, input: MasterInput) -> Result<MasterOutp
                         kind: "tool_error".into(),
                         tool: Some(call.name.clone()),
                         summary: err.to_string(),
+                        key: String::new(),
+                        params: Value::Null,
                         detail: call.args.clone(),
                     },
                 ),

@@ -45,7 +45,7 @@ function bindAvatarField(card: HTMLElement) {
   const setPreview = (value: string) => {
     hidden.value = value;
     if (!value) {
-      preview.innerHTML = `<span class="avatar-empty">нет фото</span>`;
+      preview.innerHTML = `<span class="avatar-empty">${t("form.noPhoto")}</span>`;
       return;
     }
     preview.innerHTML = `<img src="${escapeHtml(value)}" alt="" id="avatarImg" />`;
@@ -306,7 +306,7 @@ export async function openManForm(deps: ModalDeps, existing?: Man | null) {
         .slice(-40)
         .map(
           (msg) =>
-            `${msg.role === "incoming" ? "ОН" : msg.role === "outgoing" ? "ОНА" : "•"}: ${msg.text}`,
+            `${msg.role === "incoming" ? t("chat.him") : msg.role === "outgoing" ? t("chat.her") : "•"}: ${msg.text}`,
         )
         .join("\n\n");
     } catch {
@@ -427,7 +427,7 @@ export async function openManForm(deps: ModalDeps, existing?: Man | null) {
       boundaries: lines(card.querySelector<HTMLTextAreaElement>("#mBounds")!.value),
     };
     if (!form.name) {
-      toast("Имя обязательно", "error");
+      toast(t("form.nameRequired"), "error");
       return;
     }
     try {

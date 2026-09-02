@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { t } from "./i18n";
 import type {
   Backup,
   ContextStats,
@@ -144,8 +145,30 @@ export function onModelEvent(handler: (payload: Record<string, unknown>) => void
   return listen<Record<string, unknown>>(MODEL_EVENT, (event) => handler(event.payload));
 }
 
+/**
+ * Turn whatever the core rejected with into a sentence.
+ *
+ * The core does not write prose: it names the failure and hands over the
+ * details, and the wording lives in the dictionaries, in both languages.
+ */
 export function errorText(error: unknown): string {
   if (typeof error === "string") return error;
   if (error instanceof Error) return error.message;
+
+  const failure = error as {
+    kind?: string;
+    key?: string;
+    params?: Record<string, string | number>;
+    message?: string;
+  } | null;
+
+  if (failure?.key) {
+    const translated = t(failure.key, failure.params ?? {});
+    if (translated !== failure.key) return translated;
+  }
+  if (failure?.kind && failure.message !== undefined) {
+    return t(`error.${failure.kind}`, { message: failure.message });
+  }
+  if (failure?.message) return failure.message;
   return JSON.stringify(error);
 }

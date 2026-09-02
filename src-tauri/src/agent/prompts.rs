@@ -46,6 +46,14 @@ apply immediately. The sandbox still blocks every other profile's data."
     }
 }
 
+/// Language the operator reads, named for a prompt.
+pub fn operator_language(ui_language: &str) -> &'static str {
+    match ui_language {
+        "en" => "English",
+        _ => "Russian",
+    }
+}
+
 pub fn mode_block(mode: AgentMode) -> &'static str {
     match mode {
         AgentMode::Auto => {
@@ -85,7 +93,7 @@ Omit any patch field you have nothing new for. Never fabricate facts to fill it.
 Mode: MEMORIZE. The operator is dictating raw facts. Produce NO outgoing
 message. Answer with ONE JSON object and nothing else:
 {
-  \"summary\": \"one short line describing what you stored, in Russian\",
+  \"summary\": \"one short line describing what you stored, in the operator language named above\",
   \"memory_patch\": { ...same shape as ACT, without \\\"reply\\\"... }
 }
 Split dictation into atomic facts. Keep the operator's wording for names,
@@ -105,6 +113,7 @@ pub fn build_system(
     mode: AgentMode,
     security: SecurityLevel,
     global_rules: &str,
+    ui_language: &str,
 ) -> String {
     let mut out = String::with_capacity(2048);
     out.push_str(BASE_RULES);
@@ -122,6 +131,12 @@ pub fn build_system(
     out.push_str(&format!(
         "Storage sandbox: profiles/{}/ — you cannot read or write any other profile.\n\n",
         profile.id
+    ));
+    out.push_str(&format!(
+        "Operator language: {}. Everything addressed to the operator — summaries, \
+         explanations, questions — is written in it. Messages to a man stay in his \
+         own language.\n\n",
+        operator_language(ui_language)
     ));
     out.push_str(mode_block(mode));
     out.push_str("\n\n");
@@ -197,9 +212,9 @@ pub fn context_block(thread: Option<&ChatThread>, limit: usize) -> String {
 /// Asks for the summary that replaces the messages dropped by compaction.
 pub const COMPACTOR: &str = "\
 You compress a dating-agency correspondence so the copilot can keep working
-with a fraction of the tokens. Preserve, in Russian, as terse bullet lines:
+with a fraction of the tokens. Preserve, in the operator's language, as terse
+bullet lines:
 who he is and what he wants, agreed facts and dates, gifts and money, promises
 made by either side, open questions, and the current tone of the relationship.
 Drop small talk, greetings and anything already obvious from the dossier.
 Never invent anything. Answer with the summary only — no preface, no JSON.";
-

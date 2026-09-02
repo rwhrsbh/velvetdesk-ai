@@ -3,6 +3,7 @@ import type { ModalDeps } from "./deps";
 import { closeModal, escapeHtml, formatDate, openModal, toast } from "./dom";
 import { t } from "./i18n";
 import { store } from "./store";
+import { stepText } from "./views";
 import type { Backup, DoctorReport, PendingAction } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -143,7 +144,7 @@ export async function openPendingModal(deps: ModalDeps) {
                 (action) => `<div class="list-row" style="flex-direction:column;align-items:stretch">
                   <div style="display:flex;justify-content:space-between;gap:10px;align-items:center">
                     <div>
-                      <div>${escapeHtml(action.summary)}</div>
+                      <div>${escapeHtml(stepText(action))}</div>
                       <div class="meta">${escapeHtml(action.tool)} · ${escapeHtml(action.risk)} · ${escapeHtml(
                         action.model_id,
                       )} · ${formatDate(action.created_at)}</div>

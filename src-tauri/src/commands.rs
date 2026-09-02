@@ -98,7 +98,7 @@ pub struct NewProfile {
 #[tauri::command]
 pub fn create_profile(state: State<'_, AppState>, input: NewProfile) -> Result<Profile> {
     if input.name.trim().is_empty() {
-        return Err(AppError::Invalid("имя профиля обязательно".into()));
+        return Err(AppError::message("error.profileNameRequired", json!({})));
     }
     let id = match input.id.filter(|i| storage::is_safe_id(i)) {
         Some(id) => id,
@@ -106,7 +106,10 @@ pub fn create_profile(state: State<'_, AppState>, input: NewProfile) -> Result<P
     };
     let scope = state.paths.scope(&id)?;
     if scope.profile_file().exists() {
-        return Err(AppError::Invalid(format!("профиль {id} уже существует")));
+        return Err(AppError::message(
+            "error.profileExists",
+            json!({ "id": id }),
+        ));
     }
     let mut profile = Profile::new(id, input.name.trim().to_string());
     profile.age = input.age;
@@ -471,7 +474,10 @@ pub fn trust_folder(
     writable: Option<bool>,
 ) -> Result<Vec<crate::workspace::TrustedRoot>> {
     if !std::path::Path::new(&path).is_dir() {
-        return Err(AppError::Invalid(format!("{path} — не папка")));
+        return Err(AppError::message(
+            "error.notAFolder",
+            json!({ "path": path }),
+        ));
     }
     let mut settings = state.settings.write();
     settings.trusted_roots.retain(|r| r.path != path);
@@ -624,7 +630,7 @@ pub async fn list_provider_models(
     };
     let pool = state.pool(&provider.id);
     let lease = pool.acquire().ok_or_else(|| {
-        AppError::NoKeys(format!("у провайдера {} нет рабочего ключа", provider.id))
+        AppError::message("error.noWorkingKey", json!({ "provider": provider.id }))
     })?;
 
     let catalog =
@@ -658,7 +664,7 @@ pub async fn transcribe(
     language: Option<String>,
 ) -> Result<String> {
     if audio_base64.trim().is_empty() {
-        return Err(AppError::Invalid("пустая запись".into()));
+        return Err(AppError::message("error.emptyRecording", json!({})));
     }
     let provider = {
         let settings = state.settings.read();
@@ -669,7 +675,7 @@ pub async fn transcribe(
     };
     let pool = state.pool(&provider.id);
     let lease = pool.acquire().ok_or_else(|| {
-        AppError::NoKeys(format!("у провайдера {} нет рабочего ключа", provider.id))
+        AppError::message("error.noWorkingKey", json!({ "provider": provider.id }))
     })?;
 
     let language = language.unwrap_or_else(|| {

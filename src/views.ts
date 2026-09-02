@@ -151,6 +151,13 @@ function usageLine(usage: Usage | undefined, extra: string[]): string {
 /// One line per step: a coloured dot, what ran, what it did. The markup is
 /// written without indentation on purpose — the bubble renders text as
 /// `pre-wrap`, so any newline inside it would show up as blank space.
+/** What a step says, translated when the core named it. */
+export function stepText(step: { key?: string; params?: Record<string, string | number>; summary: string }): string {
+  if (!step.key) return step.summary;
+  const translated = t(step.key, step.params ?? {});
+  return translated === step.key ? step.summary : translated;
+}
+
 function stepHtml(step: RunStep): string {
   const cls = step.kind.includes("error")
     ? "error"
@@ -164,7 +171,7 @@ function stepHtml(step: RunStep): string {
   return (
     `<div class="step ${cls}">` +
     tool +
-    `<span class="step-text">${escapeHtml(step.summary)}</span>` +
+    `<span class="step-text">${escapeHtml(stepText(step))}</span>` +
     badge +
     `</div>`
   );
