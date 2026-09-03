@@ -75,6 +75,7 @@ async function refresh() {
 
 async function selectProfile(modelId: string, redraw = true) {
   if (!store.profiles.some((p) => p.id === modelId)) return;
+  leaveOverlayChat();
   store.activeModelId = modelId;
   store.activeManId = null;
   store.menFilter = "";
@@ -100,7 +101,7 @@ async function selectProfile(modelId: string, redraw = true) {
  * does. A temporary chat is in memory only and must not be overwritten.
  */
 async function loadChat() {
-  if (!store.activeModelId || store.temporary) return;
+  if (!store.activeModelId) return;
   try {
     const log = await api.getAgentLog(store.activeModelId, store.activeManId);
     store.entries = log.entries.slice(-120);
@@ -110,7 +111,25 @@ async function loadChat() {
   }
 }
 
+/**
+ * Close a temporary or master chat when the operator opens a saved one.
+ *
+ * Both of those live in memory over whatever is selected behind them, and
+ * leaving one open while switching made the same conversation appear in every
+ * profile and every dossier — the messages followed the operator around.
+ */
+function leaveOverlayChat() {
+  if (!store.temporary && !store.master) return;
+  const wasTemporary = store.temporary;
+  store.temporary = false;
+  store.master = false;
+  $("btnTemporary").classList.remove("active");
+  $("btnMaster").classList.remove("active");
+  if (wasTemporary) toast(t("cmd.temporaryEnded"), "info");
+}
+
 async function selectMan(manId: string | null) {
+  leaveOverlayChat();
   if (store.activeManId === manId) return;
   store.activeManId = manId;
   if (manId && store.activeModelId) {
@@ -1069,7 +1088,10 @@ async function summariseChat(): Promise<string> {
  */
 async function toggleTemporaryChat() {
   store.temporary = !store.temporary;
+  // The two overlay chats are alternatives, never both at once.
+  if (store.temporary) store.master = false;
   $("btnTemporary").classList.toggle("active", store.temporary);
+  $("btnMaster").classList.toggle("active", store.master);
   store.entries = [];
 
   if (store.temporary) {
@@ -1093,7 +1115,9 @@ async function toggleTemporaryChat() {
  */
 async function toggleMasterChat() {
   store.master = !store.master;
+  if (store.master) store.temporary = false;
   $("btnMaster").classList.toggle("active", store.master);
+  $("btnTemporary").classList.toggle("active", store.temporary);
   store.entries = [];
 
   void refreshContextGauge();

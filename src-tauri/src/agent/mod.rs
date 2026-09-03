@@ -626,6 +626,20 @@ async fn run_auto(
 
         if response.tool_calls.is_empty() {
             reply = response.text;
+            // A provider that declines an answer returns a finished turn with
+            // nothing in it. Saying so beats an empty bubble the operator has
+            // to guess at.
+            if reply.trim().is_empty() && steps.is_empty() {
+                reply_key = "chat.providerDeclined".to_string();
+                reply = format!(
+                    "Провайдер не вернул ответ (finish_reason: {}).",
+                    if response.finish_reason.is_empty() {
+                        "unknown".into()
+                    } else {
+                        response.finish_reason.clone()
+                    }
+                );
+            }
             break;
         }
 
