@@ -3,7 +3,7 @@
 
 use serde_json::{json, Value};
 
-use super::{CallError, ChatRequest, ChatResponse, Role, Thinking, ToolCall, Usage};
+use super::{CallError, ChatRequest, ChatResponse, LlmMessage, Role, Thinking, ToolCall, Usage};
 use crate::config::ProviderConfig;
 
 pub async fn call(
@@ -210,6 +210,25 @@ fn read_usage(meta: Option<&Value>) -> Usage {
     }
 }
 
+/// The operator's turn as this API wants it.
+///
+/// A bare string while there is nothing but text — every endpoint that speaks
+/// this dialect takes that — and the multimodal array only once a picture is
+/// attached, so older gateways are not handed a shape they reject.
+fn user_content(msg: &LlmMessage) -> Value {
+    if msg.images.is_empty() {
+        return Value::String(msg.content.clone());
+    }
+    let mut parts: Vec<Value> = vec![json!({ "type": "text", "text": msg.content })];
+    for image in &msg.images {
+        parts.push(json!({
+            "type": "image_url",
+            "image_url": { "url": format!("data:{};base64,{}", image.mime, image.data) },
+        }));
+    }
+    Value::Array(parts)
+}
+
 fn build_body(provider: &ProviderConfig, request: &ChatRequest) -> Value {
     let mut messages: Vec<Value> = vec![];
     if !request.system.trim().is_empty() {
@@ -218,7 +237,7 @@ fn build_body(provider: &ProviderConfig, request: &ChatRequest) -> Value {
 
     for msg in &request.messages {
         match msg.role {
-            Role::User => messages.push(json!({ "role": "user", "content": msg.content })),
+            Role::User => messages.push(json!({ "role": "user", "content": user_content(msg) })),
             Role::Assistant => {
                 let mut m = json!({ "role": "assistant", "content": msg.content });
                 if !msg.tool_calls.is_empty() {
@@ -540,6 +559,24 @@ mod tests {
         let body = build_body(&provider(), &req);
         assert_eq!(body["messages"][0]["role"], "system");
         assert_eq!(body["messages"][1]["content"], "hello");
+    }
+
+    /// Text-only turns keep the shape every gateway understands; only an
+    /// attachment turns the content into the multimodal array.
+    #[test]
+    fn attachments_become_a_data_url() {
+        let mut req = ChatRequest::new("");
+        req.messages.push(LlmMessage::user_with_images(
+            "who is this",
+            vec![crate::llm::ImagePart {
+                mime: "image/jpeg".into(),
+                data: "QUJD".into(),
+            }],
+        ));
+        let body = build_body(&provider(), &req);
+        let content = &body["messages"][0]["content"];
+        assert_eq!(content[0]["type"], "text");
+        assert_eq!(content[1]["image_url"]["url"], "data:image/jpeg;base64,QUJD");
         assert_eq!(body["max_tokens"], 2048);
     }
 

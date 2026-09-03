@@ -96,6 +96,7 @@ pub fn run() {
             commands::get_agent_log,
             commands::clear_agent_log,
             commands::run_agent,
+            commands::fetch_image,
             commands::list_trusted_roots,
             commands::trust_folder,
             commands::revoke_folder,

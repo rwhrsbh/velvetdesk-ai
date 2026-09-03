@@ -59,8 +59,11 @@ pub fn mode_block(mode: AgentMode) -> &'static str {
         AgentMode::Auto => {
             "\
 Mode: AUTO. Decide yourself which tools to call: read the dossier and history
-before answering, then persist what changed. Finish with the drafted reply as
-plain text — no JSON, no preamble, no explanation of what you did."
+before answering, then persist what changed. The recent correspondence with the
+open dossier is already attached below under 'Recent correspondence' — read it
+there instead of asking for it again; call get_chat when you need more of it
+(raise `limit`) or the history of a different man. Finish with the drafted reply
+as plain text — no JSON, no preamble, no explanation of what you did."
         }
         AgentMode::Act => {
             "\

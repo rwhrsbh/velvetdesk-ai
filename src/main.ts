@@ -20,6 +20,8 @@ import {
   pushEntry,
   store,
   visibleMen,
+  type Attachment,
+  type QueuedMessage,
   type UiEntry,
 } from "./store";
 import type { AgentMode, RunStep, SecurityLevel, Settings } from "./types";
@@ -28,6 +30,8 @@ import {
   renderChat,
   renderMen,
   renderProfiles,
+  renderAttachments,
+  renderQueue,
   renderScope,
   renderTopbar,
   setIndexCounts,
@@ -112,6 +116,8 @@ async function loadChat() {
 
   // The correspondence tells the chat which drafts have already been filed, so
   // it can stop offering to file them twice.
+  restoreParked(currentTarget());
+
   store.thread = null;
   if (store.activeManId) {
     try {
@@ -183,29 +189,295 @@ function activeProviderReady(): boolean {
   return Boolean(provider && provider.key_count > 0);
 }
 
+/** Which conversation a message belongs to. */
+interface ChatTarget {
+  modelId: string | null;
+  manId: string | null;
+  master: boolean;
+}
+
+/** The chat on screen right now. */
+function currentTarget(): ChatTarget {
+  return { modelId: store.activeModelId, manId: store.activeManId, master: store.master };
+}
+
+function sameTarget(a: ChatTarget, b: ChatTarget): boolean {
+  return a.master === b.master && a.modelId === b.modelId && a.manId === b.manId;
+}
+
+function targetKey(target: ChatTarget): string {
+  return target.master ? "master" : `${target.modelId ?? ""}:${target.manId ?? ""}`;
+}
+
+/** What to call the chat in a notice, when the operator is looking elsewhere. */
+function targetName(target: ChatTarget): string {
+  if (target.master) return t("master.scope");
+  const profile = store.profiles.find((p) => p.id === target.modelId);
+  const man = store.men.find((m) => m.id === target.manId);
+  const parts = [profile?.name ?? target.modelId ?? "", man?.name ?? ""].filter(Boolean);
+  return parts.join(" — ");
+}
+
+/**
+ * Answers that arrived while the operator was in another chat.
+ *
+ * A run keeps going when the operator switches away, and its answer belongs to
+ * the chat it was asked in, not the one now on screen. Stored answers are put
+ * back the moment that chat is opened again — which also covers the temporary
+ * chats the core deliberately never writes to the log.
+ */
+const parked = new Map<string, UiEntry[]>();
+
+/** The run in flight, and the chat it answers to. */
+let runTarget: ChatTarget | null = null;
+
+/** Show an entry in its own chat, or keep it until that chat is open again. */
+function deliver(target: ChatTarget, entry: UiEntry): boolean {
+  if (sameTarget(target, currentTarget())) {
+    pushEntry(entry);
+    return true;
+  }
+  const key = targetKey(target);
+  parked.set(key, [...(parked.get(key) ?? []), entry]);
+  toast(t("toast.answerElsewhere", { chat: targetName(target) }), "info");
+  return false;
+}
+
+/** Put back whatever finished while this chat was closed. */
+function restoreParked(target: ChatTarget) {
+  const key = targetKey(target);
+  const waiting = parked.get(key);
+  if (!waiting || waiting.length === 0) return;
+  parked.delete(key);
+  // The log already holds what the core wrote down; only what it does not know
+  // about — temporary chats, errors, system notes — needs putting back.
+  for (const entry of waiting) {
+    if (store.entries.some((existing) => existing.id === entry.id)) continue;
+    store.entries.push(entry);
+  }
+}
+
+/** How many pictures one message may carry, and how big each may be. */
+const MAX_ATTACHMENTS = 8;
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+
+/** A file's bytes as base64, without the `data:` prefix the model does not want. */
+function readBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    reader.onload = () => {
+      const url = String(reader.result);
+      resolve(url.slice(url.indexOf(",") + 1));
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * Attach pictures to the message being written.
+ *
+ * Screenshots of a profile, photos he sent — whatever the operator is asking
+ * about. They are held in memory until the message goes out, so nothing heavy
+ * is written to the log.
+ */
+async function addAttachments(files: File[]) {
+  for (const file of files) {
+    if (!file.type.startsWith("image/")) continue;
+    if (store.attachments.length >= MAX_ATTACHMENTS) {
+      toast(t("toast.attachLimit", { n: MAX_ATTACHMENTS }), "error");
+      break;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      toast(t("toast.attachTooBig", { name: file.name || "image" }), "error");
+      continue;
+    }
+    try {
+      store.attachments.push({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        name: file.name || t("composer.pastedImage"),
+        mime: file.type,
+        data: await readBase64(file),
+      });
+    } catch (error) {
+      console.error("attachment read failed", error);
+      toast(t("toast.attachFailed"), "error");
+    }
+  }
+  renderAttachments();
+}
+
+/**
+ * Look at one picture full size, and copy it back out.
+ *
+ * The clipboard only takes PNG, so anything else is redrawn once on a canvas
+ * before it goes; that also means a copied picture pastes into any other app.
+ */
+function openImage(src: string, name: string) {
+  const card = openModal(
+    `<h3>${escapeHtml(name || t("composer.pastedImage"))}</h3>` +
+      `<div class="image-view"><img src="${src}" alt="${escapeHtml(name)}" /></div>` +
+      `<div class="modal-actions">` +
+      `<button class="btn btn-secondary" data-act="copy-image">${t("ctx.copy")}</button>` +
+      `<button class="btn btn-primary" data-act="close">${t("common.close")}</button></div>`,
+  );
+  card.querySelector('[data-act="close"]')?.addEventListener("click", closeModal);
+  card.querySelector('[data-act="copy-image"]')?.addEventListener("click", () => {
+    void copyImage(src);
+  });
+}
+
+/** Put a picture on the clipboard, as the PNG every app understands. */
+async function copyImage(src: string) {
+  try {
+    const image = new Image();
+    image.src = src;
+    await image.decode();
+    const canvas = document.createElement("canvas");
+    canvas.width = image.naturalWidth;
+    canvas.height = image.naturalHeight;
+    canvas.getContext("2d")?.drawImage(image, 0, 0);
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob((result) => resolve(result), "image/png"),
+    );
+    if (!blob) throw new Error("no blob");
+    await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+    toast(t("chat.copied"), "success");
+  } catch (error) {
+    console.error("image copy failed", error);
+    toast(t("toast.copyImageFailed"), "error");
+  }
+}
+
+/** Add one picture that arrived as bytes rather than a file. */
+function addRaw(name: string, mime: string, data: string) {
+  if (store.attachments.length >= MAX_ATTACHMENTS) {
+    toast(t("toast.attachLimit", { n: MAX_ATTACHMENTS }), "error");
+    return;
+  }
+  store.attachments.push({
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    name,
+    mime,
+    data,
+  });
+  renderAttachments();
+}
+
+/**
+ * Attach a picture that came in as a link.
+ *
+ * Dragging an image out of a browser hands over its address, not the file, and
+ * the site it came from will usually refuse a request made from inside the app.
+ * The core downloads it instead. A `data:` link already carries the bytes.
+ */
+async function addFromUrl(url: string) {
+  if (url.startsWith("data:")) {
+    const match = /^data:([^;,]+)[^,]*,(.*)$/s.exec(url);
+    if (!match || !match[1].startsWith("image/")) return;
+    addRaw(t("composer.pastedImage"), match[1], match[2]);
+    return;
+  }
+  try {
+    const image = await api.fetchImage(url);
+    addRaw(image.name, image.mime, image.data);
+  } catch (error) {
+    toast(errorText(error), "error");
+  }
+}
+
+/** Every picture a paste or a drop is carrying, whichever way it packed them. */
+function imageFiles(data: DataTransfer | null): File[] {
+  if (!data) return [];
+  const files = Array.from(data.files ?? []);
+  // A screenshot copied from another window arrives as an item, not a file.
+  for (const item of Array.from(data.items ?? [])) {
+    if (item.kind !== "file" || !item.type.startsWith("image/")) continue;
+    const file = item.getAsFile();
+    if (file && !files.some((known) => known.size === file.size && known.type === file.type)) {
+      files.push(file);
+    }
+  }
+  return files.filter((file) => file.type.startsWith("image/"));
+}
+
+/** The address of a picture inside a paste or a drop, when there is no file. */
+function imageLink(data: DataTransfer | null): string | null {
+  if (!data) return null;
+  const html = data.getData("text/html");
+  const src = html ? /<img[^>]+src="([^"]+)"/i.exec(html)?.[1] : null;
+  if (src) return src;
+  const uri = data.getData("text/uri-list").split("\n")[0]?.trim();
+  if (uri && !uri.startsWith("#")) return uri;
+  const text = data.getData("text/plain").trim();
+  return /^(https?:|data:image\/)/.test(text) ? text : null;
+}
+
+/** Empty the composer and let it shrink back to one line. */
+function clearComposer() {
+  const input = $("composerInput") as HTMLTextAreaElement;
+  input.value = "";
+  input.style.height = "auto";
+}
+
+/**
+ * Enter, or the button.
+ *
+ * A run in flight no longer swallows what comes next: the message lines up
+ * above the composer and goes out on its own the moment the run ends, so the
+ * operator can keep typing instead of watching a spinner.
+ */
 async function sendMessage() {
   const typed = ($("composerInput") as HTMLTextAreaElement).value.trim();
+  const attached = store.attachments;
+
+  if (store.busy) {
+    if (!typed && attached.length === 0) return;
+    store.queue.push({ text: typed, attachments: attached, target: currentTarget() });
+    store.attachments = [];
+    clearComposer();
+    renderQueue();
+    renderAttachments();
+    return;
+  }
+
+  store.attachments = [];
+  clearComposer();
+  renderAttachments();
+  await dispatchMessage(typed, attached, currentTarget());
+
+  // Everything typed while that ran, in the order it was typed and into the
+  // chat it was typed in — switching away does not redirect it.
+  while (store.queue.length > 0 && !store.busy) {
+    const next = store.queue.shift() as QueuedMessage;
+    renderQueue();
+    await dispatchMessage(next.text, next.attachments, next.target as ChatTarget);
+  }
+}
+
+/** Send one message the way the open mode wants it sent. */
+async function dispatchMessage(
+  typed: string,
+  attached: Attachment[] = [],
+  target: ChatTarget = currentTarget(),
+) {
   if (typed.startsWith("/") && (await runSlashCommand(typed))) return;
 
   // Letters are not a conversation: the brief goes to one man or to a whole
   // list, and each letter comes back as its own card.
-  if (store.mode === "letters" && !store.master) {
-    await writeLetters(typed);
+  if (store.mode === "letters" && !target.master) {
+    await writeLetters(typed, target);
     return;
   }
 
-  if (store.master) {
-    if (!typed || store.busy) return;
-    const input = $("composerInput") as HTMLTextAreaElement;
-    input.value = "";
-    input.style.height = "auto";
-    await sendToMaster(typed);
+  if (target.master) {
+    if (!typed) return;
+    await sendToMaster(typed, attached, target);
     return;
   }
-  const input = $("composerInput") as HTMLTextAreaElement;
-  const text = input.value.trim();
+  const text = typed;
   if (!text) return;
-  if (!store.activeModelId) {
+  if (!target.modelId) {
     toast(t("toast.pickProfile"), "error");
     return;
   }
@@ -214,20 +486,18 @@ async function sendMessage() {
     void openKeysModal(deps);
     return;
   }
-  if (store.busy) return;
 
   store.busy = true;
-  ($("btnSend") as HTMLButtonElement).disabled = true;
-  input.value = "";
-  input.style.height = "auto";
-  pushEntry(makeEntry("user", text));
+  runTarget = target;
+  markSending(true);
+  deliver(target, makeEntry("user", text, attached.length > 0 ? { images: attached } : null));
   renderChat();
   renderScope();
 
   try {
     const output = await api.runAgent({
-      model_id: store.activeModelId,
-      man_id: store.activeManId,
+      model_id: target.modelId,
+      man_id: target.manId,
       mode: store.mode,
       security: store.security,
       message: text,
@@ -235,6 +505,7 @@ async function sendMessage() {
       log_incoming: store.logIncoming,
       thinking_effort: store.thinking || undefined,
       temporary: store.temporary,
+      images: attached.map(({ mime, data }) => ({ mime, data })),
     });
 
     const streamed = store.entries.find((e) => e.transient && e.sender === "assistant");
@@ -244,7 +515,8 @@ async function sendMessage() {
     // A reply the app wrote itself arrives as a key, so it reads in the
     // interface language rather than the one the core was written in.
     const reply = output.reply_key ? t(output.reply_key) : output.reply;
-    pushEntry(
+    deliver(
+      target,
       makeEntry("assistant", reply, {
         steps: output.steps as unknown as RunStep[],
         usage: output.usage,
@@ -261,18 +533,19 @@ async function sendMessage() {
     if (output.pending.length > 0) {
       toast(t("toast.pendingCount", { n: output.pending.length }), "info");
     }
-    store.men = await api.listMen(store.activeModelId);
+    if (store.activeModelId) store.men = await api.listMen(store.activeModelId);
     store.pending = await api.pendingList();
-    if (store.activeManId) {
+    if (store.activeManId && store.activeModelId) {
       store.thread = await api.getChat(store.activeModelId, store.activeManId);
     }
   } catch (error) {
     store.entries = store.entries.filter((e) => !e.transient);
-    pushEntry(makeEntry("system", t("chat.error", { message: errorText(error) })));
+    deliver(target, makeEntry("system", t("chat.error", { message: errorText(error) })));
     toast(errorText(error), "error");
   } finally {
     store.busy = false;
-    ($("btnSend") as HTMLButtonElement).disabled = false;
+    runTarget = null;
+    markSending(false);
     renderAll();
     void refreshContextGauge();
   }
@@ -1024,10 +1297,6 @@ async function runSlashCommand(raw: string): Promise<boolean> {
   const command = name.toLowerCase();
   if (!["clear", "compact", "help"].includes(command)) return false;
 
-  const input = $("composerInput") as HTMLTextAreaElement;
-  input.value = "";
-  input.dispatchEvent(new Event("input"));
-
   if (command === "help") {
     pushEntry(systemNote("cmd.help"));
     renderChat();
@@ -1139,6 +1408,7 @@ async function toggleMasterChat() {
     } catch (error) {
       console.error("master log", error);
     }
+    restoreParked(currentTarget());
     if (store.entries.length === 0) pushEntry(systemNote("master.hello"));
   } else {
     await loadChat();
@@ -1146,10 +1416,15 @@ async function toggleMasterChat() {
   renderAll();
 }
 
-async function sendToMaster(text: string) {
+async function sendToMaster(
+  text: string,
+  attached: Attachment[] = [],
+  target: ChatTarget = currentTarget(),
+) {
   store.busy = true;
-  ($("btnSend") as HTMLButtonElement).disabled = true;
-  pushEntry(makeEntry("user", text));
+  runTarget = target;
+  markSending(true);
+  deliver(target, makeEntry("user", text, attached.length > 0 ? { images: attached } : null));
   renderChat();
   renderScope();
 
@@ -1159,9 +1434,11 @@ async function sendToMaster(text: string) {
       security: store.security,
       thinking_effort: store.thinking || undefined,
       temporary: store.temporary,
+      images: attached.map(({ mime, data }) => ({ mime, data })),
     });
     store.entries = store.entries.filter((e) => !e.transient);
-    pushEntry(
+    deliver(
+      target,
       makeEntry("assistant", output.reply, {
         steps: output.steps as unknown as RunStep[],
         usage: output.usage,
@@ -1177,11 +1454,12 @@ async function sendToMaster(text: string) {
     if (store.activeModelId) store.men = await api.listMen(store.activeModelId);
   } catch (error) {
     store.entries = store.entries.filter((e) => !e.transient);
-    pushEntry(makeEntry("system", t("chat.error", { message: errorText(error) })));
+    deliver(target, makeEntry("system", t("chat.error", { message: errorText(error) })));
     toast(errorText(error), "error");
   } finally {
     store.busy = false;
-    ($("btnSend") as HTMLButtonElement).disabled = false;
+    runTarget = null;
+    markSending(false);
     renderAll();
     void refreshContextGauge();
   }
@@ -1194,14 +1472,14 @@ async function sendToMaster(text: string) {
  * averaged across the list; a long round is confirmed first, because it costs
  * one call per recipient.
  */
-async function writeLetters(brief: string) {
-  if (!store.activeModelId) {
+async function writeLetters(brief: string, target: ChatTarget = currentTarget()) {
+  if (!target.modelId) {
     toast(t("toast.pickProfile"), "error");
     return;
   }
   if (store.busy) return;
 
-  const recipients = store.activeManId ? [store.activeManId] : visibleMen().map((m) => m.id);
+  const recipients = target.manId ? [target.manId] : visibleMen().map((m) => m.id);
   if (recipients.length === 0) {
     toast(t("letters.noRecipients"), "error");
     return;
@@ -1215,20 +1493,18 @@ async function writeLetters(brief: string) {
     if (!ok) return;
   }
 
-  const input = $("composerInput") as HTMLTextAreaElement;
-  input.value = "";
-  input.style.height = "auto";
   store.busy = true;
-  ($("btnSend") as HTMLButtonElement).disabled = true;
-  if (brief) pushEntry(makeEntry("user", brief));
+  runTarget = target;
+  markSending(true);
+  if (brief) deliver(target, makeEntry("user", brief));
   pushEntry(makeEntry("system", t("letters.writing", { n: recipients.length }), null, true));
   renderChat();
   renderScope();
 
   try {
     const output = await api.writeLetters({
-      model_id: store.activeModelId,
-      man_ids: store.activeManId ? recipients : [],
+      model_id: target.modelId,
+      man_ids: target.manId ? recipients : [],
       brief,
       channel: store.channel,
       thinking_effort: store.thinking || undefined,
@@ -1236,7 +1512,8 @@ async function writeLetters(brief: string) {
     });
     store.entries = store.entries.filter((e) => !e.transient);
     for (const letter of output.letters) {
-      pushEntry(
+      deliver(
+        target,
         makeEntry("assistant", letter.error || letter.text, {
           letter: true,
           man_id: letter.man_id,
@@ -1252,14 +1529,83 @@ async function writeLetters(brief: string) {
     toast(errorText(error), "error");
   } finally {
     store.busy = false;
-    ($("btnSend") as HTMLButtonElement).disabled = false;
+    runTarget = null;
+    markSending(false);
     renderAll();
   }
+}
+
+/** The send button stays live while a run goes — it says so, and it queues. */
+function markSending(busy: boolean) {
+  $("btnSend").textContent = busy ? t("composer.queue") : t("composer.send");
 }
 
 function bindComposer() {
   const input = $("composerInput") as HTMLTextAreaElement;
   $("btnSend").addEventListener("click", () => void sendMessage());
+
+  // Pictures: picked, pasted or dropped onto the composer.
+  const attachInput = $("attachInput") as HTMLInputElement;
+  $("btnAttach").addEventListener("click", () => attachInput.click());
+  attachInput.addEventListener("change", () => {
+    const files = Array.from(attachInput.files ?? []);
+    attachInput.value = "";
+    void addAttachments(files);
+  });
+  $("attachments").addEventListener("click", (event) => {
+    const target = event.target as HTMLElement;
+    const drop = target.closest<HTMLElement>("[data-attach]");
+    if (drop) {
+      store.attachments = store.attachments.filter((item) => item.id !== drop.dataset.attach);
+      renderAttachments();
+      return;
+    }
+    const image = target.closest<HTMLImageElement>(".thumb img");
+    if (image) openImage(image.src, image.alt);
+  });
+  input.addEventListener("paste", (event) => {
+    const files = imageFiles(event.clipboardData);
+    if (files.length > 0) {
+      event.preventDefault();
+      void addAttachments(files);
+      return;
+    }
+    // Copying an image inside a browser puts a link on the clipboard, and only
+    // a link; the picture itself has to be fetched.
+    const link = imageLink(event.clipboardData);
+    if (!link || !/^data:image\//.test(link)) return;
+    event.preventDefault();
+    void addFromUrl(link);
+  });
+
+  const composer = document.querySelector(".composer") as HTMLElement;
+  composer.addEventListener("dragover", (event) => {
+    if (!event.dataTransfer?.types.includes("Files")) return;
+    event.preventDefault();
+    composer.classList.add("dropping");
+  });
+  composer.addEventListener("dragleave", () => composer.classList.remove("dropping"));
+  composer.addEventListener("drop", (event) => {
+    composer.classList.remove("dropping");
+    const files = imageFiles(event.dataTransfer);
+    if (files.length > 0) {
+      event.preventDefault();
+      void addAttachments(files);
+      return;
+    }
+    const link = imageLink(event.dataTransfer);
+    if (!link) return;
+    event.preventDefault();
+    void addFromUrl(link);
+  });
+
+  // A queued line can be taken back until it goes out.
+  $("queue").addEventListener("click", (event) => {
+    const drop = (event.target as HTMLElement).closest<HTMLElement>("[data-queue]");
+    if (!drop) return;
+    store.queue.splice(Number(drop.dataset.queue), 1);
+    renderQueue();
+  });
   micButton().addEventListener("click", () => void toggleDictation());
 
   input.addEventListener("keydown", (event) => {
@@ -1340,9 +1686,34 @@ function liveEntry(): UiEntry {
   return entry;
 }
 
+/** A picture inside a message opens full size, and can be copied from there. */
+function bindMessageImages() {
+  $("messages").addEventListener("click", (event) => {
+    const image = (event.target as HTMLElement).closest<HTMLImageElement>(".msg-thumbs img");
+    if (!image) return;
+    openImage(image.src, image.alt);
+  });
+}
+
+/** A picture dropped outside the composer must not replace the app window. */
+function bindWindowDrops() {
+  for (const type of ["dragover", "drop"]) {
+    window.addEventListener(type, (event) => {
+      const inside = (event.target as HTMLElement | null)?.closest?.(".composer");
+      if (!inside) event.preventDefault();
+    });
+  }
+}
+
 function bindAgentEvents() {
   void onAgentEvent((payload) => {
     const kind = String(payload.kind ?? "");
+
+    // The operator may have walked to another chat while this run goes on. Its
+    // progress belongs to the chat it was started in, so nothing is drawn into
+    // the one now on screen; the answer itself is put back on return.
+    if (runTarget && !sameTarget(runTarget, currentTarget())) return;
+
     const entry = liveEntry();
     const meta = entry.meta as {
     steps?: RunStep[];
@@ -1386,6 +1757,8 @@ async function boot() {
   bindTopbar();
   bindPanels();
   bindComposer();
+  bindMessageImages();
+  bindWindowDrops();
   bindTabs();
   bindAgentEvents();
   bindContextMenus();

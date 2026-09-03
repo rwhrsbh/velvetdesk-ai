@@ -766,6 +766,77 @@ pub async fn list_provider_models(
     Ok(catalog)
 }
 
+/// The largest picture worth pulling in from the web, in bytes.
+const MAX_FETCHED_IMAGE: usize = 8 * 1024 * 1024;
+
+/// Fetch a picture the operator dragged in from a browser.
+///
+/// Dragging an image out of a web page hands the app a link, not the file, and
+/// the page it came from usually refuses a request made from the webview. The
+/// download happens here instead, and only for pictures: the content type is
+/// checked, the size is capped, and nothing else is followed.
+#[tauri::command]
+pub async fn fetch_image(state: State<'_, AppState>, url: String) -> Result<Value> {
+    let trimmed = url.trim();
+    if !(trimmed.starts_with("http://") || trimmed.starts_with("https://")) {
+        return Err(AppError::message("error.notAnImageLink", json!({})));
+    }
+
+    let response = state
+        .llm
+        .http
+        .get(trimmed)
+        .send()
+        .await
+        .map_err(|e| AppError::Provider(format!("image download failed: {e}")))?;
+    if !response.status().is_success() {
+        return Err(AppError::Provider(format!(
+            "image download failed: HTTP {}",
+            response.status()
+        )));
+    }
+
+    let mime = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if !mime.starts_with("image/") {
+        return Err(AppError::message("error.notAnImageLink", json!({})));
+    }
+
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| AppError::Provider(format!("image download failed: {e}")))?;
+    if bytes.len() > MAX_FETCHED_IMAGE {
+        return Err(AppError::message(
+            "error.imageTooBig",
+            json!({ "mb": MAX_FETCHED_IMAGE / (1024 * 1024) }),
+        ));
+    }
+
+    let name = trimmed
+        .rsplit('/')
+        .next()
+        .and_then(|tail| tail.split('?').next())
+        .filter(|tail| !tail.is_empty())
+        .unwrap_or("image")
+        .to_string();
+
+    use base64::Engine;
+    Ok(json!({
+        "name": name,
+        "mime": mime,
+        "data": base64::engine::general_purpose::STANDARD.encode(&bytes),
+    }))
+}
+
 /// Transcribe a dictated clip through the operator's own provider.
 #[tauri::command]
 pub async fn transcribe(

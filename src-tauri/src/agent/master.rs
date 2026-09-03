@@ -381,7 +381,10 @@ pub async fn chat(deps: &AgentDeps<'_>, input: MasterInput) -> Result<MasterOutp
     }
     request
         .messages
-        .push(LlmMessage::user(input.message.clone()));
+        .push(LlmMessage::user_with_images(
+            input.message.clone(),
+            input.images.clone(),
+        ));
 
     let mut steps: Vec<RunStep> = vec![];
     let mut pending: Vec<PendingAction> = vec![];
@@ -489,6 +492,9 @@ pub async fn chat(deps: &AgentDeps<'_>, input: MasterInput) -> Result<MasterOutp
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct MasterInput {
     pub message: String,
+    /// Screenshots and photos attached to this message.
+    #[serde(default)]
+    pub images: Vec<crate::llm::ImagePart>,
     #[serde(default)]
     pub security: Option<SecurityLevel>,
     #[serde(default)]

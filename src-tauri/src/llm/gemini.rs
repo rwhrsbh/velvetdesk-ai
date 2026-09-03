@@ -358,10 +358,15 @@ fn build_body(provider: &ProviderConfig, request: &ChatRequest) -> Value {
 
     for msg in &request.messages {
         match msg.role {
-            Role::User => contents.push(json!({
-                "role": "user",
-                "parts": [{ "text": msg.content }],
-            })),
+            Role::User => {
+                let mut parts: Vec<Value> = vec![json!({ "text": msg.content })];
+                for image in &msg.images {
+                    parts.push(json!({
+                        "inlineData": { "mimeType": image.mime, "data": image.data }
+                    }));
+                }
+                contents.push(json!({ "role": "user", "parts": parts }));
+            }
             Role::Assistant => {
                 let mut parts: Vec<Value> = vec![];
                 if !msg.content.trim().is_empty() {
@@ -869,6 +874,7 @@ mod tests {
         req.messages.push(LlmMessage {
             role: Role::Assistant,
             content: String::new(),
+            images: vec![],
             tool_calls: parsed.tool_calls.clone(),
             tool_name: None,
             tool_call_id: None,
@@ -878,6 +884,23 @@ mod tests {
         assert_eq!(part["thoughtSignature"], "Cs4BAdHtim8abc");
     }
 
+    /// A screenshot goes out beside the words that ask about it.
+    #[test]
+    fn attachments_ride_with_the_operators_turn() {
+        let mut req = ChatRequest::new("");
+        req.messages.push(LlmMessage::user_with_images(
+            "who is this",
+            vec![crate::llm::ImagePart {
+                mime: "image/png".into(),
+                data: "AAAB".into(),
+            }],
+        ));
+        let parts = &build_body(&provider(), &req)["contents"][0]["parts"];
+        assert_eq!(parts[0]["text"], "who is this");
+        assert_eq!(parts[1]["inlineData"]["mimeType"], "image/png");
+        assert_eq!(parts[1]["inlineData"]["data"], "AAAB");
+    }
+
     /// A provider that signs nothing must not gain an empty signature field.
     #[test]
     fn unsigned_calls_stay_unsigned() {
@@ -885,6 +908,7 @@ mod tests {
         req.messages.push(LlmMessage {
             role: Role::Assistant,
             content: String::new(),
+            images: vec![],
             tool_calls: vec![ToolCall {
                 id: "1".into(),
                 name: "get_man".into(),

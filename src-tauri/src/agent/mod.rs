@@ -39,6 +39,9 @@ pub struct RunInput {
     /// everything it does — facts, dossiers, messages — is applied as usual.
     #[serde(default)]
     pub temporary: bool,
+    /// Screenshots and photos attached to this message.
+    #[serde(default)]
+    pub images: Vec<crate::llm::ImagePart>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -174,7 +177,9 @@ pub async fn run(deps: &AgentDeps<'_>, input: RunInput) -> Result<RunOutput> {
     request.temperature = deps.provider.temperature;
     request.max_output_tokens = deps.provider.max_output_tokens;
     request.thinking = thinking_for(deps.provider, input.thinking_effort.as_deref());
-    request.messages.push(LlmMessage::user(user_block));
+    request
+        .messages
+        .push(LlmMessage::user_with_images(user_block, input.images.clone()));
 
     match mode {
         AgentMode::Auto => run_auto(deps, &scope, security, mode, input, request).await,

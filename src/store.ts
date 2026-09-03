@@ -16,6 +16,23 @@ export interface UiEntry extends AgentEntry {
   transient?: boolean;
 }
 
+/** A picture waiting to go out, kept in memory only. */
+export interface Attachment {
+  id: string;
+  name: string;
+  mime: string;
+  /** base64, without the `data:` prefix. */
+  data: string;
+}
+
+/** A message lined up behind the run in flight, with whatever came with it. */
+export interface QueuedMessage {
+  text: string;
+  attachments: Attachment[];
+  /** The chat it was typed in; it goes there even if the operator moves on. */
+  target: { modelId: string | null; manId: string | null; master: boolean };
+}
+
 export interface AppStore {
   info: AppInfo | null;
   settings: Settings | null;
@@ -44,6 +61,10 @@ export interface AppStore {
   thread: ChatThread | null;
   /** The master chat is open: one conversation across every profile. */
   master: boolean;
+  /** Typed while a run was in flight; sent in order once it ends. */
+  queue: QueuedMessage[];
+  /** Pictures picked or pasted for the message being written. */
+  attachments: Attachment[];
 }
 
 export const store: AppStore = {
@@ -68,7 +89,14 @@ export const store: AppStore = {
   thoughts: "",
   thread: null,
   master: false,
+  queue: [],
+  attachments: [],
 };
+
+/** A thumbnail source for an attachment. */
+export function attachmentUrl(item: Attachment): string {
+  return `data:${item.mime};base64,${item.data}`;
+}
 
 export function activeProfile(): Profile | null {
   return store.profiles.find((p) => p.id === store.activeModelId) ?? null;

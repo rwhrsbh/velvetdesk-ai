@@ -36,6 +36,9 @@ pub struct LlmMessage {
     pub role: Role,
     #[serde(default)]
     pub content: String,
+    /// Pictures the operator attached to this turn, sent inline.
+    #[serde(default)]
+    pub images: Vec<ImagePart>,
     /// Assistant turns may carry tool calls.
     #[serde(default)]
     pub tool_calls: Vec<ToolCall>,
@@ -46,11 +49,21 @@ pub struct LlmMessage {
     pub tool_name: Option<String>,
 }
 
+/// An attached picture: its type, and its bytes base64-encoded without the
+/// `data:` prefix. Both vendors take images this way — Gemini as `inlineData`,
+/// OpenAI-compatible endpoints as a `data:` URL — so one shape serves both.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ImagePart {
+    pub mime: String,
+    pub data: String,
+}
+
 impl LlmMessage {
     pub fn user(text: impl Into<String>) -> Self {
         LlmMessage {
             role: Role::User,
             content: text.into(),
+            images: vec![],
             tool_calls: vec![],
             tool_call_id: None,
             tool_name: None,
@@ -61,9 +74,19 @@ impl LlmMessage {
         LlmMessage {
             role: Role::Assistant,
             content: text.into(),
+            images: vec![],
             tool_calls,
             tool_call_id: None,
             tool_name: None,
+        }
+    }
+
+    /// The operator's turn with attachments: the same message, plus what they
+    /// pasted or picked, so the model looks at the screenshot it is asked about.
+    pub fn user_with_images(text: impl Into<String>, images: Vec<ImagePart>) -> Self {
+        LlmMessage {
+            images,
+            ..LlmMessage::user(text)
         }
     }
 
@@ -71,6 +94,7 @@ impl LlmMessage {
         LlmMessage {
             role: Role::Tool,
             content: content.into(),
+            images: vec![],
             tool_calls: vec![],
             tool_call_id: Some(call.id.clone()),
             tool_name: Some(call.name.clone()),

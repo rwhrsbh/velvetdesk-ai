@@ -1,6 +1,15 @@
 import { $, avatarHtml, escapeHtml, formatDate } from "./dom";
 import { contactWord, keyWord, t } from "./i18n";
-import { activeMan, activeProfile, alreadyFiled, store, visibleMen, visibleProfiles } from "./store";
+import {
+  activeMan,
+  activeProfile,
+  alreadyFiled,
+  attachmentUrl,
+  store,
+  visibleMen,
+  visibleProfiles,
+} from "./store";
+import type { Attachment } from "./store";
 import type { RunStep, Usage } from "./types";
 
 export function renderTopbar() {
@@ -272,6 +281,8 @@ export function renderChat() {
         thinkingSince?: number;
         /** which model answered, when a fallback took over */
         model?: string;
+        /** pictures the operator sent with this message */
+        images?: Attachment[];
         /** the provider's answer as it arrived */
         raw?: string;
         /** letters carry their recipient */
@@ -326,14 +337,80 @@ export function renderChat() {
           )}</div>`
         : "";
 
+      // What was attached stays visible in the message it went out with.
+      const shots = meta.images?.length
+        ? `<div class="msg-thumbs">${thumbsHtml(meta.images, false)}</div>`
+        : "";
+
       return (
         `<div class="msg ${entry.sender}" data-entry="${escapeHtml(entry.id)}">` +
-        `<div class="bubble">${recipient}${thinking}<span class="bubble-text">${escapeHtml(entry.text)}</span>` +
+        `<div class="bubble">${recipient}${thinking}${shots}<span class="bubble-text">${escapeHtml(entry.text)}</span>` +
         `${steps}${working}${usageLine(meta.usage, extras)}${actions}</div></div>`
       );
     })
     .join("");
   container.scrollTop = container.scrollHeight;
+}
+
+/** A row of thumbnails: what is attached, or what a message went out with. */
+function thumbsHtml(items: Attachment[], removable: boolean): string {
+  return items
+    .map(
+      (item) =>
+        `<figure class="thumb" title="${escapeHtml(item.name)}">` +
+        `<img src="${attachmentUrl(item)}" alt="${escapeHtml(item.name)}" />` +
+        (removable
+          ? `<button class="thumb-drop" data-attach="${escapeHtml(item.id)}" ` +
+            `title="${escapeHtml(t("composer.attachDrop"))}">×</button>`
+          : "") +
+        `</figure>`,
+    )
+    .join("");
+}
+
+/** What will go out with the next message. */
+export function renderAttachments() {
+  const box = $("attachments");
+  if (store.attachments.length === 0) {
+    box.innerHTML = "";
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  box.innerHTML = thumbsHtml(store.attachments, true);
+}
+
+/**
+ * What is lined up behind the current run.
+ *
+ * Each line is a message the operator typed while the model was still working;
+ * it goes out on its own as soon as the run before it ends, and can be dropped
+ * until then.
+ */
+export function renderQueue() {
+  const box = $("queue");
+  if (store.queue.length === 0) {
+    box.innerHTML = "";
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  box.innerHTML = store.queue
+    .map(
+      (item, index) =>
+        `<div class="queue-item" title="${escapeHtml(t("composer.queuedHint"))}">` +
+        `<span class="queue-mark">↵</span>` +
+        `<span class="queue-text">${escapeHtml(item.text)}</span>` +
+        (item.attachments.length > 0
+          ? `<span class="queue-count">${escapeHtml(
+              t("composer.attachCount", { n: item.attachments.length }),
+            )}</span>`
+          : "") +
+        `<button class="queue-drop" data-queue="${index}" ` +
+        `title="${escapeHtml(t("composer.queueDrop"))}">×</button>` +
+        `</div>`,
+    )
+    .join("");
 }
 
 export function renderAll() {
@@ -342,4 +419,6 @@ export function renderAll() {
   renderScope();
   renderMen();
   renderChat();
+  renderQueue();
+  renderAttachments();
 }

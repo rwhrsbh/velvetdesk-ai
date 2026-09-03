@@ -38,6 +38,14 @@ export interface RunInput {
   thinking_effort?: string;
   /** Act, but keep nothing in the chat log. */
   temporary?: boolean;
+  /** Screenshots and photos attached to this message. */
+  images?: ImagePart[];
+}
+
+/** An attached picture: its type, and its bytes without the `data:` prefix. */
+export interface ImagePart {
+  mime: string;
+  data: string;
 }
 
 export const api = {
@@ -97,6 +105,7 @@ export const api = {
     security?: string;
     thinking_effort?: string;
     temporary?: boolean;
+    images?: ImagePart[];
   }) => invoke<MasterOutput>("master_chat", { input }),
   masterContextStats: () => invoke<ContextStats>("master_context_stats"),
   getMasterLog: () => invoke<AgentLog>("get_master_log"),
@@ -147,6 +156,9 @@ export const api = {
   deleteLocalModel: (modelId: string) => invoke<LocalModel[]>("delete_local_model", { modelId }),
   localModelsBaseUrl: () => invoke<string>("local_models_base_url"),
   testProvider: () => invoke<Record<string, unknown>>("test_provider"),
+
+  fetchImage: (url: string) =>
+    invoke<{ name: string; mime: string; data: string }>("fetch_image", { url }),
 
   seedDemo: () => invoke<Profile[]>("seed_demo"),
 };

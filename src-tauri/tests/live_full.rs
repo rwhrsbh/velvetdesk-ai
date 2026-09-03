@@ -397,6 +397,7 @@ async fn the_agent_stores_what_it_is_told() {
         log_incoming: false,
         thinking_effort: Some("low".into()),
         temporary: true,
+        images: vec![],
     };
 
     let output = agent::run(&harness.deps(&config, &emit), input)
@@ -473,6 +474,7 @@ async fn the_context_gauge_matches_what_the_provider_counts() {
         log_incoming: false,
         thinking_effort: Some("none".into()),
         temporary: true,
+        images: vec![],
     };
     let output = agent::run(&harness.deps(&config, &emit), input)
         .await
@@ -807,6 +809,7 @@ async fn the_master_creates_a_profile_and_its_men() {
             security: Some(SecurityLevel::Yolo),
             thinking_effort: Some("medium".into()),
             temporary: true,
+        images: vec![],
         },
     )
     .await
@@ -883,6 +886,7 @@ async fn the_agent_runs_a_command_and_writes_a_file() {
         log_incoming: false,
         thinking_effort: Some("low".into()),
         temporary: true,
+        images: vec![],
     };
 
     let output = agent::run(&harness.deps(&config, &emit), input)
@@ -944,6 +948,7 @@ async fn an_ungranted_folder_stays_out_of_reach() {
         log_incoming: false,
         thinking_effort: Some("low".into()),
         temporary: true,
+        images: vec![],
     };
 
     let output = agent::run(&harness.deps(&config, &emit), input)
