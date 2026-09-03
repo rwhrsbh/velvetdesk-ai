@@ -728,7 +728,7 @@ pub fn plan_mutation(scope: &Scope, tool: &str, args: &Value) -> Result<Mutation
                 summary: format!("заметка {}: {}", man.name, truncate(&text, 60)),
                 phrase: Phrase::new(
                     "step.note",
-                    json!({ "name": man.name, "text": truncate(&text, 60) }),
+                    json!({ "name": man.name, "text": text }),
                     format!("заметка {}: {}", man.name, truncate(&text, 60)),
                 ),
                 before: serde_json::to_value(&before)?,
@@ -815,7 +815,9 @@ pub fn plan_mutation(scope: &Scope, tool: &str, args: &Value) -> Result<Mutation
                 summary: format!("в переписку {id}: {}", truncate(&text, 60)),
                 phrase: Phrase::new(
                     "step.appendChat",
-                    json!({ "id": id, "text": truncate(&text, 60) }),
+                    // The whole message, not a preview: this is the letter the
+                    // operator is about to send, and it belongs on screen.
+                    json!({ "id": id, "text": text }),
                     format!("в переписку {id}: {}", truncate(&text, 60)),
                 ),
                 before: json!({ "messages": before.messages.len() }),
@@ -892,7 +894,13 @@ pub fn plan_mutation(scope: &Scope, tool: &str, args: &Value) -> Result<Mutation
                 summary: format!("переписать персону {}", profile.name),
                 phrase: Phrase::new(
                     "step.replacePersona",
-                    json!({ "name": profile.name }),
+                    // A persona rewrite replaces instructions the operator
+                    // wrote, so both versions go on screen.
+                    json!({
+                        "name": profile.name,
+                        "before": before.system_prompt_override,
+                        "text": profile.system_prompt_override,
+                    }),
                     format!("переписать персону {}", profile.name),
                 ),
                 before: json!({ "system_prompt_override": before.system_prompt_override }),
