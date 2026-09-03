@@ -30,6 +30,12 @@ pub fn run() {
         }
     }));
 
+    // Updating in place is a desktop affair; a phone installs its own APK.
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    let builder = builder
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init());
+
     builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())

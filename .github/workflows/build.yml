@@ -121,9 +121,17 @@ jobs:
       - run: npm ci
       - name: Stamp version
         shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: node scripts/set-version.mjs "${{ needs.check.outputs.version }}"
 
       - name: Build bundles
+        # The signing key turns the desktop bundles into updater artifacts: the
+        # app only installs what this key signed. Without the secret the build
+        # still succeeds — it simply produces nothing the updater will accept.
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: npx tauri build --target ${{ matrix.target }} --ci
 
       - name: Collect artifacts
@@ -134,7 +142,7 @@ jobs:
           find "$base" -maxdepth 3 -type f \
             \( -name "*.deb" -o -name "*.AppImage" -o -name "*.rpm" \
                -o -name "*.dmg" -o -name "*.app.tar.gz" \
-               -o -name "*.msi" -o -name "*.exe" \) \
+               -o -name "*.msi" -o -name "*.exe" -o -name "*.sig" \) \
             -exec cp {} out/ \; || true
           ls -la out
 
@@ -242,6 +250,11 @@ jobs:
           path: artifacts
           pattern: velvetdesk-*
           merge-multiple: true
+
+      - name: Build the update manifest
+        env:
+          VERSION: ${{ needs.check.outputs.version }}
+        run: node scripts/update-manifest.mjs artifacts "${VERSION}"
 
       - name: Publish
         env:

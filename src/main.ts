@@ -1,5 +1,7 @@
 import { applyStatic, lang, setLang, t, type Lang } from "./i18n";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { check, type Update } from "@tauri-apps/plugin-updater";
 import { api, errorText, onAgentEvent } from "./api";
 import type { ModalDeps } from "./deps";
 import { $, bindModalDismiss, closeModal, confirmDialog, escapeHtml, openModal, toast } from "./dom";
@@ -320,11 +322,99 @@ async function removeMessages(ids: string[], filed: string[]) {
 /**
  * Offer the newest release.
  *
- * The check reads the release list and nothing else; the download happens in
- * the operator's browser, and only after they say so. A version turned down is
- * remembered, so the same offer is not made twice.
+ * On the desktop the update is signed and installed in place: the operator is
+ * shown what changed and asked, and only their click downloads and runs it,
+ * after which the app restarts on the new version. A phone has no such path —
+ * Android installs its own APK — so there the release page is opened instead
+ * and the operator installs it themselves.
+ *
+ * A version turned down is remembered and never offered again on start.
  */
 async function offerUpdate(manual: boolean) {
+  if (store.info?.platform === "android") {
+    await offerDownload(manual);
+    return;
+  }
+
+  let update: Update | null = null;
+  try {
+    update = await check();
+  } catch (error) {
+    // No manifest yet, or no network: the release page still answers.
+    console.error("update check", error);
+    await offerDownload(manual);
+    return;
+  }
+
+  if (!update) {
+    if (manual) toast(t("update.upToDate", { version: store.info?.version ?? "" }), "success");
+    return;
+  }
+  if (!manual && store.settings?.update_skipped === update.version) return;
+
+  const notes = (update.body ?? "").trim().split("\n").slice(0, 12).join("\n");
+  const card = openModal(
+    `<h3>${escapeHtml(t("update.title", { version: update.version }))}</h3>` +
+      `<div class="modal-sub">${escapeHtml(
+        t("update.subInstall", { current: store.info?.version ?? "" }),
+      )}</div>` +
+      (notes ? `<div class="code-block">${escapeHtml(notes)}</div>` : "") +
+      `<div class="update-progress" id="updateProgress" hidden></div>` +
+      `<div class="modal-actions" id="updateActions">` +
+      `<button class="btn btn-secondary" data-act="skip">${t("update.skip")}</button>` +
+      `<button class="btn btn-secondary" data-act="close">${t("update.later")}</button>` +
+      `<button class="btn btn-primary" data-act="install">${t("update.install")}</button></div>`,
+  );
+  card.querySelector('[data-act="close"]')?.addEventListener("click", closeModal);
+  card.querySelector('[data-act="skip"]')?.addEventListener("click", () => {
+    closeModal();
+    void persistSettings({ update_skipped: update.version });
+  });
+  card.querySelector('[data-act="install"]')?.addEventListener("click", () => {
+    void installUpdate(update, card);
+  });
+}
+
+/** Download and install, saying how far along it is. */
+async function installUpdate(update: Update, card: HTMLElement) {
+  const actions = card.querySelector<HTMLElement>("#updateActions");
+  const progress = card.querySelector<HTMLElement>("#updateProgress");
+  if (actions) actions.hidden = true;
+  if (progress) {
+    progress.hidden = false;
+    progress.textContent = t("update.downloading", { percent: 0 });
+  }
+
+  let total = 0;
+  let done = 0;
+  try {
+    await update.downloadAndInstall((event) => {
+      if (event.event === "Started") total = event.data.contentLength ?? 0;
+      if (event.event === "Progress") done += event.data.chunkLength;
+      if (progress) {
+        const percent = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+        progress.textContent =
+          event.event === "Finished"
+            ? t("update.installing")
+            : t("update.downloading", { percent });
+      }
+    });
+    // The new version only exists once the app comes back on it.
+    await relaunch();
+  } catch (error) {
+    if (actions) actions.hidden = false;
+    if (progress) progress.hidden = true;
+    toast(errorText(error), "error");
+  }
+}
+
+/**
+ * The release page, for the platforms that install their own package.
+ *
+ * Nothing is fetched here either: the file opens in the operator's browser and
+ * they run it themselves.
+ */
+async function offerDownload(manual: boolean) {
   let info: UpdateInfo;
   try {
     info = await api.checkUpdate();
@@ -356,7 +446,6 @@ async function offerUpdate(manual: boolean) {
   });
   card.querySelector('[data-act="get"]')?.addEventListener("click", () => {
     closeModal();
-    // The installer is fetched and run by the operator, in their own browser.
     void openUrl(info.download ?? info.page).catch((error) => toast(errorText(error), "error"));
   });
 }

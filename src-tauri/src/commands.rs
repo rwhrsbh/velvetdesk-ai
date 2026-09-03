@@ -299,6 +299,10 @@ fn asset_for_platform(assets: &[Value]) -> Option<String> {
     let wanted: &[&str] = match std::env::consts::OS {
         "windows" => &[".msi", ".exe"],
         "macos" => &[".dmg", ".app.tar.gz"],
+        // The release carries one APK per architecture plus a universal one;
+        // the universal build runs everywhere, so it is what a phone is offered
+        // unless its own architecture is named in the file.
+        "android" => &["universal-release.apk", ".apk"],
         _ => &[".AppImage", ".deb", ".rpm"],
     };
     for suffix in wanted {
@@ -1190,11 +1194,13 @@ mod tests {
             json!({ "name": "VelvetDesk-0.2.1.AppImage", "browser_download_url": "u/appimage" }),
             json!({ "name": "VelvetDesk-0.2.1.msi", "browser_download_url": "u/msi" }),
             json!({ "name": "VelvetDesk-0.2.1.dmg", "browser_download_url": "u/dmg" }),
+            json!({ "name": "VelvetDesk-0.2.1-app-universal-release.apk", "browser_download_url": "u/apk" }),
         ];
         let picked = asset_for_platform(&assets).unwrap();
         let expected = match std::env::consts::OS {
             "windows" => "u/msi",
             "macos" => "u/dmg",
+            "android" => "u/apk",
             _ => "u/appimage",
         };
         assert_eq!(picked, expected);

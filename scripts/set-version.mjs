@@ -39,3 +39,13 @@ edit("src-tauri/tauri.conf.json", (text) =>
 edit("src-tauri/Cargo.toml", (text) =>
   text.replace(/(\[package\][\s\S]*?\nversion\s*=\s*")\d+\.\d+\.\d+(")/, `$1${version}$2`),
 );
+
+// Signed bundles need the project's private key. A fork, or this repository
+// before the secret is added, has none — asking for updater artifacts there
+// fails the build, so the request is dropped instead of breaking it.
+if (!process.env.TAURI_SIGNING_PRIVATE_KEY) {
+  edit("src-tauri/tauri.conf.json", (text) =>
+    text.replace(/("createUpdaterArtifacts":\s*)true/, "$1false"),
+  );
+  console.log("[set-version] no signing key: updater artifacts off for this build");
+}
