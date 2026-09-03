@@ -52,6 +52,31 @@ for (const file of readdirSync("src").filter((f) => f.endsWith(".ts") && f !== "
   for (const [, key] of source.matchAll(/\bt\(\s*"([\w.@-]+)"/g)) note(key, file);
 }
 
+// The core names keys as well — errors it raises and steps it reports are
+// rendered from the same dictionaries, and a missing one shows as a bare key.
+const rustFiles = [];
+const walk = (dir) => {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) walk(path);
+    else if (entry.name.endsWith(".rs")) rustFiles.push(path);
+  }
+};
+walk(join("src-tauri", "src"));
+
+for (const file of rustFiles) {
+  const source = readFileSync(file, "utf8");
+  for (const [, key] of source.matchAll(/AppError::message\(\s*"([\w.@-]+)"/g)) {
+    note(key, file);
+  }
+  for (const [, key] of source.matchAll(/Phrase::new\(\s*"([\w.@-]+)"/g)) {
+    if (key) note(key, file);
+  }
+  for (const [, key] of source.matchAll(/(?:key|reply_key):\s*"([\w.]+\.[\w.]+)"/g)) {
+    note(key, file);
+  }
+}
+
 for (const [key, where] of referenced) {
   if (!known.has(key)) problems.push(`${where} asks for a key nothing defines: ${key}`);
 }
