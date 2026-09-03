@@ -249,10 +249,18 @@ function restoreParked(target: ChatTarget) {
   const waiting = parked.get(key);
   if (!waiting || waiting.length === 0) return;
   parked.delete(key);
-  // The log already holds what the core wrote down; only what it does not know
-  // about — temporary chats, errors, system notes — needs putting back.
+  // The log already holds what the core wrote down, and reopening the chat has
+  // just loaded it. Only what the log does not know about — temporary chats,
+  // errors, system notes — needs putting back, so anything already on screen
+  // word for word is left alone rather than shown twice.
+  const recent = store.entries.slice(-40);
   for (const entry of waiting) {
-    if (store.entries.some((existing) => existing.id === entry.id)) continue;
+    const known = recent.some(
+      (existing) =>
+        existing.id === entry.id ||
+        (existing.sender === entry.sender && existing.text.trim() === entry.text.trim()),
+    );
+    if (known) continue;
     store.entries.push(entry);
   }
 }

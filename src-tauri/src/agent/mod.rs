@@ -1059,10 +1059,14 @@ pub fn apply_patch(
         match man_id {
             Some(id) => calls.extend(man_calls(id, patch)),
             None if patch.get("name").is_some() => calls.extend(calls_for_entry(&known, patch)),
+            // Nothing to attribute them to. If the patch also listed men, they
+            // have already been handled and the leftovers are noise; otherwise
+            // the operator is told what was dropped, with the patch to look at.
+            None if !calls.is_empty() => {}
             None => steps.push(RunStep {
                 kind: "warn".into(),
                 tool: None,
-                summary: "Патч памяти пропущен: не выбран мужчина и в патче нет имени".into(),
+                summary: "Facts not stored: no man is selected and the patch names none".into(),
                 key: "step.patchUnattributed".into(),
                 params: json!({}),
                 detail: patch.clone(),
@@ -1452,6 +1456,30 @@ mod tests {
         assert_eq!(pending[0].after["facts"].as_array().unwrap().len(), 1);
         assert_eq!(pending[0].after["notes"].as_array().unwrap().len(), 1);
         assert_eq!(scope.read_all_men().unwrap().len(), 1);
+    }
+
+    /// A pasted roster of admirers becomes dossiers, and the stray top-level
+    /// fields the model tacked on are not reported as lost work.
+    #[test]
+    fn a_roster_of_admirers_becomes_dossiers() {
+        let scope = scope();
+        let patch = json!({
+            "status": "смотрю список интересов",
+            "men": [
+                { "name": "LANGKA", "id": "804329GDN", "age": 37, "tags": ["admirer"],
+                  "notes": ["01.09.2026: I want to get to know you better!"] },
+                { "name": "ERIC COX", "id": "628101GDN", "age": 36, "tags": ["admirer"] }
+            ]
+        });
+        let (steps, _) = apply_patch(&scope, SecurityLevel::Yolo, None, &patch, &|_| {}).unwrap();
+
+        assert!(steps.iter().all(|s| s.kind != "warn"));
+        let men = scope.read_all_men().unwrap();
+        assert_eq!(men.len(), 3);
+        let langka = scope.read_man("804329GDN").unwrap();
+        assert_eq!(langka.name, "LANGKA");
+        assert_eq!(langka.age, Some(37));
+        assert_eq!(langka.notes.len(), 1);
     }
 
     /// Without a selected man, a patch that names whom it is about is applied

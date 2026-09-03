@@ -120,7 +120,20 @@ Split dictation into atomic facts. Keep the operator's wording for names,
 numbers and dates. Do not guess anything that was not said.
 If the dictation is about men other than the one currently open — a list of new
 admirers, for instance — put each of them in \"men\" with his name, and never
-drop a fact because no dossier exists yet: an entry in \"men\" creates one."
+drop a fact because no dossier exists yet: an entry in \"men\" creates one.
+With no dossier open, the top-level man fields (status, stage, facts, notes...)
+have nobody to belong to and are thrown away: EVERY man goes inside \"men\",
+one object each, carrying whatever the text shows — his site id as \"id\", his
+age, and his message and its date as a note. A pasted roster of twenty men is
+twenty entries:
+{\"summary\": \"...\", \"memory_patch\": {\"men\": [
+  {\"name\": \"LANGKA\", \"id\": \"804329GDN\", \"age\": 37,
+   \"tags\": [\"admirer\"],
+   \"notes\": [\"01.09.2026: I want to get to know you better!\"]},
+  {\"name\": \"ERIC COX\", \"id\": \"628101GDN\", \"age\": 36,
+   \"tags\": [\"admirer\"],
+   \"notes\": [\"31.08.2026: You've won my heart!\"]}
+]}}"
         }
     }
 }
