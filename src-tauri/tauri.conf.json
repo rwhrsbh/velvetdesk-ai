@@ -62,7 +62,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEZGQzc4NDVCMTJBRUNDM0UKUldRK3pLNFNXNFRILytsSjhjRGJndkwrNFlRK2FqQ0RjWi8rY3Y5bVQ4NFVQd3VvNEx1dm10TWEK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVEQjFCMzExRTkxQTk0MEMKUldRTWxCcnBFYk94WGJyakxVR2VYMDdkSHZzaSswYlU5T2thZThGblYydS90NE1WamcwTEd4dFgK",
       "endpoints": [
         "https://github.com/rwhrsbh/velvetdesk-ai/releases/latest/download/latest.json"
       ],

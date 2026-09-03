@@ -305,7 +305,10 @@ npx tauri signer generate -w ~/.tauri/velvetdesk-updater.key
 | Секрет | Значение |
 | --- | --- |
 | `TAURI_SIGNING_PRIVATE_KEY` | содержимое `~/.tauri/velvetdesk-updater.key` целиком |
-| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | пароль ключа (пустая строка, если задан пустой) |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | пароль, заданный при генерации ключа |
+
+GitHub не принимает пустое значение секрета, поэтому ключ генерируется с паролем:
+`npx tauri signer generate -p '<пароль>' -w ~/.tauri/velvetdesk-updater.key`.
 
 Пока секрета нет, сборка всё равно проходит: `scripts/set-version.mjs` видит отсутствие
 ключа и выключает подписанные артефакты, `latest.json` выходит пустым, а приложение
