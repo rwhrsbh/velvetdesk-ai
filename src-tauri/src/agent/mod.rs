@@ -744,7 +744,10 @@ async fn run_auto(
                         summary: format!("read: {} (already fetched)", call.name),
                         key: "step.readCached".into(),
                         params: json!({ "tool": call.name }),
-                        detail: json!({ "args": call.args }),
+                        detail: json!({
+                            "args": call.args,
+                            "result": crate::llm::cap_raw(&cached.to_string()),
+                        }),
                     };
                     (deps.emit)(json!({ "kind": "step", "step": step }));
                     steps.push(step);
@@ -778,6 +781,7 @@ async fn run_auto(
                     result,
                     summary,
                     phrase,
+                    changes,
                     queued,
                     applied,
                     risk,
@@ -796,7 +800,15 @@ async fn run_auto(
                         summary: summary.clone(),
                         key: phrase.key,
                         params: phrase.params,
-                        detail: json!({ "args": call.args, "risk": risk, "applied": applied }),
+                        // Everything the operator might want to open: what was
+                        // asked, what came back, and what it changed.
+                        detail: json!({
+                            "args": call.args,
+                            "risk": risk,
+                            "applied": applied,
+                            "result": crate::llm::cap_raw(&result.to_string()),
+                            "changes": changes,
+                        }),
                     };
                     (result, step)
                 }
@@ -1069,7 +1081,7 @@ pub fn apply_patch(
                     summary: outcome.summary,
                     key: outcome.phrase.key,
                     params: outcome.phrase.params,
-                    detail: args,
+                    detail: json!({ "args": args, "changes": outcome.changes }),
                 };
                 emit(json!({ "kind": "step", "step": step }));
                 steps.push(step);

@@ -156,6 +156,7 @@ fn read_outcome(tool: &str, result: Value) -> tools::ToolOutcome {
         result,
         applied: true,
         queued: None,
+        changes: Value::Null,
         summary: format!("read: {tool}"),
         phrase: tools::Phrase::new(
             "step.read",
@@ -241,6 +242,7 @@ fn create_profile(
             result: json!({ "ok": true, "applied": false, "pending_approval": true }),
             applied: false,
             queued: Some(pending),
+            changes: Value::Null,
             summary,
             phrase,
         });
@@ -254,6 +256,7 @@ fn create_profile(
         result: json!({ "ok": true, "applied": true, "model_id": profile.id }),
         applied: true,
         queued: None,
+        changes: Value::Null,
         summary,
         phrase,
     })

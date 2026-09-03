@@ -227,6 +227,7 @@ fn queued(tool: &str, args: &Value, risk: Risk, phrase: Phrase) -> ToolOutcome {
         result: json!({ "ok": true, "applied": false, "pending_approval": true }),
         applied: false,
         queued: Some(pending),
+        changes: Value::Null,
         summary: phrase.text.clone(),
         phrase,
     }
@@ -239,6 +240,7 @@ fn done(tool: &str, risk: Risk, result: Value, phrase: Phrase) -> ToolOutcome {
         result,
         applied: true,
         queued: None,
+        changes: Value::Null,
         summary: phrase.text.clone(),
         phrase,
     }
@@ -561,6 +563,7 @@ fn request_access(args: &Value) -> Result<ToolOutcome> {
         }),
         applied: false,
         queued: Some(pending),
+        changes: Value::Null,
         summary,
         phrase,
     })

@@ -59,6 +59,76 @@ pub struct PendingAction {
     pub created_at: chrono::DateTime<Utc>,
 }
 
+/// Fields that move on every write and say nothing about what was done.
+const BOOKKEEPING: &[&str] = &[
+    "updated_at",
+    "created_at",
+    "schema_version",
+    "id",
+    "model_id",
+    "man_id",
+];
+
+/// Values longer than this are cut: a diff is for reading, not for storing.
+const DIFF_VALUE_LIMIT: usize = 400;
+
+/// What changed between two versions of a record, as `[{field, before, after}]`.
+///
+/// Field-level rather than line-level on purpose: these are records, not source
+/// files, and "stage: warming → attached" is the whole story.
+pub fn diff_values(before: &Value, after: &Value) -> Value {
+    let (Some(before), Some(after)) = (before.as_object(), after.as_object()) else {
+        return Value::Null;
+    };
+
+    let mut changes = vec![];
+    for (field, new_value) in after {
+        if BOOKKEEPING.contains(&field.as_str()) {
+            continue;
+        }
+        let old_value = before.get(field).unwrap_or(&Value::Null);
+        if old_value == new_value {
+            continue;
+        }
+        changes.push(json!({
+            "field": field,
+            "before": readable(old_value),
+            "after": readable(new_value),
+        }));
+    }
+    if changes.is_empty() {
+        Value::Null
+    } else {
+        Value::Array(changes)
+    }
+}
+
+/// A JSON value as a person would read it in a diff.
+fn readable(value: &Value) -> String {
+    let text = match value {
+        Value::Null => String::new(),
+        Value::String(text) => text.clone(),
+        Value::Array(items) => {
+            // A list of facts or notes reads as its own lines; a list of tags
+            // reads as one.
+            let parts: Vec<String> = items.iter().map(readable).collect();
+            if parts.iter().any(|p| p.contains(':') || p.len() > 40) {
+                parts.join("\n")
+            } else {
+                parts.join(", ")
+            }
+        }
+        Value::Object(map) => map
+            .iter()
+            .filter(|(key, _)| !BOOKKEEPING.contains(&key.as_str()))
+            .map(|(key, nested)| format!("{key}: {}", readable(nested)))
+            .collect::<Vec<_>>()
+            .join(" · "),
+        other => other.to_string(),
+    };
+    truncate(&text, DIFF_VALUE_LIMIT)
+}
+
 /// A named description of what a tool did, which the interface translates.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Phrase {
@@ -103,6 +173,9 @@ pub struct ToolOutcome {
     /// Named wording for `summary`, translated by the interface.
     #[serde(default)]
     pub phrase: Phrase,
+    /// What the write changed, field by field. Null for reads.
+    #[serde(default)]
+    pub changes: Value,
     /// JSON string handed back to the model.
     pub result: Value,
     pub applied: bool,
@@ -420,10 +493,12 @@ pub fn execute(
             queued: None,
             summary: phrase.text.clone(),
             phrase,
+            changes: Value::Null,
         });
     }
 
     let plan = plan_mutation(scope, tool, args)?;
+    let changes = diff_values(&plan.before, &plan.after);
 
     if is_allowed(security, risk) {
         commit(scope, &plan.target)?;
@@ -435,6 +510,7 @@ pub fn execute(
             queued: None,
             summary: plan.summary,
             phrase: plan.phrase,
+            changes,
         })
     } else {
         let pending = PendingAction {
@@ -464,6 +540,7 @@ pub fn execute(
             queued: Some(pending),
             summary: plan.summary,
             phrase: plan.phrase,
+            changes,
         })
     }
 }

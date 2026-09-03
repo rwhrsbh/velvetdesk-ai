@@ -148,16 +148,25 @@ function usageLine(usage: Usage | undefined, extra: string[]): string {
   return `<div class="usage">${escapeHtml(bits.join(" \u00b7 "))}</div>`;
 }
 
-/// One line per step: a coloured dot, what ran, what it did. The markup is
-/// written without indentation on purpose — the bubble renders text as
-/// `pre-wrap`, so any newline inside it would show up as blank space.
 /** What a step says, translated when the core named it. */
-export function stepText(step: { key?: string; params?: Record<string, string | number>; summary: string }): string {
+export function stepText(step: {
+  key?: string;
+  params?: Record<string, string | number>;
+  summary: string;
+}): string {
   if (!step.key) return step.summary;
   const translated = t(step.key, step.params ?? {});
   return translated === step.key ? step.summary : translated;
 }
 
+/**
+ * One step of a run, openable.
+ *
+ * Closed it is a line: which tool ran and what it did. Open it shows the
+ * substance — the fields a write changed, before and after; the text it wrote;
+ * or, for a read, what came back. That is the difference between a log an
+ * operator scrolls past and one they can check.
+ */
 function stepHtml(step: RunStep): string {
   const cls = step.kind.includes("error")
     ? "error"
@@ -168,13 +177,76 @@ function stepHtml(step: RunStep): string {
     ? `<span class="step-badge">${escapeHtml(t("chat.pending"))}</span>`
     : "";
   const tool = step.tool ? `<span class="step-tool">${escapeHtml(step.tool)}</span>` : "";
-  return (
-    `<div class="step ${cls}">` +
+
+  const params = (step.params ?? {}) as { text?: string; before?: string };
+  const detail = (step.detail ?? {}) as {
+    changes?: { field: string; before: string; after: string }[];
+    result?: string;
+  };
+
+  const written = typeof params.text === "string" ? params.text.trim() : "";
+  const changes = Array.isArray(detail.changes) ? detail.changes : [];
+
+  const parts: string[] = [];
+
+  // What the write changed, field by field.
+  if (changes.length > 0) {
+    parts.push(
+      `<div class="step-diff">` +
+        changes
+          .map(
+            (change) =>
+              `<div class="diff-row"><span class="diff-field">${escapeHtml(change.field)}</span>` +
+              (change.before
+                ? `<span class="diff-before">${escapeHtml(change.before)}</span>`
+                : "") +
+              `<span class="diff-after">${escapeHtml(change.after)}</span></div>`,
+          )
+          .join("") +
+        `</div>`,
+    );
+  }
+
+  // The text it wrote, in full — a letter, a note, a rewritten persona.
+  if (written && changes.length === 0) {
+    if (params.before?.trim()) {
+      parts.push(
+        `<div class="step-was"><span class="step-label">${escapeHtml(t("chat.wasBefore"))}</span>` +
+          `<div class="step-body">${escapeHtml(params.before.trim())}</div></div>`,
+      );
+    }
+    parts.push(`<div class="step-body">${escapeHtml(written)}</div>`);
+  }
+
+  // What a read came back with.
+  if (parts.length === 0 && detail.result) {
+    parts.push(`<div class="step-body mono">${escapeHtml(prettyJson(detail.result))}</div>`);
+  }
+
+  const head =
+    `<span class="step-caret">›</span>` +
     tool +
     `<span class="step-text">${escapeHtml(stepText(step))}</span>` +
-    badge +
-    `</div>`
+    badge;
+
+  if (parts.length === 0) {
+    return `<div class="step ${cls} step-plain">${head}</div>`;
+  }
+  return (
+    `<details class="step ${cls}">` +
+    `<summary class="step-head">${head}</summary>` +
+    parts.join("") +
+    `</details>`
   );
+}
+
+/** Lay a returned payload out so it can be read rather than decoded. */
+function prettyJson(raw: string): string {
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2);
+  } catch {
+    return raw;
+  }
 }
 
 export function renderChat() {
