@@ -30,6 +30,11 @@ log = "0.4"
 base64 = "0.22"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 
+# Turning the webview's own autofill off needs its settings interface.
+[target.'cfg(target_os = "windows")'.dependencies]
+webview2-com = "0.38"
+windows = { version = "0.61", features = ["Win32_Foundation"] }
+
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-single-instance = "2"
 

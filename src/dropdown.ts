@@ -91,17 +91,19 @@ export function dressCombo(input: HTMLInputElement, options: readonly string[]) 
   caret.textContent = "▾";
   wrap.appendChild(caret);
 
-  let comboOpen = false;
-  caret.addEventListener("pointerdown", () => {
-    comboOpen = isContextMenuOpen();
-  });
-  caret.addEventListener("click", () => {
-    if (comboOpen) {
-      comboOpen = false;
+  /** The list, narrowed to what has been typed so far. */
+  function show() {
+    const typed = input.value.trim().toLowerCase();
+    const matches = typed
+      ? options.filter((option) => option.toLowerCase().includes(typed))
+      : options;
+    // Nothing matches a site that is not on the list, and that is allowed:
+    // the field keeps whatever was typed and the menu simply stays away.
+    if (matches.length === 0) {
       closeContextMenu();
       return;
     }
-    const entries: MenuEntry[] = options.map((option) => ({
+    const entries: MenuEntry[] = matches.map((option) => ({
       label: `${option === input.value ? "✓ " : ""}${option}`,
       onSelect: () => {
         input.value = option;
@@ -111,6 +113,32 @@ export function dressCombo(input: HTMLInputElement, options: readonly string[]) 
     }));
     const box = wrap.getBoundingClientRect();
     openContextMenu(box.left, box.bottom + 4, entries);
+  }
+
+  // Clicking the field offers the list at once; typing narrows it as a search.
+  input.addEventListener("click", show);
+  input.addEventListener("input", () => {
+    if (document.activeElement === input) show();
+  });
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeContextMenu();
+  });
+
+  let caretOpen = false;
+  caret.addEventListener("pointerdown", () => {
+    caretOpen = isContextMenuOpen();
+  });
+  caret.addEventListener("click", () => {
+    if (caretOpen) {
+      caretOpen = false;
+      closeContextMenu();
+      return;
+    }
+    // The caret always offers everything, whatever the field says.
+    const value = input.value;
+    input.value = "";
+    show();
+    input.value = value;
   });
 }
 

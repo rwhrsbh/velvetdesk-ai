@@ -4549,6 +4549,8 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "uuid",
+ "webview2-com",
+ "windows",
 ]
 
 [[package]]

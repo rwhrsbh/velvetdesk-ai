@@ -62,6 +62,30 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            // The webview offers to remember and refill every text field, and
+            // draws that offer as an oversized panel over the form — the HTML
+            // `autocomplete` attribute does not always talk it out of it. None
+            // of these fields is a login or an address, so the whole feature is
+            // switched off at the source.
+            #[cfg(target_os = "windows")]
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.with_webview(|webview| unsafe {
+                    use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Settings4;
+                    use windows::core::Interface;
+
+                    let Ok(core) = webview.controller().CoreWebView2() else {
+                        return;
+                    };
+                    let Ok(settings) = core.Settings() else {
+                        return;
+                    };
+                    if let Ok(settings) = settings.cast::<ICoreWebView2Settings4>() {
+                        let _ = settings.SetIsGeneralAutofillEnabled(false);
+                        let _ = settings.SetIsPasswordAutosaveEnabled(false);
+                    }
+                });
+            }
+
             // A separate data directory can be requested with VELVETDESK_DATA_DIR:
             // it keeps a development or test run from touching the operator's
             // real profiles, which live in the platform app-data directory.
