@@ -20,6 +20,11 @@ export type MenuEntry = MenuAction | "separator";
 
 let open: HTMLElement | null = null;
 
+/** Whether a menu is on screen — a toggle needs to know. */
+export function isContextMenuOpen(): boolean {
+  return open !== null;
+}
+
 export function closeContextMenu() {
   open?.remove();
   open = null;

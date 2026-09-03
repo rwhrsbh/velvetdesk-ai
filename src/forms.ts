@@ -1,11 +1,41 @@
 import { api, errorText } from "./api";
 import type { ModalDeps } from "./deps";
 import { closeModal, confirmDialog, escapeHtml, formatDate, openModal, toast } from "./dom";
+import { dressCombo, dressSelectsIn } from "./dropdown";
 import { t } from "./i18n";
 import { store } from "./store";
-import type { Fact, Man, Note, Profile } from "./types";
+import type { Channel, ChatMessage, Fact, Man, MsgRole, Note, Profile } from "./types";
 
 const AVATAR_SIZE = 256;
+
+/**
+ * The dating sites an operator is likely to be working on.
+ *
+ * A suggestion list, not a closed set: the field takes anything, and a site
+ * that is not here is typed in as it is written on the site itself.
+ */
+const SITES = [
+  "RomanceCompass",
+  "Jump 4 Love",
+  "Charmdate",
+  "Natashaclub",
+  "Ladadate",
+  "Bridge Of Love",
+  "Svadba",
+  "Goldenbride",
+  "Generationlove",
+  "Dream Singles",
+  "Findbride",
+  "UDate",
+  "Brides4Love",
+  "LoveInChat",
+  "Charmlive",
+  "Love-Temptation",
+  "Victoriyaclub",
+  "Bride Forever",
+  "Waytobride",
+  "Hanuma",
+] as const;
 
 /** Both sources stay available: a blocked URL falls back to a local file. */
 function avatarField(current: string): string {
@@ -152,12 +182,7 @@ export async function openProfileForm(deps: ModalDeps, existing?: Profile | null
       <div class="field"><label>${t("profile.age")}</label>
         <input class="field-input" id="fAge" type="number" min="18" max="99" value="${p?.age ?? ""}" placeholder="42" /></div>
       <div class="field"><label>${t("profile.site")}</label>
-        <input class="field-input" id="fSite" list="sitePresets" value="${escapeHtml(p?.site ?? "")}" placeholder="RomanceCompass" />
-        <datalist id="sitePresets">
-          <option value="RomanceCompass"></option><option value="VictoriaBrides"></option>
-          <option value="Dating.com"></option><option value="AnastasiaDate"></option>
-          <option value="SofiaDate"></option><option value="JollyRomance"></option>
-        </datalist>
+        <input class="field-input" id="fSite" value="${escapeHtml(p?.site ?? "")}" placeholder="RomanceCompass" />
       </div>
       <div class="field"><label>${t("profile.siteId")}</label>
         <input class="field-input" id="fId" value="${escapeHtml(p?.id ?? "")}" placeholder="${t("profile.idHint")}" ${
@@ -209,6 +234,7 @@ export async function openProfileForm(deps: ModalDeps, existing?: Profile | null
     </div>`);
 
   bindAvatarField(card);
+  dressCombo(card.querySelector<HTMLInputElement>("#fSite")!, SITES);
   card.querySelector<HTMLInputElement>("#fName")?.focus();
   card.querySelector<HTMLButtonElement>('[data-act="close"]')?.addEventListener("click", closeModal);
 
@@ -353,6 +379,115 @@ function editedNotes(text: string | undefined, man: Man): Note[] {
   });
 }
 
+/**
+ * The correspondence, editable message by message.
+ *
+ * This record is what every prompt is built from, so a message pasted under the
+ * wrong role, a line that belongs to another man, or a typo his letter never
+ * had all steer the model until someone fixes them. Each message keeps its own
+ * row: who wrote it, over which channel, and the text; rows can be added and
+ * removed, and what is left is written back in the order shown.
+ */
+export async function openChatEditor(deps: ModalDeps, man: Man) {
+  let messages: ChatMessage[] = [];
+  try {
+    messages = (await api.getChat(man.model_id, man.id)).messages;
+  } catch (error) {
+    toast(errorText(error), "error");
+    return;
+  }
+
+  const card = openModal(`
+    <h3>${t("chat.editTitle", { name: escapeHtml(man.name) })}</h3>
+    <div class="modal-sub">${t("chat.editSub")}</div>
+    <div class="msg-rows" id="msgRows"></div>
+    <button class="btn btn-secondary" id="btnAddMessage" type="button">${t("chat.addMessage")}</button>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" data-act="close">${t("common.cancel")}</button>
+      <button class="btn btn-primary" id="btnSaveChat">${t("common.save")}</button>
+    </div>`);
+
+  const rows = card.querySelector<HTMLElement>("#msgRows")!;
+
+  const draw = () => {
+    rows.innerHTML = messages
+      .map(
+        (message, index) => `
+        <div class="msg-row" data-index="${index}">
+          <div class="msg-row-head">
+            <select class="field-input compact" data-field="role">
+              <option value="incoming"${message.role === "incoming" ? " selected" : ""}>${t("chat.roleIncoming")}</option>
+              <option value="outgoing"${message.role === "outgoing" ? " selected" : ""}>${t("chat.roleOutgoing")}</option>
+              <option value="note"${message.role === "note" ? " selected" : ""}>${t("chat.roleNote")}</option>
+            </select>
+            <select class="field-input compact" data-field="channel">
+              <option value="chat"${message.channel === "chat" ? " selected" : ""}>${t("composer.chat")}</option>
+              <option value="letter"${message.channel === "letter" ? " selected" : ""}>${t("composer.letter")}</option>
+              <option value="note"${message.channel === "note" ? " selected" : ""}>${t("chat.roleNote")}</option>
+            </select>
+            <span class="msg-row-date">${formatDate(message.ts)}</span>
+            <button class="btn btn-icon" data-act="drop" title="${t("common.delete")}">×</button>
+          </div>
+          <textarea class="field-area" data-field="text">${escapeHtml(message.text)}</textarea>
+        </div>`,
+      )
+      .join("");
+    // The rows appear after the dialog did, so their dropdowns are dressed here.
+    dressSelectsIn(rows);
+  };
+
+  /** Read the rows back before anything that redraws them. */
+  const collect = () => {
+    messages = Array.from(rows.querySelectorAll<HTMLElement>(".msg-row")).map((row) => {
+      const index = Number(row.dataset.index);
+      const previous = messages[index];
+      return {
+        ...previous,
+        role: row.querySelector<HTMLSelectElement>('[data-field="role"]')!.value as MsgRole,
+        channel: row.querySelector<HTMLSelectElement>('[data-field="channel"]')!.value as Channel,
+        text: row.querySelector<HTMLTextAreaElement>('[data-field="text"]')!.value,
+      };
+    });
+  };
+
+  draw();
+
+  rows.addEventListener("click", (event) => {
+    const drop = (event.target as HTMLElement).closest<HTMLElement>('[data-act="drop"]');
+    if (!drop) return;
+    const index = Number(drop.closest<HTMLElement>(".msg-row")?.dataset.index);
+    collect();
+    messages.splice(index, 1);
+    draw();
+  });
+
+  card.querySelector<HTMLButtonElement>("#btnAddMessage")?.addEventListener("click", () => {
+    collect();
+    messages.push({
+      id: crypto.randomUUID(),
+      role: "incoming",
+      channel: "chat",
+      text: "",
+      ts: new Date().toISOString(),
+    });
+    draw();
+  });
+
+  card.querySelector<HTMLButtonElement>("#btnSaveChat")?.addEventListener("click", async () => {
+    collect();
+    // An empty row is a row the operator meant to throw away.
+    const kept = messages.filter((message) => message.text.trim());
+    try {
+      await api.saveChat(man.model_id, man.id, kept);
+      toast(t("toast.chatSaved"), "success");
+      closeModal();
+      await deps.refresh();
+    } catch (error) {
+      toast(errorText(error), "error");
+    }
+  });
+}
+
 export async function openManForm(deps: ModalDeps, existing?: Man | null) {
   const m = existing ?? null;
   if (!m && !store.activeModelId) {
@@ -453,7 +588,9 @@ export async function openManForm(deps: ModalDeps, existing?: Man | null) {
                    : t("common.empty")
                }</div></div>
              <div class="field"><label>${t("man.chat")}</label>
-               <div class="code-block">${transcript ? escapeHtml(transcript) : t("common.empty")}</div></div>`
+               <div class="code-block">${transcript ? escapeHtml(transcript) : t("common.empty")}</div>
+               <button class="btn btn-secondary" id="btnEditChat" type="button">${t("man.editChat")}</button>
+             </div>`
           : ""
       }
     </details>
@@ -519,6 +656,10 @@ export async function openManForm(deps: ModalDeps, existing?: Man | null) {
     } catch (error) {
       toast(errorText(error), "error");
     }
+  });
+
+  card.querySelector<HTMLButtonElement>("#btnEditChat")?.addEventListener("click", () => {
+    if (m) void openChatEditor(deps, m);
   });
 
   card.querySelector<HTMLButtonElement>("#btnDeleteMan")?.addEventListener("click", async () => {

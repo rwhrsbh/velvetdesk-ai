@@ -9,6 +9,7 @@ import {
   selectionWithin,
   type MenuEntry,
 } from "./context-menu";
+import { dressSelect, syncDressedSelects } from "./dropdown";
 import { openManForm, openProfileForm } from "./forms";
 import { openDoctorModal, openPendingModal } from "./modals";
 import { loadModel, SilentClipError, transcribeLocally } from "./local-whisper";
@@ -1020,6 +1021,7 @@ function retranslateEntries() {
 function applyLanguage(next: Lang, persist = false) {
   setLang(next);
   applyStatic();
+  syncDressedSelects();
   retranslateEntries();
   $("langLabel").textContent = next.toUpperCase();
   if (store.settings) renderAll();
@@ -1780,6 +1782,12 @@ function bindComposer() {
 
   const micMenu = $("btnMicMenu");
   micMenu.addEventListener("click", () => void openMicrophoneMenu(micMenu));
+
+  // The row of controls under the composer opens the app's own menus rather
+  // than the platform's popup.
+  for (const id of ["speechLang", "thinkingSelect", "channelSelect"]) {
+    dressSelect($(id) as HTMLSelectElement);
+  }
 
   const speech = $("speechLang") as HTMLSelectElement;
   speech.addEventListener("change", () => {

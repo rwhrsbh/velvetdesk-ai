@@ -1,3 +1,4 @@
+import { dressSelectsIn } from "./dropdown";
 import { lang, t } from "./i18n";
 export function $<T extends HTMLElement = HTMLElement>(id: string): T {
   const el = document.getElementById(id);
@@ -58,6 +59,17 @@ export function openModal(html: string, onClose?: () => void) {
   const overlay = $("modalOverlay");
   const card = $("modalCard");
   card.innerHTML = html;
+
+  // The webview offers to remember and refill these fields, and draws that
+  // offer as an oversized panel over the form. Nothing here is a login or an
+  // address, so the offer is refused outright.
+  for (const field of card.querySelectorAll<HTMLElement>("input, textarea")) {
+    field.setAttribute("autocomplete", "off");
+    field.setAttribute("autocorrect", "off");
+    field.setAttribute("data-lpignore", "true");
+  }
+  // Its dropdowns are drawn outside the page too, so they are ours as well.
+  dressSelectsIn(card);
   overlay.classList.add("open");
   closeHandler = onClose ?? null;
   return card;

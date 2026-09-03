@@ -257,6 +257,28 @@ pub fn clear_agent_log(
     scope.write_agent_log(&AgentLog::new(model_id, man_id))
 }
 
+/// Replace a man's correspondence with what the operator edited.
+///
+/// The record is theirs to correct: a message pasted with the wrong role, a
+/// typo his letter never had, a line that belongs to another man. Messages keep
+/// the ids they came with, new ones are given their own, and the window that
+/// still reaches the model is clamped to what is left.
+#[tauri::command]
+pub fn save_chat(
+    state: State<'_, AppState>,
+    model_id: String,
+    man_id: String,
+    messages: Vec<ChatMessage>,
+) -> Result<ChatThread> {
+    let scope = state.paths.scope(&model_id)?;
+    let mut thread = scope.read_chat(&man_id)?;
+    thread.messages = messages;
+    thread.context_from = thread.context_from.min(thread.messages.len());
+    thread.updated_at = chrono::Utc::now();
+    scope.write_chat(&thread)?;
+    Ok(thread)
+}
+
 /// Drop the picked entries from a conversation.
 ///
 /// The operator's own chat with the agent: what is removed here stops being

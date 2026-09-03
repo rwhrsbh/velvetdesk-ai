@@ -1309,6 +1309,105 @@ select.compact {
   color: var(--danger);
 }
 
+.combo {
+  position: relative;
+  display: block;
+}
+
+.combo-caret {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: none;
+  color: var(--text-faint);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px;
+}
+
+.combo-caret:hover {
+  color: var(--text);
+}
+
+.combo .field-input {
+  padding-right: 24px;
+}
+
+/* A dressed select keeps its value and loses its popup. */
+select.dressed {
+  display: none;
+}
+
+.select-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.select-caret {
+  color: var(--text-faint);
+  font-size: 10px;
+  line-height: 1;
+}
+
+/* Attaching a picture is a normal action, not a warning: white, and big
+   enough to aim at. */
+.btn-attach {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text);
+}
+
+.btn-attach:hover {
+  color: var(--accent);
+}
+
+/* One row per message while the correspondence is being corrected. */
+.msg-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 45vh;
+  overflow-y: auto;
+  margin: 8px 0;
+  padding-right: 4px;
+}
+
+.msg-row {
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 6px 8px;
+  background: var(--sunken);
+}
+
+.msg-row-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.msg-row-date {
+  flex: 1 1 auto;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.msg-row .field-area {
+  min-height: 54px;
+}
+
 .btn-wide {
   width: 100%;
   justify-content: center;

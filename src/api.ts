@@ -160,6 +160,8 @@ export const api = {
   deleteAgentEntries: (model_id: string, man_id: string | null, ids: string[]) =>
     invoke<AgentLog>("delete_agent_entries", { modelId: model_id, manId: man_id, ids }),
   deleteMasterEntries: (ids: string[]) => invoke<AgentLog>("delete_master_entries", { ids }),
+  saveChat: (model_id: string, man_id: string, messages: unknown[]) =>
+    invoke<ChatThread>("save_chat", { modelId: model_id, manId: man_id, messages }),
   deleteChatMessages: (model_id: string, man_id: string, ids: string[]) =>
     invoke<ChatThread>("delete_chat_messages", { modelId: model_id, manId: man_id, ids }),
 
