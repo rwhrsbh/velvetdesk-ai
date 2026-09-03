@@ -304,7 +304,6 @@ select.field-input {
   transition: border-color 0.12s;
 }
 
-.field-input:focus,
 /* Memory fields hold many lines and are read as much as they are written. */
 .field-area.tall {
   min-height: 120px;
@@ -313,6 +312,7 @@ select.field-input {
   line-height: 1.6;
 }
 
+.field-input:focus,
 .field-area:focus,
 .search-input:focus {
   border-color: var(--accent);
@@ -1973,6 +1973,26 @@ details.advanced[open] {
   border: 0.5px solid var(--line);
   border-radius: var(--r-md);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+/* Slimmer than the page's own bars: the menu is a small surface. */
+.ctx-menu::-webkit-scrollbar {
+  width: 8px;
+}
+
+.ctx-menu::-webkit-scrollbar-thumb {
+  background: #333a48;
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.ctx-menu::-webkit-scrollbar-thumb:hover {
+  background: #45506a;
+  background-clip: content-box;
 }
 
 .ctx-item {

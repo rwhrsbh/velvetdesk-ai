@@ -91,9 +91,9 @@ export function dressCombo(input: HTMLInputElement, options: readonly string[]) 
   caret.textContent = "▾";
   wrap.appendChild(caret);
 
-  /** The list, narrowed to what has been typed so far. */
-  function show() {
-    const typed = input.value.trim().toLowerCase();
+  /** The list, narrowed by what is being searched for. */
+  function show(search: string) {
+    const typed = search.trim().toLowerCase();
     const matches = typed
       ? options.filter((option) => option.toLowerCase().includes(typed))
       : options;
@@ -115,10 +115,11 @@ export function dressCombo(input: HTMLInputElement, options: readonly string[]) 
     openContextMenu(box.left, box.bottom + 4, entries);
   }
 
-  // Clicking the field offers the list at once; typing narrows it as a search.
-  input.addEventListener("click", show);
+  // Clicking the field offers everything at once; typing turns it into a search
+  // over the list, so a site already in the field does not hide the rest.
+  input.addEventListener("click", () => show(""));
   input.addEventListener("input", () => {
-    if (document.activeElement === input) show();
+    if (document.activeElement === input) show(input.value);
   });
   input.addEventListener("keydown", (event) => {
     if (event.key === "Escape") closeContextMenu();
@@ -134,11 +135,7 @@ export function dressCombo(input: HTMLInputElement, options: readonly string[]) 
       closeContextMenu();
       return;
     }
-    // The caret always offers everything, whatever the field says.
-    const value = input.value;
-    input.value = "";
-    show();
-    input.value = value;
+    show("");
   });
 }
 

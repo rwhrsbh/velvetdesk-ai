@@ -81,10 +81,23 @@ export function openContextMenu(x: number, y: number, entries: MenuEntry[]) {
   menu.style.visibility = "hidden";
   document.body.appendChild(menu);
   const { width, height } = menu.getBoundingClientRect();
+
   const left = Math.min(x, window.innerWidth - width - 8);
-  const top = Math.min(y, window.innerHeight - height - 8);
   menu.style.left = `${Math.max(8, left)}px`;
-  menu.style.top = `${Math.max(8, top)}px`;
+
+  // A list longer than the room under it used to be pushed up until it sat on
+  // top of the control that opened it. It stays where it was asked to open and
+  // scrolls instead, unless there is genuinely more room above.
+  const below = window.innerHeight - y - 8;
+  const above = y - 8;
+  if (height <= below || below >= above) {
+    menu.style.top = `${Math.max(8, y)}px`;
+    menu.style.maxHeight = `${Math.max(120, below)}px`;
+  } else {
+    menu.style.top = `${Math.max(8, y - Math.min(height, above))}px`;
+    menu.style.maxHeight = `${Math.max(120, above)}px`;
+  }
+
   menu.style.visibility = "visible";
   open = menu;
 }
@@ -170,4 +183,13 @@ document.addEventListener("keydown", (event) => {
 });
 window.addEventListener("blur", closeContextMenu);
 window.addEventListener("resize", closeContextMenu);
-document.addEventListener("scroll", closeContextMenu, true);
+// Anything scrolling under the menu moves it out from under the pointer, so it
+// closes — except the menu's own list, which is there to be scrolled.
+document.addEventListener(
+  "scroll",
+  (event) => {
+    if (open && open.contains(event.target as Node)) return;
+    closeContextMenu();
+  },
+  true,
+);
