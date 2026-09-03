@@ -75,8 +75,18 @@ export function closeModal() {
 
 export function bindModalDismiss() {
   const overlay = $("modalOverlay");
+
+  // Selecting text in a dialog often ends with the mouse outside it, and a
+  // click event fires on the nearest common ancestor — the backdrop — which
+  // used to throw the dialog away mid-selection. A dismissal has to both start
+  // and end on the backdrop.
+  let pressedBackdrop = false;
+  overlay.addEventListener("pointerdown", (event) => {
+    pressedBackdrop = event.target === overlay;
+  });
   overlay.addEventListener("click", (event) => {
-    if (event.target === overlay) closeModal();
+    if (event.target === overlay && pressedBackdrop) closeModal();
+    pressedBackdrop = false;
   });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && overlay.classList.contains("open")) closeModal();

@@ -654,7 +654,7 @@ function bindPanels() {
 
     if (btn.dataset.act === "raw") {
       const meta = (entry.meta ?? {}) as { raw?: string };
-      openModal(
+      const card = openModal(
         `<h3>${t("chat.rawTitle")}</h3>` +
           `<div class="modal-sub">${t("chat.rawSub")}</div>` +
           `<div class="code-block raw-payload">${escapeHtml(meta.raw ?? "")}</div>` +
@@ -662,9 +662,8 @@ function bindPanels() {
           `<button class="btn btn-secondary" data-act="copy-raw">${t("ctx.copy")}</button>` +
           `<button class="btn btn-primary" data-act="close">${t("common.close")}</button></div>`,
       );
-      const card = document.querySelector<HTMLElement>(".modal-card");
-      card?.querySelector('[data-act="close"]')?.addEventListener("click", closeModal);
-      card?.querySelector('[data-act="copy-raw"]')?.addEventListener("click", () => {
+      card.querySelector('[data-act="close"]')?.addEventListener("click", closeModal);
+      card.querySelector('[data-act="copy-raw"]')?.addEventListener("click", () => {
         void copyText(meta.raw ?? "");
         toast(t("chat.copied"), "success");
       });
