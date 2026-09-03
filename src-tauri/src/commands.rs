@@ -350,6 +350,30 @@ pub fn clear_context(
     agent::context_stats(&scope, &settings, &provider, Some(&man_id))
 }
 
+/// Fold the open chat into a summary that stands in for it.
+#[tauri::command]
+pub async fn compact_chat(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    model_id: String,
+    man_id: Option<String>,
+) -> Result<AgentLog> {
+    let settings = state.settings_view();
+    let provider = state.active_provider()?;
+    let pool = state.pool(&provider.id);
+    let emit = emitter(&app);
+
+    let deps = AgentDeps {
+        paths: &state.paths,
+        settings: &settings,
+        provider: &provider,
+        pool,
+        llm: &state.llm,
+        emit: &emit,
+    };
+    agent::compact_chat(&deps, &model_id, man_id.as_deref()).await
+}
+
 /// Summarise the older messages and keep only the tail verbatim.
 #[tauri::command]
 pub async fn compact_context(

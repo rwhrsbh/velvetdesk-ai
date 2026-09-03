@@ -223,6 +223,9 @@ pub async fn call_streaming(
     let mut usage = Usage::default();
     let mut finish_reason = String::new();
     let mut buffer = String::new();
+    // The events as they arrived, so an empty or surprising answer can be read
+    // rather than guessed at.
+    let mut seen = String::new();
     let mut stream = response.bytes_stream();
 
     while let Some(chunk) = stream.next().await {
@@ -230,6 +233,10 @@ pub async fn call_streaming(
         buffer.push_str(&String::from_utf8_lossy(&chunk));
 
         for value in take_events(&mut buffer) {
+            if seen.len() < super::RAW_LIMIT {
+                seen.push_str(&value.to_string());
+                seen.push('\n');
+            }
             if let Some(reason) = value["candidates"][0]["finishReason"].as_str() {
                 finish_reason = reason.to_string();
             }
@@ -272,6 +279,7 @@ pub async fn call_streaming(
 
     Ok(ChatResponse {
         text: text.trim().to_string(),
+        raw: super::cap_raw(&seen),
         // The caller fills this in: it knows which model of the chain this was.
         model: String::new(),
         thoughts: thoughts.trim().to_string(),
@@ -719,7 +727,8 @@ fn parse_response(value: &Value) -> Result<ChatResponse, CallError> {
 
     Ok(ChatResponse {
         text: text.trim().to_string(),
-        // The caller fills this in: it knows which model of the chain this was.
+        // Filled in by the caller, which has the payload and the model name.
+        raw: String::new(),
         model: String::new(),
         thoughts: thoughts.trim().to_string(),
         tool_calls,

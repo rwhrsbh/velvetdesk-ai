@@ -724,6 +724,18 @@ input[type="range"] {
   color: var(--ok);
 }
 
+.raw-payload {
+  max-height: 340px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.raw-payload {
+  max-height: 340px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 /* Who a letter is for. */
 .letter-to {
   font-size: 11px;

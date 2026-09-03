@@ -200,6 +200,8 @@ export function renderChat() {
         thinkingSince?: number;
         /** which model answered, when a fallback took over */
         model?: string;
+        /** the provider's answer as it arrived */
+        raw?: string;
         /** letters carry their recipient */
         letter?: boolean;
         recipient?: string;
@@ -218,6 +220,12 @@ export function renderChat() {
           ? `<div class="msg-actions">
                <button data-act="copy" data-entry="${escapeHtml(entry.id)}">${t("chat.copy")}</button>
                <button data-act="send-as-outgoing" data-entry="${escapeHtml(entry.id)}">${t("chat.asOutgoing")}</button>
+               ${
+                 meta.raw
+                   ? `<button data-act="raw" data-entry="${escapeHtml(entry.id)}">${t("chat.raw")}</button>`
+                   : ""
+               }
+
              </div>`
           : "";
 

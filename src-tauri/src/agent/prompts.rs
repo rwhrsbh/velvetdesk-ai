@@ -259,6 +259,19 @@ pub fn context_block(thread: Option<&ChatThread>, limit: usize) -> String {
     block
 }
 
+/// Asks for the summary that replaces a whole operator/copilot conversation.
+pub const CHAT_COMPACTOR: &str = "\
+You compress a working conversation between an operator and their copilot so it
+can continue with a fraction of the tokens. The summary replaces everything that
+was said, so anything left out is lost.
+
+Keep: what the operator asked for and decided, what was actually done and to
+whom, facts and names that came up, what is still open or waiting. Keep the
+operator's own wording for names, ids and numbers.
+
+Drop: greetings, retries, tool chatter, anything already stored in a dossier.
+Write it as short lines, no preface, no headings.";
+
 /// Asks for the summary that replaces the messages dropped by compaction.
 pub const COMPACTOR: &str = "\
 You compress a dating-agency correspondence so the copilot can keep working

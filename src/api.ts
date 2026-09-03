@@ -135,6 +135,8 @@ export const api = {
     invoke<ContextStats>("context_stats", { modelId, manId }),
   clearContext: (modelId: string, manId: string) =>
     invoke<ContextStats>("clear_context", { modelId, manId }),
+  compactChat: (modelId: string, manId: string | null) =>
+    invoke<AgentLog>("compact_chat", { modelId, manId }),
   compactContext: (modelId: string, manId: string, keepLast?: number) =>
     invoke<ContextStats>("compact_context", { modelId, manId, keepLast }),
 

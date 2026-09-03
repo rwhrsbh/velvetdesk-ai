@@ -1,7 +1,7 @@
 import { applyStatic, lang, setLang, t, type Lang } from "./i18n";
 import { api, errorText, onAgentEvent } from "./api";
 import type { ModalDeps } from "./deps";
-import { $, bindModalDismiss, confirmDialog, toast } from "./dom";
+import { $, bindModalDismiss, closeModal, confirmDialog, escapeHtml, openModal, toast } from "./dom";
 import {
   copyText,
   editingEntries,
@@ -241,6 +241,7 @@ async function sendMessage() {
         model: output.model,
         key_index: output.key_index,
         turns: output.turns,
+        raw: output.raw,
         thoughts,
       }),
     );
@@ -651,6 +652,25 @@ function bindPanels() {
       toast(t("chat.copied"), "success");
     }
 
+    if (btn.dataset.act === "raw") {
+      const meta = (entry.meta ?? {}) as { raw?: string };
+      openModal(
+        `<h3>${t("chat.rawTitle")}</h3>` +
+          `<div class="modal-sub">${t("chat.rawSub")}</div>` +
+          `<div class="code-block raw-payload">${escapeHtml(meta.raw ?? "")}</div>` +
+          `<div class="modal-actions">` +
+          `<button class="btn btn-secondary" data-act="copy-raw">${t("ctx.copy")}</button>` +
+          `<button class="btn btn-primary" data-act="close">${t("common.close")}</button></div>`,
+      );
+      const card = document.querySelector<HTMLElement>(".modal-card");
+      card?.querySelector('[data-act="close"]')?.addEventListener("click", closeModal);
+      card?.querySelector('[data-act="copy-raw"]')?.addEventListener("click", () => {
+        void copyText(meta.raw ?? "");
+        toast(t("chat.copied"), "success");
+      });
+      return;
+    }
+
     if (btn.dataset.act === "send-as-outgoing") {
       // A letter carries its own recipient; a chat reply belongs to whoever is
       // open.
@@ -1026,22 +1046,18 @@ async function runSlashCommand(raw: string): Promise<boolean> {
       renderScope();
       pushEntry(makeEntry("system", t("cmd.compacting"), { key: "cmd.compacting" }, true));
       renderChat();
+      // The chat is what grows: the model is handed everything said so far and
+      // the summary it writes replaces it, here and in the log.
+      const before = store.entries.filter((e) => !e.transient).length;
+      const log = await api.compactChat(store.activeModelId, store.activeManId);
+      store.entries = log.entries.map((entry) => ({ ...entry }));
+      renderChat();
+      toast(t("cmd.compacted", { before, after: store.entries.length }), "success");
+
+      // With a dossier open the correspondence has its own context, folded the
+      // same way.
       if (store.activeManId) {
-        const stats = await api.compactContext(store.activeModelId, store.activeManId);
-        store.entries = store.entries.filter((e) => !e.transient);
-        pushEntry(
-          makeEntry(
-            "system",
-            t("cmd.compacted", { live: stats.live_messages, total: stats.total_messages }),
-          ),
-        );
-      } else {
-        // No dossier open: fold the copilot chat itself into one summary.
-        const summary = await summariseChat();
-        store.entries = store.entries.filter((e) => !e.transient);
-        if (!store.temporary) await api.clearAgentLog(store.activeModelId, store.activeManId);
-        store.entries = [];
-        pushEntry(makeEntry("system", summary));
+        await api.compactContext(store.activeModelId, store.activeManId);
       }
     }
   } catch (error) {
@@ -1054,29 +1070,6 @@ async function runSlashCommand(raw: string): Promise<boolean> {
   renderChat();
   void refreshContextGauge();
   return true;
-}
-
-/**
- * Fold the visible copilot chat into a few lines. Used by /compact when no
- * dossier is open — there the chat itself is what has grown long.
- */
-async function summariseChat(): Promise<string> {
-  const transcript = store.entries
-    .filter((e) => !e.transient && e.text.trim())
-    .map((e) => `${e.sender.toUpperCase()}: ${e.text}`)
-    .join("\n");
-  if (!transcript) return t("cmd.nothingToCompact");
-
-  const output = await api.runAgent({
-    model_id: store.activeModelId!,
-    man_id: null,
-    mode: "act",
-    security: store.security,
-    message: `${t("cmd.summariseInstruction")}\n\n${transcript}`,
-    temporary: true,
-    thinking_effort: store.thinking || undefined,
-  });
-  return output.reply.trim() || t("cmd.nothingToCompact");
 }
 
 /**

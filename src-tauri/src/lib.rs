@@ -108,6 +108,7 @@ pub fn run() {
             commands::clear_master_log,
             commands::context_stats,
             commands::clear_context,
+            commands::compact_chat,
             commands::compact_context,
             commands::global_search,
             commands::rebuild_index,

@@ -59,6 +59,9 @@ pub struct RunStep {
 #[derive(Debug, Clone, Serialize)]
 pub struct RunOutput {
     pub reply: String,
+    /// The provider's last answer as it arrived, for the "raw answer" view.
+    #[serde(default)]
+    pub raw: String,
     /// Which model answered: the chosen one, or a fallback from the chain.
     #[serde(default)]
     pub model: String,
@@ -362,6 +365,69 @@ pub async fn compact_context(
     Ok(thread.context_summary.clone())
 }
 
+/// Fold a whole conversation into one summary.
+///
+/// The chat is what grows: every turn carries the ones before it. Compaction
+/// hands the model everything said so far, asks for the short version, and
+/// replaces the log with it — the messages themselves are gone from the prompt
+/// from then on, which is the point.
+pub async fn compact_chat(
+    deps: &AgentDeps<'_>,
+    model_id: &str,
+    man_id: Option<&str>,
+) -> Result<AgentLog> {
+    let scope = deps.paths.scope(model_id)?;
+    let log = scope.read_agent_log(man_id)?;
+
+    // Nothing to gain from summarising two lines.
+    if log.entries.len() < 4 {
+        return Err(AppError::message(
+            "error.nothingToCompact",
+            json!({ "n": log.entries.len() }),
+        ));
+    }
+
+    let transcript: String = log
+        .entries
+        .iter()
+        .filter(|entry| !entry.text.trim().is_empty())
+        .map(|entry| format!("{}: {}", entry.sender.to_uppercase(), entry.text))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let mut request = ChatRequest::new(format!(
+        "{}\n\nWrite the summary in {}.",
+        prompts::CHAT_COMPACTOR,
+        prompts::operator_language(&deps.settings.ui_language)
+    ));
+    request.temperature = 0.2;
+    request.stream = false;
+    request.messages.push(LlmMessage::user(transcript));
+
+    let response = deps
+        .llm
+        .chat(deps.provider, deps.pool.clone(), &request, deps.emit)
+        .await?;
+
+    let summary = response.text.trim().to_string();
+    if summary.is_empty() {
+        return Err(AppError::message("error.emptySummary", json!({})));
+    }
+
+    let mut entry = AgentEntry::new("system", summary);
+    entry.meta = json!({
+        "summary": true,
+        "replaced": log.entries.len(),
+        "usage": response.usage,
+        "model": response.model,
+    });
+
+    let mut compacted = AgentLog::new(model_id.to_string(), man_id.map(str::to_string));
+    compacted.entries.push(entry);
+    scope.write_agent_log(&compacted)?;
+    Ok(compacted)
+}
+
 /// One letter, ready for the operator to read and send.
 #[derive(Debug, Clone, Serialize)]
 pub struct Letter {
@@ -600,10 +666,22 @@ async fn run_auto(
     let mut thoughts = String::new();
     let mut reply_key = String::new();
     let mut model = String::new();
+    let mut raw = String::new();
     let mut turns = 0usize;
+    // What has already been fetched this run, so a model that asks for the
+    // same dossier three times gets the answer it already has instead of
+    // spending another turn — and another few thousand tokens — on it.
+    let mut fetched: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
 
-    for turn in 0..deps.settings.max_tool_turns.max(1) {
+    let max_turns = deps.settings.max_tool_turns.max(1);
+    for turn in 0..max_turns {
         turns = turn + 1;
+        // On the last turn the tools are taken away: the model has had its
+        // chance to look things up and now has to answer. Without this a run
+        // could end on a tool call and leave the operator with no reply at all.
+        if turn + 1 == max_turns {
+            request.tools.clear();
+        }
         let response = deps
             .llm
             .chat(deps.provider, deps.pool.clone(), &request, deps.emit)
@@ -614,6 +692,7 @@ async fn run_auto(
         usage.total_tokens += response.usage.total_tokens;
         key_index = response.key_index;
         model = response.model.clone();
+        raw = response.raw.clone();
         if !response.thoughts.is_empty() {
             if !thoughts.is_empty() {
                 thoughts.push_str("\n\n");
@@ -652,6 +731,35 @@ async fn run_auto(
         }
 
         for call in &response.tool_calls {
+            // A repeated read is answered from the cache. Writes are never
+            // cached: asking twice to store something is a real second write.
+            let signature = format!("{}:{}", call.name, call.args);
+            if tools::risk_of(&call.name) == tools::Risk::Read
+                && !workspace_tools::is_workspace_tool(&call.name)
+            {
+                if let Some(cached) = fetched.get(&signature) {
+                    let step = RunStep {
+                        kind: "tool_cached".into(),
+                        tool: Some(call.name.clone()),
+                        summary: format!("read: {} (already fetched)", call.name),
+                        key: "step.readCached".into(),
+                        params: json!({ "tool": call.name }),
+                        detail: json!({ "args": call.args }),
+                    };
+                    (deps.emit)(json!({ "kind": "step", "step": step }));
+                    steps.push(step);
+                    request.messages.push(LlmMessage::tool_result(
+                        call,
+                        json!({
+                            "note": "already fetched in this run; use the earlier result",
+                            "result": cached,
+                        })
+                        .to_string(),
+                    ));
+                    continue;
+                }
+            }
+
             // Files and shell commands live outside the profile sandbox and
             // are checked against the folders the operator has trusted.
             let outcome = if workspace_tools::is_workspace_tool(&call.name) {
@@ -709,9 +817,37 @@ async fn run_auto(
             };
             (deps.emit)(json!({ "kind": "step", "step": step }));
             steps.push(step);
+            if tools::risk_of(&call.name) == tools::Risk::Read
+                && !workspace_tools::is_workspace_tool(&call.name)
+            {
+                fetched.insert(signature, result_json.clone());
+            }
             request
                 .messages
                 .push(LlmMessage::tool_result(call, result_json.to_string()));
+        }
+    }
+
+    // The turns ran out while the model was still calling tools. One more
+    // call, with nothing left to reach for, turns what it gathered into the
+    // answer the operator asked for — the run used to end in silence here.
+    if reply.trim().is_empty() && !steps.is_empty() {
+        request.tools.clear();
+        request.messages.push(LlmMessage::user(
+            "Answer the operator now, in full, from what you have already              gathered. Do not call tools and do not narrate what you did.",
+        ));
+        if let Ok(response) = deps
+            .llm
+            .chat(deps.provider, deps.pool.clone(), &request, deps.emit)
+            .await
+        {
+            usage.prompt_tokens += response.usage.prompt_tokens;
+            usage.completion_tokens += response.usage.completion_tokens;
+            usage.total_tokens += response.usage.total_tokens;
+            turns += 1;
+            if !response.text.trim().is_empty() {
+                reply = response.text;
+            }
         }
     }
 
@@ -721,8 +857,8 @@ async fn run_auto(
     }
 
     finish(
-        scope, mode, security, input, reply, reply_key, model, thoughts, steps, pending, usage,
-        key_index, turns,
+        scope, mode, security, input, reply, reply_key, model, raw, thoughts, steps, pending,
+        usage, key_index, turns,
     )
 }
 
@@ -753,6 +889,7 @@ async fn run_single_turn(
             response.text,
             String::new(),
             response.model.clone(),
+            response.raw.clone(),
             response.thoughts,
             vec![],
             vec![],
@@ -803,6 +940,7 @@ async fn run_single_turn(
         reply,
         reply_key,
         response.model.clone(),
+        response.raw.clone(),
         response.thoughts,
         steps,
         pending,
@@ -821,6 +959,7 @@ fn finish(
     reply: String,
     reply_key: String,
     model: String,
+    raw: String,
     thoughts: String,
     steps: Vec<RunStep>,
     pending: Vec<PendingAction>,
@@ -841,6 +980,7 @@ fn finish(
             "usage": usage,
             "thoughts": thoughts,
             "model": model,
+            "raw": raw,
         });
         let _ = scope.append_agent_entry(man, entry);
     }
@@ -849,6 +989,7 @@ fn finish(
         reply,
         reply_key,
         model,
+        raw,
         thoughts,
         mode,
         security,

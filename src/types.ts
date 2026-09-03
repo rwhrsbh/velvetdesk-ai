@@ -147,6 +147,8 @@ export interface RunOutput {
   reply: string;
   /** Which model answered — the chosen one, or a fallback. */
   model?: string;
+  /** The provider's answer as it arrived, for the raw view. */
+  raw?: string;
   /** Set when the reply is the app's own words; the dictionary holds them. */
   reply_key?: string;
   /** The model's own summary of its reasoning, when it reports one. */

@@ -105,6 +105,7 @@ pub async fn call_streaming(
     // Fragments of tool calls, in the order the server numbered them.
     let mut partial: Vec<(String, String, String)> = vec![];
     let mut buffer = String::new();
+    let mut seen = String::new();
     let mut stream = response.bytes_stream();
 
     while let Some(chunk) = stream.next().await {
@@ -112,6 +113,10 @@ pub async fn call_streaming(
         buffer.push_str(&String::from_utf8_lossy(&chunk));
 
         for value in super::gemini::take_events(&mut buffer) {
+            if seen.len() < super::RAW_LIMIT {
+                seen.push_str(&value.to_string());
+                seen.push('\n');
+            }
             if let Some(err) = value.get("error") {
                 return Err(CallError::Parse(err.to_string()));
             }
@@ -160,6 +165,7 @@ pub async fn call_streaming(
 
     Ok(ChatResponse {
         text: text.trim().to_string(),
+        raw: super::cap_raw(&seen),
         // The caller fills this in: it knows which model of the chain this was.
         model: String::new(),
         thoughts: thoughts.trim().to_string(),
@@ -398,7 +404,8 @@ fn parse_response(value: &Value) -> Result<ChatResponse, CallError> {
 
     Ok(ChatResponse {
         text: text.trim().to_string(),
-        // The caller fills this in: it knows which model of the chain this was.
+        // Filled in by the caller, which has the payload and the model name.
+        raw: String::new(),
         model: String::new(),
         thoughts,
         tool_calls,

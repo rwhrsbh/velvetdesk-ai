@@ -154,6 +154,10 @@ pub struct Usage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatResponse {
     pub text: String,
+    /// The provider's answer exactly as it arrived, capped. Kept so an empty
+    /// or surprising reply can be read rather than guessed at.
+    #[serde(default)]
+    pub raw: String,
     /// Which model answered — the first of the chain, or a fallback.
     #[serde(default)]
     pub model: String,
@@ -211,6 +215,22 @@ impl CallError {
 #[derive(Clone)]
 pub struct LlmClient {
     pub http: reqwest::Client,
+}
+
+/// Payloads are kept for inspection, not for storage: enough to see what came
+/// back, not enough to bloat a chat log.
+pub const RAW_LIMIT: usize = 24_000;
+
+/// Cut a payload to something a person can open in a dialog.
+pub fn cap_raw(text: &str) -> String {
+    if text.len() <= RAW_LIMIT {
+        return text.to_string();
+    }
+    let mut cut = RAW_LIMIT;
+    while cut > 0 && !text.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    format!("{}\n… ({} more characters)", &text[..cut], text.len() - cut)
 }
 
 /// True when a failure looks like "this endpoint does not stream" rather than
