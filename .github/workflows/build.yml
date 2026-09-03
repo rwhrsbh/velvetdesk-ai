@@ -136,14 +136,29 @@ jobs:
 
       - name: Collect artifacts
         shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ needs.check.outputs.version }}
         run: |
           mkdir -p out
-          base="src-tauri/target/${{ matrix.target }}/release/bundle"
+          base="src-tauri/target/${TARGET}/release/bundle"
           find "$base" -maxdepth 3 -type f \
             \( -name "*.deb" -o -name "*.AppImage" -o -name "*.rpm" \
                -o -name "*.dmg" -o -name "*.app.tar.gz" \
                -o -name "*.msi" -o -name "*.exe" -o -name "*.sig" \) \
             -exec cp {} out/ \; || true
+
+          # macOS names its updater bundle after the app alone, so both Mac
+          # builds would arrive as the same file and one would bury the other —
+          # and the manifest could not tell an Apple Silicon build from an
+          # Intel one. The architecture goes into the name here.
+          arch="${TARGET%%-*}"
+          for file in out/*.app.tar.gz out/*.app.tar.gz.sig; do
+            [ -e "$file" ] || continue
+            suffix=""
+            case "$file" in *.sig) suffix=".sig" ;; esac
+            mv "$file" "out/VelvetDesk_${VERSION}_${arch}.app.tar.gz${suffix}"
+          done
           ls -la out
 
       - uses: actions/upload-artifact@v4

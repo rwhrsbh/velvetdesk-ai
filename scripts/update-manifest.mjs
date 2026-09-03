@@ -25,7 +25,11 @@ function platformOf(name) {
   if (name.endsWith(".msi") || name.endsWith(".exe")) return "windows-x86_64";
   if (name.endsWith(".AppImage")) return "linux-x86_64";
   if (name.endsWith(".app.tar.gz")) {
-    return name.includes("aarch64") ? "darwin-aarch64" : "darwin-x86_64";
+    // The collector stamps the architecture into the name; without one the
+    // bundle is ambiguous and belongs in no entry at all.
+    if (name.includes("aarch64")) return "darwin-aarch64";
+    if (name.includes("x86_64")) return "darwin-x86_64";
+    return null;
   }
   return null;
 }
