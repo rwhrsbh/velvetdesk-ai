@@ -260,6 +260,8 @@ function prettyJson(raw: string): string {
 
 export function renderChat() {
   const container = $("messages");
+  const keep = container.scrollTop;
+  const stick = container.scrollTop + container.clientHeight >= container.scrollHeight - 48;
   if (!store.activeModelId) {
     container.innerHTML = `<div class="msg system"><div class="bubble">${t("empty.needProfile")}</div></div>`;
     return;
@@ -351,7 +353,15 @@ export function renderChat() {
       );
     })
     .join("");
-  container.scrollTop = container.scrollHeight;
+
+  // Following the conversation means staying at the bottom; reading further up
+  // — or dragging a selection across old messages — means staying where you
+  // are, so a redraw does not yank the chat away.
+  if (stick) {
+    container.scrollTop = container.scrollHeight;
+  } else {
+    container.scrollTop = keep;
+  }
 }
 
 /** A row of thumbnails: what is attached, or what a message went out with. */

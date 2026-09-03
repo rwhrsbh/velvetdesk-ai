@@ -107,6 +107,8 @@ async function selectProfile(modelId: string, redraw = true) {
  */
 async function loadChat() {
   if (!store.activeModelId) return;
+  // Messages picked in one chat mean nothing in the next one.
+  cancelSelection();
   try {
     const log = await api.getAgentLog(store.activeModelId, store.activeManId);
     store.entries = log.entries.slice(-120);
@@ -1549,6 +1551,7 @@ async function toggleMasterChat() {
       console.error("master log", error);
     }
     restoreParked(currentTarget());
+    cancelSelection();
     if (store.entries.length === 0) pushEntry(systemNote("master.hello"));
   } else {
     await loadChat();
@@ -1835,50 +1838,127 @@ function liveEntry(): UiEntry {
 /**
  * Picking with the mouse, once picking has started.
  *
- * The first message is picked from its right-click menu; from then on the whole
- * row is the target — anywhere on its line, not just the bubble — and holding
- * the button while moving down the chat paints the same choice over every row
- * it crosses, the way a messenger does it. Text selection is off while this
- * lasts, so a drag picks messages instead of highlighting words.
+ * The first message is picked from its right-click menu; from then on the chat
+ * behaves like a list. Only the height of the pointer matters — a message is
+ * picked when the cursor passes its line, whether the pointer is over the
+ * bubble, in the empty column beside it, or in the gap between two rows — and
+ * holding the button while moving sweeps everything between where the drag
+ * began and where it is now, so a fast drag skips nothing. Dragging past the
+ * top or bottom edge scrolls the chat along. Letting go leaves the selection
+ * as it stands; going back over the same rows takes them out again.
  */
 function bindSelectionPainting() {
   const container = $("messages");
-  let painting: boolean | null = null;
 
-  const rowOf = (event: Event) =>
-    (event.target as HTMLElement).closest<HTMLElement>("[data-entry]");
+  /** Whether the drag is adding rows or taking them out. */
+  let adding = true;
+  /** Where the drag began, and what was picked before it started. */
+  let anchor = -1;
+  let before: string[] = [];
+  let pointerY = 0;
+  let frame = 0;
 
-  const apply = (id: string, picked: boolean) => {
-    const already = store.selected.includes(id);
-    if (already === picked) return;
-    store.selected = picked
-      ? [...store.selected, id]
-      : store.selected.filter((known) => known !== id);
+  // Only the message rows: the buttons inside a bubble carry the same
+  // attribute, and counting them as rows makes every index wrong.
+  const rows = () => Array.from(container.querySelectorAll<HTMLElement>(".msg[data-entry]"));
+
+  /** The row the pointer is level with — the nearest one when it is in a gap. */
+  function rowAt(y: number): number {
+    const list = rows();
+    if (list.length === 0) return -1;
+    let nearest = 0;
+    let distance = Infinity;
+    for (let index = 0; index < list.length; index += 1) {
+      const box = list[index].getBoundingClientRect();
+      if (y >= box.top && y <= box.bottom) return index;
+      const gap = y < box.top ? box.top - y : y - box.bottom;
+      if (gap < distance) {
+        distance = gap;
+        nearest = index;
+      }
+    }
+    return nearest;
+  }
+
+  /** Everything between the anchor and here, added to or taken out of before. */
+  function sweep(to: number) {
+    if (anchor < 0 || to < 0) return;
+    const list = rows();
+    const from = Math.min(anchor, to);
+    const till = Math.max(anchor, to);
+    const touched = list
+      .slice(from, till + 1)
+      .map((row) => row.dataset.entry ?? "")
+      .filter(Boolean);
+
+    const next = adding
+      ? [...before, ...touched.filter((id) => !before.includes(id))]
+      : before.filter((id) => !touched.includes(id));
+    if (next.length === store.selected.length && next.every((id, i) => id === store.selected[i])) {
+      return;
+    }
+    store.selected = next;
     renderChat();
     renderSelection();
-  };
+  }
+
+  /**
+   * Dragging into the last strip of the chat keeps it moving under the pointer.
+   *
+   * The strip is narrow and the speed follows how far into it the pointer has
+   * gone, so resting the cursor near the top row does not run the selection
+   * away to the first message; a real reach past the edge scrolls briskly.
+   */
+  function follow() {
+    if (anchor < 0) return;
+    const box = container.getBoundingClientRect();
+    const margin = 24;
+    let over = 0;
+    if (pointerY < box.top + margin) over = pointerY - (box.top + margin);
+    else if (pointerY > box.bottom - margin) over = pointerY - (box.bottom - margin);
+
+    if (over !== 0) {
+      const step = Math.sign(over) * Math.min(18, 1 + Math.abs(over) / 6);
+      const was = container.scrollTop;
+      container.scrollTop += step;
+      // At either end there is nothing left to reveal, so nothing to re-sweep.
+      if (container.scrollTop !== was) sweep(rowAt(pointerY));
+    }
+    frame = requestAnimationFrame(follow);
+  }
+
+  function stop() {
+    anchor = -1;
+    before = [];
+    if (frame) cancelAnimationFrame(frame);
+    frame = 0;
+  }
 
   container.addEventListener("pointerdown", (event) => {
     if (!store.selecting || event.button !== 0) return;
     // Buttons inside a message keep doing their own job.
     if ((event.target as HTMLElement).closest("button, a, summary")) return;
-    const row = rowOf(event);
-    if (!row?.dataset.entry) return;
+    const index = rowAt(event.clientY);
+    const id = rows()[index]?.dataset.entry;
+    if (!id) return;
+
     event.preventDefault();
-    painting = !store.selected.includes(row.dataset.entry);
-    apply(row.dataset.entry, painting);
+    adding = !store.selected.includes(id);
+    anchor = index;
+    before = [...store.selected];
+    pointerY = event.clientY;
+    sweep(index);
+    frame = requestAnimationFrame(follow);
   });
 
-  container.addEventListener("pointerover", (event) => {
-    if (!store.selecting || painting === null) return;
-    const row = rowOf(event);
-    if (row?.dataset.entry) apply(row.dataset.entry, painting);
+  window.addEventListener("pointermove", (event) => {
+    if (anchor < 0) return;
+    pointerY = event.clientY;
+    sweep(rowAt(pointerY));
   });
 
-  for (const type of ["pointerup", "pointercancel", "pointerleave"]) {
-    window.addEventListener(type, () => {
-      painting = null;
-    });
+  for (const type of ["pointerup", "pointercancel"]) {
+    window.addEventListener(type, stop);
   }
 }
 

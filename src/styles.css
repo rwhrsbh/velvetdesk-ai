@@ -305,6 +305,14 @@ select.field-input {
 }
 
 .field-input:focus,
+/* Memory fields hold many lines and are read as much as they are written. */
+.field-area.tall {
+  min-height: 120px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .field-area:focus,
 .search-input:focus {
   border-color: var(--accent);

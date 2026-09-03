@@ -3,7 +3,7 @@ import type { ModalDeps } from "./deps";
 import { closeModal, confirmDialog, escapeHtml, formatDate, openModal, toast } from "./dom";
 import { t } from "./i18n";
 import { store } from "./store";
-import type { Man, Profile } from "./types";
+import type { Fact, Man, Note, Profile } from "./types";
 
 const AVATAR_SIZE = 256;
 
@@ -304,6 +304,55 @@ export async function openProfileForm(deps: ModalDeps, existing?: Profile | null
 // Man dossier
 // ---------------------------------------------------------------------------
 
+/**
+ * Facts as the operator typed them: one `key: value` per line.
+ *
+ * A line that still matches a stored fact keeps that fact whole — its id, who
+ * wrote it, when — and only what actually changed becomes a new entry.
+ */
+function editedFacts(text: string | undefined, man: Man): Fact[] {
+  if (text === undefined) return man.facts;
+  const seen = new Set<string>();
+  return lines(text).map((line) => {
+    const at = line.indexOf(":");
+    const key = at === -1 ? "note" : line.slice(0, at).trim();
+    const value = at === -1 ? line.trim() : line.slice(at + 1).trim();
+    const kept = man.facts.find(
+      (fact) => !seen.has(fact.id) && fact.key === key && fact.value === value,
+    );
+    if (kept) {
+      seen.add(kept.id);
+      return kept;
+    }
+    return {
+      id: crypto.randomUUID(),
+      key,
+      value,
+      source: "operator",
+      created_at: new Date().toISOString(),
+    };
+  });
+}
+
+/** Notes the same way: one per line, untouched ones kept as they are. */
+function editedNotes(text: string | undefined, man: Man): Note[] {
+  if (text === undefined) return man.notes;
+  const seen = new Set<string>();
+  return lines(text).map((line) => {
+    const kept = man.notes.find((note) => !seen.has(note.id) && note.text.trim() === line);
+    if (kept) {
+      seen.add(kept.id);
+      return kept;
+    }
+    return {
+      id: crypto.randomUUID(),
+      text: line,
+      author: "operator",
+      created_at: new Date().toISOString(),
+    };
+  });
+}
+
 export async function openManForm(deps: ModalDeps, existing?: Man | null) {
   const m = existing ?? null;
   if (!m && !store.activeModelId) {
@@ -385,11 +434,13 @@ export async function openManForm(deps: ModalDeps, existing?: Man | null) {
       ${
         m
           ? `<div class="field"><label>${t("man.facts", { n: m.facts.length })}</label>
-               <div class="code-block">${
-                 m.facts.length
-                   ? m.facts.map((f) => `${escapeHtml(f.key)}: ${escapeHtml(f.value)}`).join("\n")
-                   : t("common.empty")
-               }</div></div>
+               <textarea class="field-area tall" id="mFacts" placeholder="${t("man.factsHint")}">${escapeHtml(
+                 m.facts.map((f) => `${f.key}: ${f.value}`).join("\n"),
+               )}</textarea></div>
+             <div class="field"><label>${t("man.notes", { n: m.notes.length })}</label>
+               <textarea class="field-area tall" id="mNotes" placeholder="${t("man.notesHint")}">${escapeHtml(
+                 m.notes.map((n) => n.text.replace(/\s*\n\s*/g, " ")).join("\n"),
+               )}</textarea></div>
              <div class="field"><label>${t("man.gifts", { n: m.gifts.length })}</label>
                <div class="code-block">${
                  m.gifts.length
@@ -398,14 +449,6 @@ export async function openManForm(deps: ModalDeps, existing?: Man | null) {
                          (g) =>
                            `${formatDate(g.date)} — ${escapeHtml(g.title)}${g.value ? ` (${g.value})` : ""}`,
                        )
-                       .join("\n")
-                   : t("common.empty")
-               }</div></div>
-             <div class="field"><label>${t("man.notes", { n: m.notes.length })}</label>
-               <div class="code-block">${
-                 m.notes.length
-                   ? m.notes
-                       .map((n) => `${formatDate(n.created_at)} — ${escapeHtml(n.text)}`)
                        .join("\n")
                    : t("common.empty")
                }</div></div>
@@ -445,7 +488,13 @@ export async function openManForm(deps: ModalDeps, existing?: Man | null) {
     }
     try {
       if (m) {
-        await api.saveMan({ ...m, ...form, id: m.id, age: form.age });
+        // The dossier's memory is the operator's too: edited lines replace what
+        // was there, while every line left alone keeps the id and the date it
+        // was written with, so nothing looks freshly remembered after a typo
+        // fix somewhere else.
+        const facts = editedFacts(card.querySelector<HTMLTextAreaElement>("#mFacts")?.value, m);
+        const notes = editedNotes(card.querySelector<HTMLTextAreaElement>("#mNotes")?.value, m);
+        await api.saveMan({ ...m, ...form, facts, notes, id: m.id, age: form.age });
         toast(t("toast.manSaved"), "success");
         await deps.refresh();
       } else {
