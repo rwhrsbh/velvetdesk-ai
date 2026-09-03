@@ -379,12 +379,10 @@ pub async fn chat(deps: &AgentDeps<'_>, input: MasterInput) -> Result<MasterOutp
             _ => {}
         }
     }
-    request
-        .messages
-        .push(LlmMessage::user_with_images(
-            input.message.clone(),
-            input.images.clone(),
-        ));
+    request.messages.push(LlmMessage::user_with_images(
+        input.message.clone(),
+        input.images.clone(),
+    ));
 
     let mut steps: Vec<RunStep> = vec![];
     let mut pending: Vec<PendingAction> = vec![];

@@ -576,7 +576,10 @@ mod tests {
         let body = build_body(&provider(), &req);
         let content = &body["messages"][0]["content"];
         assert_eq!(content[0]["type"], "text");
-        assert_eq!(content[1]["image_url"]["url"], "data:image/jpeg;base64,QUJD");
+        assert_eq!(
+            content[1]["image_url"]["url"],
+            "data:image/jpeg;base64,QUJD"
+        );
         assert_eq!(body["max_tokens"], 2048);
     }
 

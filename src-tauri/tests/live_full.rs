@@ -809,7 +809,7 @@ async fn the_master_creates_a_profile_and_its_men() {
             security: Some(SecurityLevel::Yolo),
             thinking_effort: Some("medium".into()),
             temporary: true,
-        images: vec![],
+            images: vec![],
         },
     )
     .await
