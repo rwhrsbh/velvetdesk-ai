@@ -21,6 +21,7 @@ import type {
   RunOutput,
   SearchHit,
   Settings,
+  UpdateInfo,
 } from "./types";
 
 export const AGENT_EVENT = "velvetdesk://agent";
@@ -164,6 +165,8 @@ export const api = {
     invoke<ChatThread>("save_chat", { modelId: model_id, manId: man_id, messages }),
   deleteChatMessages: (model_id: string, man_id: string, ids: string[]) =>
     invoke<ChatThread>("delete_chat_messages", { modelId: model_id, manId: man_id, ids }),
+
+  checkUpdate: () => invoke<UpdateInfo>("check_update"),
 
   fetchImage: (url: string) =>
     invoke<{ name: string; mime: string; data: string }>("fetch_image", { url }),

@@ -397,6 +397,13 @@ export async function openKeysModal(deps: ModalDeps) {
           <label>${t("keys.rules")}</label>
           <textarea class="field-area" id="globalRules">${escapeHtml(settings.global_style_rules)}</textarea>
         </div>
+        <div class="field">
+          <label class="toggle wide">
+            <input type="checkbox" id="updateCheck"${settings.update_check ? " checked" : ""} />
+            <span>${t("keys.updateCheck")}</span>
+          </label>
+          <button class="btn btn-secondary" id="btnCheckUpdate" type="button">${t("keys.updateNow")}</button>
+        </div>
       </details>
 
       <div class="modal-actions">
@@ -656,7 +663,11 @@ export async function openKeysModal(deps: ModalDeps) {
       if (label) label.textContent = Number(tempInput.value).toFixed(2);
     });
 
-    card.querySelector<HTMLButtonElement>("#btnTest")?.addEventListener("click", async () => {
+    card.querySelector<HTMLButtonElement>("#btnCheckUpdate")?.addEventListener("click", () => {
+    void deps.checkUpdate();
+  });
+
+  card.querySelector<HTMLButtonElement>("#btnTest")?.addEventListener("click", async () => {
       toast(t("toast.checking"));
       try {
         const result = await api.testProvider();
@@ -689,6 +700,8 @@ export async function openKeysModal(deps: ModalDeps) {
         settings.providers.find((item) => item.id === (speechProviderId || providerId)) ?? null;
       if (speechTarget) speechTarget.transcribe_model = speech;
 
+      settings.update_check =
+        card.querySelector<HTMLInputElement>("#updateCheck")?.checked ?? settings.update_check;
       settings.global_style_rules =
         card.querySelector<HTMLTextAreaElement>("#globalRules")?.value ?? settings.global_style_rules;
       settings.history_limit =

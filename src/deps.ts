@@ -4,4 +4,6 @@ export interface ModalDeps {
   refresh: () => Promise<void>;
   selectProfile: (modelId: string) => Promise<void>;
   selectMan: (manId: string | null) => Promise<void>;
+  /** Look for a newer release now, and say so either way. */
+  checkUpdate: () => Promise<void>;
 }

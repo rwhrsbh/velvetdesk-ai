@@ -257,6 +257,102 @@ pub fn clear_agent_log(
     scope.write_agent_log(&AgentLog::new(model_id, man_id))
 }
 
+/// Where the releases live. The check is read-only and needs no credentials.
+const RELEASES_URL: &str = "https://api.github.com/repos/rwhrsbh/velvetdesk-ai/releases/latest";
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UpdateInfo {
+    /// The version of the newest release, without the leading `v`.
+    pub version: String,
+    /// The version running right now.
+    pub current: String,
+    /// True when the release is newer than what is running.
+    pub newer: bool,
+    /// What the release says about itself.
+    pub notes: String,
+    /// The release page, and the file for this platform when there is one.
+    pub page: String,
+    pub download: Option<String>,
+}
+
+/// Compare two dotted versions the way people read them: 0.2.10 beats 0.2.9.
+fn newer_than(candidate: &str, current: &str) -> bool {
+    let parts = |v: &str| -> Vec<u64> {
+        v.trim_start_matches('v')
+            .split(['.', '-'])
+            .map(|piece| piece.parse::<u64>().unwrap_or(0))
+            .collect()
+    };
+    let (a, b) = (parts(candidate), parts(current));
+    for index in 0..a.len().max(b.len()) {
+        let left = a.get(index).copied().unwrap_or(0);
+        let right = b.get(index).copied().unwrap_or(0);
+        if left != right {
+            return left > right;
+        }
+    }
+    false
+}
+
+/// The installer for the machine this is running on, out of a release's files.
+fn asset_for_platform(assets: &[Value]) -> Option<String> {
+    let wanted: &[&str] = match std::env::consts::OS {
+        "windows" => &[".msi", ".exe"],
+        "macos" => &[".dmg", ".app.tar.gz"],
+        _ => &[".AppImage", ".deb", ".rpm"],
+    };
+    for suffix in wanted {
+        for asset in assets {
+            let name = asset["name"].as_str().unwrap_or("");
+            if name.ends_with(suffix) {
+                return asset["browser_download_url"].as_str().map(str::to_string);
+            }
+        }
+    }
+    None
+}
+
+/// Ask the release page whether there is something newer.
+///
+/// Nothing is downloaded here: the answer is shown to the operator, and only
+/// their click opens the installer's download in their browser.
+#[tauri::command]
+pub async fn check_update(state: State<'_, AppState>) -> Result<UpdateInfo> {
+    let current = env!("CARGO_PKG_VERSION").to_string();
+    let response = state
+        .llm
+        .http
+        .get(RELEASES_URL)
+        .header("accept", "application/vnd.github+json")
+        .header("user-agent", format!("velvetdesk/{current}"))
+        .send()
+        .await
+        .map_err(|e| AppError::Provider(format!("update check failed: {e}")))?;
+    if !response.status().is_success() {
+        return Err(AppError::Provider(format!(
+            "update check failed: HTTP {}",
+            response.status()
+        )));
+    }
+    let release: Value = response
+        .json()
+        .await
+        .map_err(|e| AppError::Provider(format!("update check failed: {e}")))?;
+
+    let tag = release["tag_name"].as_str().unwrap_or_default();
+    let version = tag.trim_start_matches('v').to_string();
+    let assets = release["assets"].as_array().cloned().unwrap_or_default();
+
+    Ok(UpdateInfo {
+        newer: !version.is_empty() && newer_than(&version, &current),
+        version,
+        current,
+        notes: release["body"].as_str().unwrap_or_default().to_string(),
+        page: release["html_url"].as_str().unwrap_or_default().to_string(),
+        download: asset_for_platform(&assets),
+    })
+}
+
 /// Replace a man's correspondence with what the operator edited.
 ///
 /// The record is theirs to correct: a message pasted with the wrong role, a
@@ -1070,4 +1166,37 @@ pub fn seed_demo(state: State<'_, AppState>) -> Result<Vec<Profile>> {
     scope.write_man(&man)?;
     storage::rebuild_index(&state.paths)?;
     read_profiles(&state)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Versions are compared piece by piece, not as strings: 0.2.10 is newer
+    /// than 0.2.9, and the leading `v` of a tag is not part of the number.
+    #[test]
+    fn a_newer_release_is_recognised() {
+        assert!(newer_than("v0.2.10", "0.2.9"));
+        assert!(newer_than("0.3.0", "0.2.99"));
+        assert!(!newer_than("0.2.9", "0.2.9"));
+        assert!(!newer_than("0.2.8", "0.2.9"));
+        assert!(newer_than("1.0.0", "0.9.9"));
+    }
+
+    /// The installer offered is the one this machine can actually run.
+    #[test]
+    fn the_platforms_installer_is_picked() {
+        let assets = vec![
+            json!({ "name": "VelvetDesk-0.2.1.AppImage", "browser_download_url": "u/appimage" }),
+            json!({ "name": "VelvetDesk-0.2.1.msi", "browser_download_url": "u/msi" }),
+            json!({ "name": "VelvetDesk-0.2.1.dmg", "browser_download_url": "u/dmg" }),
+        ];
+        let picked = asset_for_platform(&assets).unwrap();
+        let expected = match std::env::consts::OS {
+            "windows" => "u/msi",
+            "macos" => "u/dmg",
+            _ => "u/appimage",
+        };
+        assert_eq!(picked, expected);
+    }
 }

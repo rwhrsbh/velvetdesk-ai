@@ -100,6 +100,16 @@ export interface ChatThread {
   updated_at: string;
 }
 
+/** What the release page says about the newest version. */
+export interface UpdateInfo {
+  version: string;
+  current: string;
+  newer: boolean;
+  notes: string;
+  page: string;
+  download: string | null;
+}
+
 export interface AgentEntry {
   id: string;
   sender: "user" | "assistant" | "system" | "tool";
@@ -228,6 +238,10 @@ export interface Settings {
   speech_device: string;
   speech_language: string;
   auto_compact_at: number;
+  /** Look for a newer release on start. */
+  update_check: boolean;
+  /** A version already offered and turned down. */
+  update_skipped: string;
 }
 
 /** How much of the context window the correspondence currently occupies. */

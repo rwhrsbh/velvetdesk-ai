@@ -1,4 +1,5 @@
 import { applyStatic, lang, setLang, t, type Lang } from "./i18n";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { api, errorText, onAgentEvent } from "./api";
 import type { ModalDeps } from "./deps";
 import { $, bindModalDismiss, closeModal, confirmDialog, escapeHtml, openModal, toast } from "./dom";
@@ -25,7 +26,7 @@ import {
   type QueuedMessage,
   type UiEntry,
 } from "./store";
-import type { AgentMode, RunStep, SecurityLevel, Settings } from "./types";
+import type { AgentMode, RunStep, SecurityLevel, Settings, UpdateInfo } from "./types";
 import {
   renderAll,
   renderChat,
@@ -180,7 +181,12 @@ async function persistSettings(patch: Partial<Settings>) {
   if ("speech_engine" in patch || "local_speech_model" in patch) warmLocalModel();
 }
 
-const deps: ModalDeps = { refresh, selectProfile: (id) => selectProfile(id), selectMan };
+const deps: ModalDeps = {
+  refresh,
+  selectProfile: (id) => selectProfile(id),
+  selectMan,
+  checkUpdate: () => offerUpdate(true),
+};
 
 // ---------------------------------------------------------------------------
 // agent run
@@ -309,6 +315,50 @@ async function removeMessages(ids: string[], filed: string[]) {
     cancelSelection();
     void refreshContextGauge();
   }
+}
+
+/**
+ * Offer the newest release.
+ *
+ * The check reads the release list and nothing else; the download happens in
+ * the operator's browser, and only after they say so. A version turned down is
+ * remembered, so the same offer is not made twice.
+ */
+async function offerUpdate(manual: boolean) {
+  let info: UpdateInfo;
+  try {
+    info = await api.checkUpdate();
+  } catch (error) {
+    if (manual) toast(errorText(error), "error");
+    return;
+  }
+
+  if (!info.newer) {
+    if (manual) toast(t("update.upToDate", { version: info.current }), "success");
+    return;
+  }
+  if (!manual && store.settings?.update_skipped === info.version) return;
+
+  const notes = info.notes.trim().split("\n").slice(0, 12).join("\n");
+  const card = openModal(
+    `<h3>${escapeHtml(t("update.title", { version: info.version }))}</h3>` +
+      `<div class="modal-sub">${escapeHtml(t("update.sub", { current: info.current }))}</div>` +
+      (notes ? `<div class="code-block">${escapeHtml(notes)}</div>` : "") +
+      `<div class="modal-actions">` +
+      `<button class="btn btn-secondary" data-act="skip">${t("update.skip")}</button>` +
+      `<button class="btn btn-secondary" data-act="close">${t("update.later")}</button>` +
+      `<button class="btn btn-primary" data-act="get">${t("update.get")}</button></div>`,
+  );
+  card.querySelector('[data-act="close"]')?.addEventListener("click", closeModal);
+  card.querySelector('[data-act="skip"]')?.addEventListener("click", () => {
+    closeModal();
+    void persistSettings({ update_skipped: info.version });
+  });
+  card.querySelector('[data-act="get"]')?.addEventListener("click", () => {
+    closeModal();
+    // The installer is fetched and run by the operator, in their own browser.
+    void openUrl(info.download ?? info.page).catch((error) => toast(errorText(error), "error"));
+  });
 }
 
 /** Which conversation a message belongs to. */
@@ -2076,6 +2126,11 @@ async function boot() {
     if (preferred) await selectProfile(preferred, false);
 
     renderAll();
+
+    // A quiet look at the release page a moment after the window is usable.
+    if (data.settings.update_check) {
+      window.setTimeout(() => void offerUpdate(false), 4000);
+    }
 
     if (data.profiles.length === 0) {
       pushEntry(systemNote("hint.firstRun"));

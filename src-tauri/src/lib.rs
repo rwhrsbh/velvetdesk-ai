@@ -125,6 +125,7 @@ pub fn run() {
             commands::save_chat,
             commands::run_agent,
             commands::fetch_image,
+            commands::check_update,
             commands::list_trusted_roots,
             commands::trust_folder,
             commands::revoke_folder,

@@ -229,6 +229,13 @@ pub struct Settings {
     /// Empty by default: an agent starts isolated and has to ask.
     #[serde(default)]
     pub trusted_roots: Vec<crate::workspace::TrustedRoot>,
+    /// Look for a newer release on start. The check only reads the release
+    /// list; nothing is downloaded or installed without the operator saying so.
+    #[serde(default = "default_true")]
+    pub update_check: bool,
+    /// A version the operator has already been offered and turned down.
+    #[serde(default)]
+    pub update_skipped: String,
 }
 
 fn default_auto_compact() -> f32 {
@@ -335,6 +342,8 @@ impl Default for Settings {
             speech_engine: default_speech_engine(),
             local_speech_model: String::new(),
             trusted_roots: vec![],
+            update_check: true,
+            update_skipped: String::new(),
             speech_device: String::new(),
             speech_language: String::new(),
             auto_compact_at: default_auto_compact(),
