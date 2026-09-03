@@ -361,6 +361,28 @@ pub struct ChatThread {
 }
 
 impl ChatThread {
+    /// Take messages out of the record.
+    ///
+    /// The window of messages that still reach the model is pulled back by
+    /// however many were removed from behind it, so it keeps pointing at the
+    /// same place in a shorter thread instead of drifting forward.
+    pub fn remove(&mut self, ids: &[String]) -> usize {
+        let before = self.messages.len();
+        let removed_behind = self
+            .messages
+            .iter()
+            .take(self.context_from)
+            .filter(|m| ids.contains(&m.id))
+            .count();
+        self.messages.retain(|m| !ids.contains(&m.id));
+        self.context_from = self
+            .context_from
+            .saturating_sub(removed_behind)
+            .min(self.messages.len());
+        self.updated_at = now();
+        before - self.messages.len()
+    }
+
     pub fn new(model_id: String, man_id: String) -> Self {
         ChatThread {
             model_id,
@@ -500,4 +522,33 @@ pub struct SearchHit {
     pub man_name: String,
     pub snippet: String,
     pub score: u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Deleting old messages must not drag the prompt window forward onto
+    /// messages the model has already been told to skip.
+    #[test]
+    fn deleting_messages_keeps_the_prompt_window_in_place() {
+        let mut thread = ChatThread::new("2428653".into(), "1219749".into());
+        for n in 0..6 {
+            thread.messages.push(ChatMessage {
+                id: format!("m{n}"),
+                role: MsgRole::Incoming,
+                channel: Channel::Chat,
+                text: format!("message {n}"),
+                ts: now(),
+            });
+        }
+        thread.context_from = 4; // only the last two go to the model
+
+        let removed = thread.remove(&["m0".to_string(), "m5".to_string()]);
+
+        assert_eq!(removed, 2);
+        assert_eq!(thread.messages.len(), 4);
+        assert_eq!(thread.context_from, 3);
+        assert_eq!(thread.messages[thread.context_from].id, "m4");
+    }
 }

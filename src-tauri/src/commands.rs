@@ -257,6 +257,54 @@ pub fn clear_agent_log(
     scope.write_agent_log(&AgentLog::new(model_id, man_id))
 }
 
+/// Drop the picked entries from a conversation.
+///
+/// The operator's own chat with the agent: what is removed here stops being
+/// shown and stops being counted, and for the master chat — the one that is
+/// replayed to the model turn after turn — it also stops being sent.
+#[tauri::command]
+pub fn delete_agent_entries(
+    state: State<'_, AppState>,
+    model_id: String,
+    man_id: Option<String>,
+    ids: Vec<String>,
+) -> Result<AgentLog> {
+    let scope = state.paths.scope(&model_id)?;
+    let mut log = scope.read_agent_log(man_id.as_deref())?;
+    log.entries.retain(|entry| !ids.contains(&entry.id));
+    scope.write_agent_log(&log)?;
+    Ok(log)
+}
+
+#[tauri::command]
+pub fn delete_master_entries(state: State<'_, AppState>, ids: Vec<String>) -> Result<AgentLog> {
+    let mut log = state.paths.master_log()?;
+    log.entries.retain(|entry| !ids.contains(&entry.id));
+    state.paths.write_master_log(&log)?;
+    Ok(log)
+}
+
+/// Remove messages from a man's correspondence.
+///
+/// This is the record every prompt is built from, so a message deleted here is
+/// gone from the next request as well — which is usually the point: something
+/// was filed by mistake, or the operator does not want it steering the model.
+/// The window of messages that still go to the model is pulled back so it keeps
+/// pointing at the same place in a shorter thread.
+#[tauri::command]
+pub fn delete_chat_messages(
+    state: State<'_, AppState>,
+    model_id: String,
+    man_id: String,
+    ids: Vec<String>,
+) -> Result<ChatThread> {
+    let scope = state.paths.scope(&model_id)?;
+    let mut thread = scope.read_chat(&man_id)?;
+    thread.remove(&ids);
+    scope.write_chat(&thread)?;
+    Ok(thread)
+}
+
 // ---------------------------------------------------------------------------
 // Agent
 // ---------------------------------------------------------------------------

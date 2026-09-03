@@ -342,8 +342,10 @@ export function renderChat() {
         ? `<div class="msg-thumbs">${thumbsHtml(meta.images, false)}</div>`
         : "";
 
+      const picked = store.selecting && store.selected.includes(entry.id);
+
       return (
-        `<div class="msg ${entry.sender}" data-entry="${escapeHtml(entry.id)}">` +
+        `<div class="msg ${entry.sender}${picked ? " picked" : ""}" data-entry="${escapeHtml(entry.id)}">` +
         `<div class="bubble">${recipient}${thinking}${shots}<span class="bubble-text">${escapeHtml(entry.text)}</span>` +
         `${steps}${working}${usageLine(meta.usage, extras)}${actions}</div></div>`
       );
@@ -387,6 +389,27 @@ export function renderAttachments() {
  * it goes out on its own as soon as the run before it ends, and can be dropped
  * until then.
  */
+/** While messages are being picked: how many, and what can be done with them. */
+export function renderSelection() {
+  const bar = $("selectBar");
+  const container = $("messages");
+  container.classList.toggle("selecting", store.selecting);
+  if (!store.selecting) {
+    bar.innerHTML = "";
+    bar.hidden = true;
+    return;
+  }
+  bar.hidden = false;
+  bar.innerHTML =
+    `<span class="select-count">${escapeHtml(
+      t("chat.selectedCount", { n: store.selected.length }),
+    )}</span>` +
+    `<button class="btn btn-secondary" data-act="select-cancel">${t("common.cancel")}</button>` +
+    `<button class="btn btn-danger" data-act="select-delete"${
+      store.selected.length === 0 ? " disabled" : ""
+    }>${t("common.delete")}</button>`;
+}
+
 export function renderQueue() {
   const box = $("queue");
   if (store.queue.length === 0) {
@@ -421,4 +444,5 @@ export function renderAll() {
   renderChat();
   renderQueue();
   renderAttachments();
+  renderSelection();
 }

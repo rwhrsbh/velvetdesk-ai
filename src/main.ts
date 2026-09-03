@@ -32,6 +32,7 @@ import {
   renderProfiles,
   renderAttachments,
   renderQueue,
+  renderSelection,
   renderScope,
   renderTopbar,
   setIndexCounts,
@@ -187,6 +188,124 @@ function activeProviderReady(): boolean {
     (p) => p.id === store.settings?.active_provider,
   );
   return Boolean(provider && provider.key_count > 0);
+}
+
+/**
+ * Picking messages, the way a messenger does it.
+ *
+ * The first message is picked from its right-click menu — dragging across a
+ * bubble to copy its text must never mark it for deletion. Once picking has
+ * started the whole row is a target and a drag paints across rows. A bar over
+ * the composer counts what is picked, Escape drops the lot. Deleting takes them
+ * out of the operator's chat, and — when they
+ * were filed into a man's correspondence — offers to take them out of there
+ * too, which is what actually keeps them out of the next request.
+ */
+function startSelection(entryId: string) {
+  store.selecting = true;
+  store.selected = [entryId];
+  renderChat();
+  renderSelection();
+}
+
+function toggleSelected(entryId: string) {
+  store.selected = store.selected.includes(entryId)
+    ? store.selected.filter((id) => id !== entryId)
+    : [...store.selected, entryId];
+  renderChat();
+  renderSelection();
+}
+
+function cancelSelection() {
+  if (!store.selecting) return;
+  store.selecting = false;
+  store.selected = [];
+  renderChat();
+  renderSelection();
+}
+
+/**
+ * The filed messages that say the same thing as the picked entries.
+ *
+ * A draft rarely reaches the correspondence byte for byte — a greeting gets
+ * trimmed, a line break moves — so two texts count as the same message when
+ * one contains the other and there is enough of it to be sure.
+ */
+function filedCounterparts(): string[] {
+  if (!store.thread) return [];
+  const flatten = (text: string) => text.replace(/\s+/g, " ").trim().toLowerCase();
+  const picked = store.entries
+    .filter((entry) => store.selected.includes(entry.id))
+    .map((entry) => flatten(entry.text))
+    .filter(Boolean);
+
+  return store.thread.messages
+    .filter((message) => {
+      const filed = flatten(message.text);
+      if (!filed) return false;
+      return picked.some((text) => {
+        if (text === filed) return true;
+        const shorter = Math.min(text.length, filed.length);
+        return shorter >= 40 && (text.includes(filed) || filed.includes(text));
+      });
+    })
+    .map((message) => message.id);
+}
+
+async function deleteSelected() {
+  const ids = [...store.selected];
+  if (ids.length === 0) return;
+
+  const filed = filedCounterparts();
+  const card = openModal(
+    `<h3>${t("chat.deleteTitle")}</h3>` +
+      `<div class="modal-sub">${escapeHtml(t("chat.deleteBody", { n: ids.length }))}</div>` +
+      (filed.length > 0
+        ? `<label class="toggle wide"><input type="checkbox" id="alsoThread" checked />` +
+          `<span>${escapeHtml(t("chat.deleteAlsoThread", { n: filed.length }))}</span></label>`
+        : "") +
+      `<div class="modal-actions">` +
+      `<button class="btn btn-secondary" data-act="cancel">${t("common.cancel")}</button>` +
+      `<button class="btn btn-danger" data-act="ok">${t("common.delete")}</button></div>`,
+  );
+  card.querySelector('[data-act="cancel"]')?.addEventListener("click", closeModal);
+  card.querySelector('[data-act="ok"]')?.addEventListener("click", () => {
+    const alsoThread =
+      filed.length > 0 && (card.querySelector("#alsoThread") as HTMLInputElement | null)?.checked;
+    closeModal();
+    void removeMessages(ids, alsoThread ? filed : []);
+  });
+}
+
+async function removeMessages(ids: string[], filed: string[]) {
+  try {
+    if (store.master) {
+      const log = await api.deleteMasterEntries(ids);
+      store.entries = log.entries.slice(-120);
+    } else if (store.activeModelId) {
+      // A run that was never written down (a temporary chat) has nothing to
+      // delete on disk; dropping it from the screen is the whole job.
+      if (store.temporary) {
+        store.entries = store.entries.filter((entry) => !ids.includes(entry.id));
+      } else {
+        const log = await api.deleteAgentEntries(store.activeModelId, store.activeManId, ids);
+        store.entries = log.entries.slice(-120);
+      }
+      if (filed.length > 0 && store.activeManId) {
+        store.thread = await api.deleteChatMessages(
+          store.activeModelId,
+          store.activeManId,
+          filed,
+        );
+      }
+    }
+    toast(t("toast.messagesDeleted", { n: ids.length + filed.length }), "success");
+  } catch (error) {
+    toast(errorText(error), "error");
+  } finally {
+    cancelSelection();
+    void refreshContextGauge();
+  }
 }
 
 /** Which conversation a message belongs to. */
@@ -936,6 +1055,12 @@ function bindPanels() {
     }
   });
 
+  $("selectBar").addEventListener("click", (event) => {
+    const act = (event.target as HTMLElement).closest<HTMLElement>("[data-act]")?.dataset.act;
+    if (act === "select-cancel") cancelSelection();
+    if (act === "select-delete") void deleteSelected();
+  });
+
   $("messages").addEventListener("click", async (event) => {
     const btn = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-act]");
     if (!btn) return;
@@ -1156,6 +1281,13 @@ function messageEntries(bubble: Element, entryId: string | undefined): MenuEntry
     entries.push({
       label: t("chat.asOutgoing"),
       onSelect: () => void logAsOutgoing(entry.text),
+    });
+  }
+  if (entry && !entry.transient) {
+    const picked = store.selecting && store.selected.includes(entry.id);
+    entries.push({
+      label: picked ? t("chat.unselect") : t("chat.select"),
+      onSelect: () => (store.selecting ? toggleSelected(entry.id) : startSelection(entry.id)),
     });
   }
   if (entry?.meta && Object.keys(entry.meta).length > 0) {
@@ -1571,6 +1703,12 @@ function bindComposer() {
     const image = target.closest<HTMLImageElement>(".thumb img");
     if (image) openImage(image.src, image.alt);
   });
+  // Paste from the right-click menu: the clipboard is read there, and the
+  // pictures it held arrive here.
+  input.addEventListener("images-pasted", (event) => {
+    void addAttachments((event as CustomEvent<File[]>).detail);
+  });
+
   input.addEventListener("paste", (event) => {
     const files = imageFiles(event.clipboardData);
     if (files.length > 0) {
@@ -1694,6 +1832,56 @@ function liveEntry(): UiEntry {
   return entry;
 }
 
+/**
+ * Picking with the mouse, once picking has started.
+ *
+ * The first message is picked from its right-click menu; from then on the whole
+ * row is the target — anywhere on its line, not just the bubble — and holding
+ * the button while moving down the chat paints the same choice over every row
+ * it crosses, the way a messenger does it. Text selection is off while this
+ * lasts, so a drag picks messages instead of highlighting words.
+ */
+function bindSelectionPainting() {
+  const container = $("messages");
+  let painting: boolean | null = null;
+
+  const rowOf = (event: Event) =>
+    (event.target as HTMLElement).closest<HTMLElement>("[data-entry]");
+
+  const apply = (id: string, picked: boolean) => {
+    const already = store.selected.includes(id);
+    if (already === picked) return;
+    store.selected = picked
+      ? [...store.selected, id]
+      : store.selected.filter((known) => known !== id);
+    renderChat();
+    renderSelection();
+  };
+
+  container.addEventListener("pointerdown", (event) => {
+    if (!store.selecting || event.button !== 0) return;
+    // Buttons inside a message keep doing their own job.
+    if ((event.target as HTMLElement).closest("button, a, summary")) return;
+    const row = rowOf(event);
+    if (!row?.dataset.entry) return;
+    event.preventDefault();
+    painting = !store.selected.includes(row.dataset.entry);
+    apply(row.dataset.entry, painting);
+  });
+
+  container.addEventListener("pointerover", (event) => {
+    if (!store.selecting || painting === null) return;
+    const row = rowOf(event);
+    if (row?.dataset.entry) apply(row.dataset.entry, painting);
+  });
+
+  for (const type of ["pointerup", "pointercancel", "pointerleave"]) {
+    window.addEventListener(type, () => {
+      painting = null;
+    });
+  }
+}
+
 /** A picture inside a message opens full size, and can be copied from there. */
 function bindMessageImages() {
   $("messages").addEventListener("click", (event) => {
@@ -1766,6 +1954,10 @@ async function boot() {
   bindPanels();
   bindComposer();
   bindMessageImages();
+  bindSelectionPainting();
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") cancelSelection();
+  });
   bindWindowDrops();
   bindTabs();
   bindAgentEvents();

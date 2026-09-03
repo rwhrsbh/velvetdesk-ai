@@ -118,6 +118,25 @@ export function editingEntries(field: HTMLInputElement | HTMLTextAreaElement): M
       label: t("ctx.paste"),
       disabled: field.readOnly,
       onSelect: async () => {
+        // A clipboard holding a screenshot has no text to insert, and reading
+        // it as text silently does nothing — so the pictures are taken out
+        // first and handed to whoever owns the field.
+        try {
+          const items = await navigator.clipboard.read();
+          const files: File[] = [];
+          for (const item of items) {
+            const type = item.types.find((known) => known.startsWith("image/"));
+            if (!type) continue;
+            const blob = await item.getType(type);
+            files.push(new File([blob], "clipboard", { type }));
+          }
+          if (files.length > 0) {
+            field.dispatchEvent(new CustomEvent("images-pasted", { detail: files }));
+            return;
+          }
+        } catch {
+          // No permission to inspect the clipboard: fall through to text.
+        }
         try {
           replaceSelection(await navigator.clipboard.readText());
         } catch {

@@ -65,6 +65,9 @@ export interface AppStore {
   queue: QueuedMessage[];
   /** Pictures picked or pasted for the message being written. */
   attachments: Attachment[];
+  /** Picking messages to delete, and which are picked. */
+  selecting: boolean;
+  selected: string[];
 }
 
 export const store: AppStore = {
@@ -91,6 +94,8 @@ export const store: AppStore = {
   master: false,
   queue: [],
   attachments: [],
+  selecting: false,
+  selected: [],
 };
 
 /** A thumbnail source for an attachment. */

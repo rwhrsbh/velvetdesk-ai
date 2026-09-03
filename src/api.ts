@@ -157,6 +157,12 @@ export const api = {
   localModelsBaseUrl: () => invoke<string>("local_models_base_url"),
   testProvider: () => invoke<Record<string, unknown>>("test_provider"),
 
+  deleteAgentEntries: (model_id: string, man_id: string | null, ids: string[]) =>
+    invoke<AgentLog>("delete_agent_entries", { modelId: model_id, manId: man_id, ids }),
+  deleteMasterEntries: (ids: string[]) => invoke<AgentLog>("delete_master_entries", { ids }),
+  deleteChatMessages: (model_id: string, man_id: string, ids: string[]) =>
+    invoke<ChatThread>("delete_chat_messages", { modelId: model_id, manId: man_id, ids }),
+
   fetchImage: (url: string) =>
     invoke<{ name: string; mime: string; data: string }>("fetch_image", { url }),
 

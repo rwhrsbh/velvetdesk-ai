@@ -1048,6 +1048,54 @@ details.step[open] > .step-head .step-caret {
   color: var(--danger, #ff453a);
 }
 
+/* A hidden element stays hidden: an explicit `display` in a rule below would
+   otherwise win over the browser's own rule for [hidden], and an empty strip
+   would sit above the composer with nothing in it. */
+[hidden] {
+  display: none !important;
+}
+
+/* Picking messages to delete. */
+.select-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  background: var(--sunken);
+}
+
+.select-count {
+  flex: 1 1 auto;
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+
+.messages.selecting .msg {
+  cursor: pointer;
+  user-select: none;
+}
+
+.messages.selecting .bubble {
+  outline: 1px solid transparent;
+}
+
+.msg.picked .bubble {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.toggle.wide {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 10px 0 0;
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+
 .queue-count {
   flex: none;
   font-size: 11px;
