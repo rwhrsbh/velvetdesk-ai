@@ -2,6 +2,7 @@ import type {
   AgentEntry,
   AgentMode,
   AppInfo,
+  ChatThread,
   ContextStats,
   Man,
   PendingAction,
@@ -39,6 +40,8 @@ export interface AppStore {
   temporary: boolean;
   /** Reasoning text streamed by the current run, shown under a spoiler. */
   thoughts: string;
+  /** The open dossier's correspondence: what has already been filed there. */
+  thread: ChatThread | null;
   /** The master chat is open: one conversation across every profile. */
   master: boolean;
 }
@@ -63,11 +66,19 @@ export const store: AppStore = {
   context: null,
   temporary: false,
   thoughts: "",
+  thread: null,
   master: false,
 };
 
 export function activeProfile(): Profile | null {
   return store.profiles.find((p) => p.id === store.activeModelId) ?? null;
+}
+
+/** True when this exact text is already in the open dossier's thread. */
+export function alreadyFiled(text: string): boolean {
+  const wanted = text.trim();
+  if (!wanted || !store.thread) return false;
+  return store.thread.messages.some((message) => message.text.trim() === wanted);
 }
 
 export function activeMan(): Man | null {

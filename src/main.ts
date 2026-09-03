@@ -109,6 +109,17 @@ async function loadChat() {
     console.error("chat load failed", error);
     store.entries = [];
   }
+
+  // The correspondence tells the chat which drafts have already been filed, so
+  // it can stop offering to file them twice.
+  store.thread = null;
+  if (store.activeManId) {
+    try {
+      store.thread = await api.getChat(store.activeModelId, store.activeManId);
+    } catch (error) {
+      console.error("thread load failed", error);
+    }
+  }
 }
 
 /**
@@ -252,6 +263,9 @@ async function sendMessage() {
     }
     store.men = await api.listMen(store.activeModelId);
     store.pending = await api.pendingList();
+    if (store.activeManId) {
+      store.thread = await api.getChat(store.activeModelId, store.activeManId);
+    }
   } catch (error) {
     store.entries = store.entries.filter((e) => !e.transient);
     pushEntry(makeEntry("system", t("chat.error", { message: errorText(error) })));
@@ -687,6 +701,11 @@ function bindPanels() {
           channel: store.channel,
           text: entry.text,
         });
+        // Filed: the button that offered it has nothing left to offer.
+        if (store.thread && manId === store.activeManId) {
+          store.thread = await api.getChat(store.activeModelId, manId);
+          renderChat();
+        }
         toast(t("chat.logged"), "success");
       } catch (error) {
         toast(errorText(error), "error");

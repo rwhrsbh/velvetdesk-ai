@@ -793,6 +793,18 @@ pub fn plan_mutation(scope: &Scope, tool: &str, args: &Value) -> Result<Mutation
             let text = arg_str(args, "text")
                 .ok_or_else(|| AppError::Invalid("text is required".into()))?;
             let before = scope.read_man(&id)?;
+            if before
+                .notes
+                .iter()
+                .rev()
+                .take(10)
+                .any(|note| note.text.trim() == text.trim())
+            {
+                return Err(AppError::message(
+                    "error.duplicateNote",
+                    json!({ "text": truncate(&text, 80) }),
+                ));
+            }
             let mut man = before.clone();
             man.notes.push(Note {
                 id: new_id(),
@@ -879,6 +891,23 @@ pub fn plan_mutation(scope: &Scope, tool: &str, args: &Value) -> Result<Mutation
                 _ => Channel::Chat,
             };
             let before = scope.read_chat(&id)?;
+
+            // An agent that loses track of what it has done appends the same
+            // letter again; a second identical message in a thread is never
+            // what the operator wanted.
+            if before
+                .messages
+                .iter()
+                .rev()
+                .take(10)
+                .any(|m| m.role == role && m.text.trim() == text.trim())
+            {
+                return Err(AppError::message(
+                    "error.duplicateMessage",
+                    json!({ "text": truncate(&text, 80) }),
+                ));
+            }
+
             let mut thread = before.clone();
             thread.messages.push(ChatMessage {
                 id: new_id(),
@@ -1095,6 +1124,50 @@ mod tests {
         .unwrap();
         assert!(out.applied);
         assert!(scope.read_man("1219749").is_err());
+    }
+
+    /// An agent that loses track of what it has done files the same letter
+    /// again, and the man receives it twice.
+    #[test]
+    fn the_same_message_is_not_filed_twice() {
+        let scope = scope();
+        let args = json!({
+            "man_id": "1219749",
+            "role": "outgoing",
+            "text": "Are you playing with yourself right now, Daddy?",
+        });
+
+        execute(&scope, SecurityLevel::Yolo, "append_chat", &args).unwrap();
+        let again = execute(&scope, SecurityLevel::Yolo, "append_chat", &args);
+        assert!(again.is_err(), "a verbatim repeat must be refused");
+        assert_eq!(scope.read_chat("1219749").unwrap().messages.len(), 1);
+
+        // Something else, from the same side, still goes through.
+        let next = json!({
+            "man_id": "1219749",
+            "role": "outgoing",
+            "text": "And what are you doing now?",
+        });
+        execute(&scope, SecurityLevel::Yolo, "append_chat", &next).unwrap();
+        assert_eq!(scope.read_chat("1219749").unwrap().messages.len(), 2);
+
+        // The same words from him are a different message.
+        let incoming = json!({
+            "man_id": "1219749",
+            "role": "incoming",
+            "text": "And what are you doing now?",
+        });
+        execute(&scope, SecurityLevel::Yolo, "append_chat", &incoming).unwrap();
+        assert_eq!(scope.read_chat("1219749").unwrap().messages.len(), 3);
+    }
+
+    #[test]
+    fn a_note_is_not_stored_twice() {
+        let scope = scope();
+        let args = json!({ "man_id": "1219749", "text": "просил фото" });
+        execute(&scope, SecurityLevel::Yolo, "add_man_note", &args).unwrap();
+        assert!(execute(&scope, SecurityLevel::Yolo, "add_man_note", &args).is_err());
+        assert_eq!(scope.read_man("1219749").unwrap().notes.len(), 1);
     }
 
     #[test]

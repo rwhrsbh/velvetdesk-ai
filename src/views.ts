@@ -1,6 +1,6 @@
 import { $, avatarHtml, escapeHtml, formatDate } from "./dom";
 import { contactWord, keyWord, t } from "./i18n";
-import { activeMan, activeProfile, store, visibleMen, visibleProfiles } from "./store";
+import { activeMan, activeProfile, alreadyFiled, store, visibleMen, visibleProfiles } from "./store";
 import type { RunStep, Usage } from "./types";
 
 export function renderTopbar() {
@@ -287,11 +287,18 @@ export function renderChat() {
       if (typeof meta.turns === "number" && meta.turns > 1)
         extras.push(t("chat.turns", { n: meta.turns }));
 
+      // Offering to file a draft that is already in the thread invites the
+      // duplicate it would create.
+      const filed = alreadyFiled(entry.text);
       const actions =
         entry.sender === "assistant" && !entry.transient
           ? `<div class="msg-actions">
                <button data-act="copy" data-entry="${escapeHtml(entry.id)}">${t("chat.copy")}</button>
-               <button data-act="send-as-outgoing" data-entry="${escapeHtml(entry.id)}">${t("chat.asOutgoing")}</button>
+               ${
+                 filed
+                   ? `<span class="msg-filed">${escapeHtml(t("chat.alreadyLogged"))}</span>`
+                   : `<button data-act="send-as-outgoing" data-entry="${escapeHtml(entry.id)}">${t("chat.asOutgoing")}</button>`
+               }
                ${
                  meta.raw
                    ? `<button data-act="raw" data-entry="${escapeHtml(entry.id)}">${t("chat.raw")}</button>`
