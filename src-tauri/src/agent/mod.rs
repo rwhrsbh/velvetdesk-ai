@@ -42,6 +42,10 @@ pub struct RunInput {
     /// Screenshots and photos attached to this message.
     #[serde(default)]
     pub images: Vec<crate::llm::ImagePart>,
+    /// The caller's name for this run, echoed back on every progress event so
+    /// parallel runs can be told apart.
+    #[serde(default)]
+    pub run_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -462,6 +466,9 @@ pub struct LettersInput {
     pub channel: Option<String>,
     #[serde(default)]
     pub thinking_effort: Option<String>,
+    /// The caller's name for this run; see `RunInput::run_id`.
+    #[serde(default)]
+    pub run_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

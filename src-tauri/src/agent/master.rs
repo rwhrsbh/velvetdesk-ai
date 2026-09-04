@@ -499,6 +499,9 @@ pub struct MasterInput {
     pub thinking_effort: Option<String>,
     #[serde(default)]
     pub temporary: bool,
+    /// The caller's name for this run; see `RunInput::run_id`.
+    #[serde(default)]
+    pub run_id: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

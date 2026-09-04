@@ -685,7 +685,14 @@ export async function openKeysModal(deps: ModalDeps) {
 
     card.querySelector<HTMLButtonElement>('[data-act="close"]')?.addEventListener("click", closeModal);
 
-    card.querySelector<HTMLButtonElement>("#btnSaveProvider")?.addEventListener("click", async () => {
+    /**
+     * Write the form down.
+     *
+     * Every field saves itself as it is changed — a setting the operator typed
+     * and then closed the dialog on used to be lost — so this runs both from
+     * the Save button and, quietly, a moment after any edit.
+     */
+    const apply = async (quiet: boolean) => {
       const model =
         card.querySelector<HTMLInputElement>("#modelManual")?.value.trim() || chosenModel;
       const speech =
@@ -720,7 +727,8 @@ export async function openKeysModal(deps: ModalDeps) {
         return Number.isFinite(value) ? value : null;
       };
 
-      await persist({
+      await persist(
+        {
         model,
         base_url: card.querySelector<HTMLInputElement>("#baseUrl")?.value.trim() ?? p.base_url,
         api_version: card.querySelector<HTMLInputElement>("#apiVersion")?.value.trim() ?? p.api_version,
@@ -739,9 +747,28 @@ export async function openKeysModal(deps: ModalDeps) {
             return [line.slice(0, idx).trim(), line.slice(idx + 1).trim()] as [string, string];
           })
           .filter(([k, v]) => k && v),
-      });
+        },
+        quiet,
+      );
       await deps.refresh();
-      closeModal();
+    };
+
+    card.querySelector<HTMLButtonElement>("#btnSaveProvider")?.addEventListener("click", () => {
+      void apply(false).then(closeModal);
+    });
+
+    // Anything touched in the dialog is saved on its own; typing settles first
+    // so a half-written number is not stored on every keystroke.
+    let pending = 0;
+    const later = () => {
+      window.clearTimeout(pending);
+      pending = window.setTimeout(() => void apply(true), 600);
+    };
+    card.addEventListener("change", (event) => {
+      if ((event.target as HTMLElement).closest("input, select, textarea")) later();
+    });
+    card.addEventListener("input", (event) => {
+      if ((event.target as HTMLElement).closest("input, textarea")) later();
     });
   };
 

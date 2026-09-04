@@ -398,6 +398,7 @@ async fn the_agent_stores_what_it_is_told() {
         thinking_effort: Some("low".into()),
         temporary: true,
         images: vec![],
+        run_id: None,
     };
 
     let output = agent::run(&harness.deps(&config, &emit), input)
@@ -475,6 +476,7 @@ async fn the_context_gauge_matches_what_the_provider_counts() {
         thinking_effort: Some("none".into()),
         temporary: true,
         images: vec![],
+        run_id: None,
     };
     let output = agent::run(&harness.deps(&config, &emit), input)
         .await
@@ -616,6 +618,7 @@ async fn each_woman_writes_in_her_own_voice() {
                 brief: brief.into(),
                 channel: Some("letter".into()),
                 thinking_effort: Some("low".into()),
+                run_id: None,
             },
         )
         .await
@@ -709,6 +712,7 @@ async fn a_round_of_letters_is_written_one_by_one() {
             brief: "Короткое письмо: как прошли выходные.".into(),
             channel: Some("letter".into()),
             thinking_effort: Some("none".into()),
+            run_id: None,
         },
     )
     .await
@@ -768,6 +772,7 @@ async fn a_round_of_letters_is_written_one_by_one() {
             brief: "Короткое письмо про погоду.".into(),
             channel: Some("chat".into()),
             thinking_effort: Some("none".into()),
+            run_id: None,
         },
     )
     .await
@@ -810,6 +815,7 @@ async fn the_master_creates_a_profile_and_its_men() {
             thinking_effort: Some("medium".into()),
             temporary: true,
             images: vec![],
+            run_id: None,
         },
     )
     .await
@@ -887,6 +893,7 @@ async fn the_agent_runs_a_command_and_writes_a_file() {
         thinking_effort: Some("low".into()),
         temporary: true,
         images: vec![],
+        run_id: None,
     };
 
     let output = agent::run(&harness.deps(&config, &emit), input)
@@ -949,6 +956,7 @@ async fn an_ungranted_folder_stays_out_of_reach() {
         thinking_effort: Some("low".into()),
         temporary: true,
         images: vec![],
+        run_id: None,
     };
 
     let output = agent::run(&harness.deps(&config, &emit), input)

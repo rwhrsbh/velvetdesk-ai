@@ -407,6 +407,10 @@ export async function openChatEditor(deps: ModalDeps, man: Man) {
       <button class="btn btn-primary" id="btnSaveChat">${t("common.save")}</button>
     </div>`);
 
+  card.querySelector<HTMLButtonElement>('[data-act="close"]')?.addEventListener("click", () => {
+    closeModal();
+  });
+
   const rows = card.querySelector<HTMLElement>("#msgRows")!;
 
   const draw = () => {

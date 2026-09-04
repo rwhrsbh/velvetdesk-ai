@@ -41,6 +41,8 @@ export interface RunInput {
   temporary?: boolean;
   /** Screenshots and photos attached to this message. */
   images?: ImagePart[];
+  /** Names this run, so its progress events can be told from another chat's. */
+  run_id?: string;
 }
 
 /** An attached picture: its type, and its bytes without the `data:` prefix. */
@@ -99,6 +101,7 @@ export const api = {
     channel?: string;
     thinking_effort?: string;
     temporary?: boolean;
+    run_id?: string;
   }) => invoke<LettersOutput>("write_letters", { input }),
 
   masterChat: (input: {
@@ -107,6 +110,7 @@ export const api = {
     thinking_effort?: string;
     temporary?: boolean;
     images?: ImagePart[];
+    run_id?: string;
   }) => invoke<MasterOutput>("master_chat", { input }),
   masterContextStats: () => invoke<ContextStats>("master_context_stats"),
   getMasterLog: () => invoke<AgentLog>("get_master_log"),

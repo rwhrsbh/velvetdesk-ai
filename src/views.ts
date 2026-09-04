@@ -422,13 +422,20 @@ export function renderSelection() {
 
 export function renderQueue() {
   const box = $("queue");
-  if (store.queue.length === 0) {
+  // Another chat's queue belongs above another chat's composer.
+  const here = store.queue.filter(
+    (item) =>
+      item.target.master === store.master &&
+      item.target.modelId === store.activeModelId &&
+      item.target.manId === store.activeManId,
+  );
+  if (here.length === 0) {
     box.innerHTML = "";
     box.hidden = true;
     return;
   }
   box.hidden = false;
-  box.innerHTML = store.queue
+  box.innerHTML = here
     .map(
       (item, index) =>
         `<div class="queue-item" title="${escapeHtml(t("composer.queuedHint"))}">` +

@@ -4,7 +4,15 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { api, errorText, onAgentEvent } from "./api";
 import type { ModalDeps } from "./deps";
-import { $, bindModalDismiss, closeModal, confirmDialog, escapeHtml, openModal, toast } from "./dom";
+import {
+  $,
+  bindModalDismiss,
+  closeModal,
+  confirmDialog,
+  escapeHtml,
+  openModal,
+  toast,
+} from "./dom";
 import {
   copyText,
   editingEntries,
@@ -25,7 +33,6 @@ import {
   store,
   visibleMen,
   type Attachment,
-  type QueuedMessage,
   type UiEntry,
 } from "./store";
 import type { AgentMode, RunStep, SecurityLevel, Settings, UpdateInfo } from "./types";
@@ -124,6 +131,8 @@ async function loadChat() {
   // The correspondence tells the chat which drafts have already been filed, so
   // it can stop offering to file them twice.
   restoreParked(currentTarget());
+  restoreRunning(currentTarget());
+  syncBusy();
 
   store.thread = null;
   if (store.activeManId) {
@@ -195,9 +204,7 @@ const deps: ModalDeps = {
 // ---------------------------------------------------------------------------
 
 function activeProviderReady(): boolean {
-  const provider = store.settings?.providers.find(
-    (p) => p.id === store.settings?.active_provider,
-  );
+  const provider = store.settings?.providers.find((p) => p.id === store.settings?.active_provider);
   return Boolean(provider && provider.key_count > 0);
 }
 
@@ -303,11 +310,7 @@ async function removeMessages(ids: string[], filed: string[]) {
         store.entries = log.entries.slice(-120);
       }
       if (filed.length > 0 && store.activeManId) {
-        store.thread = await api.deleteChatMessages(
-          store.activeModelId,
-          store.activeManId,
-          filed,
-        );
+        store.thread = await api.deleteChatMessages(store.activeModelId, store.activeManId, filed);
       }
     }
     toast(t("toast.messagesDeleted", { n: ids.length + filed.length }), "success");
@@ -459,7 +462,11 @@ interface ChatTarget {
 
 /** The chat on screen right now. */
 function currentTarget(): ChatTarget {
-  return { modelId: store.activeModelId, manId: store.activeManId, master: store.master };
+  return {
+    modelId: store.activeModelId,
+    manId: store.activeManId,
+    master: store.master,
+  };
 }
 
 function sameTarget(a: ChatTarget, b: ChatTarget): boolean {
@@ -489,8 +496,79 @@ function targetName(target: ChatTarget): string {
  */
 const parked = new Map<string, UiEntry[]>();
 
-/** The run in flight, and the chat it answers to. */
-let runTarget: ChatTarget | null = null;
+/**
+ * The runs in flight, one per chat.
+ *
+ * Chats do not wait for each other: asking one dossier something while another
+ * is still writing starts a second run, and each keeps its own bubble. What a
+ * run has put on screen — the operator's message and the bubble filling up —
+ * lives here rather than in the chat log, because none of it is written down
+ * until the run ends; that is what lets the operator walk away and come back to
+ * a conversation still in progress instead of an empty one.
+ */
+interface LiveRun {
+  id: string;
+  target: ChatTarget;
+  /** The assistant bubble being filled, and the message that started it. */
+  entries: UiEntry[];
+  live: UiEntry;
+}
+
+const running = new Map<string, LiveRun>();
+
+/** Whether this particular chat has something going. */
+function isRunning(target: ChatTarget): boolean {
+  return running.has(targetKey(target));
+}
+
+/** The composer reflects the chat on screen, not whatever else is working. */
+function syncBusy() {
+  store.busy = isRunning(currentTarget());
+  markSending(store.busy);
+  renderScope();
+}
+
+/** Open a run for this chat: its bubble is on screen if the chat is. */
+function startRun(target: ChatTarget, opening: UiEntry[]): LiveRun {
+  const live = makeEntry("assistant", "", { steps: [], live: true, thoughts: "" }, true);
+  const run: LiveRun = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    target,
+    entries: [...opening, live],
+    live,
+  };
+  running.set(targetKey(target), run);
+  if (sameTarget(target, currentTarget())) {
+    for (const entry of run.entries) pushEntry(entry);
+    renderChat();
+  }
+  syncBusy();
+  return run;
+}
+
+/** Close a run and take its working bubble off the screen. */
+function endRun(run: LiveRun) {
+  running.delete(targetKey(run.target));
+  store.entries = store.entries.filter((entry) => entry !== run.live);
+  syncBusy();
+}
+
+/** Put an unfinished run back on screen when its chat is opened again. */
+function restoreRunning(target: ChatTarget) {
+  const run = running.get(targetKey(target));
+  if (!run) return;
+  for (const entry of run.entries) {
+    // The user's message may already have been written to the log by a step.
+    const known = store.entries.some(
+      (existing) =>
+        existing.id === entry.id ||
+        (existing.sender === entry.sender &&
+          entry.text.trim().length > 0 &&
+          existing.text.trim() === entry.text.trim()),
+    );
+    if (!known) store.entries.push(entry);
+  }
+}
 
 /** Show an entry in its own chat, or keep it until that chat is open again. */
 function deliver(target: ChatTarget, entry: UiEntry): boolean {
@@ -692,17 +770,19 @@ function clearComposer() {
 /**
  * Enter, or the button.
  *
- * A run in flight no longer swallows what comes next: the message lines up
- * above the composer and goes out on its own the moment the run ends, so the
- * operator can keep typing instead of watching a spinner.
+ * Only the chat that is already working makes a message wait: it lines up above
+ * the composer and goes out when that run ends. Another chat is another
+ * conversation, with its own context and its own turn, so it starts straight
+ * away and the two run side by side.
  */
 async function sendMessage() {
   const typed = ($("composerInput") as HTMLTextAreaElement).value.trim();
   const attached = store.attachments;
+  const target = currentTarget();
 
-  if (store.busy) {
+  if (isRunning(target)) {
     if (!typed && attached.length === 0) return;
-    store.queue.push({ text: typed, attachments: attached, target: currentTarget() });
+    store.queue.push({ text: typed, attachments: attached, target });
     store.attachments = [];
     clearComposer();
     renderQueue();
@@ -713,12 +793,16 @@ async function sendMessage() {
   store.attachments = [];
   clearComposer();
   renderAttachments();
-  await dispatchMessage(typed, attached, currentTarget());
+  await dispatchMessage(typed, attached, target);
+  await drainQueue(target);
+}
 
-  // Everything typed while that ran, in the order it was typed and into the
-  // chat it was typed in — switching away does not redirect it.
-  while (store.queue.length > 0 && !store.busy) {
-    const next = store.queue.shift() as QueuedMessage;
+/** Send what was typed into this chat while it was busy, in order. */
+async function drainQueue(target: ChatTarget) {
+  while (!isRunning(target)) {
+    const index = store.queue.findIndex((item) => sameTarget(item.target as ChatTarget, target));
+    if (index === -1) return;
+    const [next] = store.queue.splice(index, 1);
     renderQueue();
     await dispatchMessage(next.text, next.attachments, next.target as ChatTarget);
   }
@@ -756,15 +840,12 @@ async function dispatchMessage(
     return;
   }
 
-  store.busy = true;
-  runTarget = target;
-  markSending(true);
-  deliver(target, makeEntry("user", text, attached.length > 0 ? { images: attached } : null));
-  renderChat();
-  renderScope();
+  const asked = makeEntry("user", text, attached.length > 0 ? { images: attached } : null);
+  const run = startRun(target, [asked]);
 
   try {
     const output = await api.runAgent({
+      run_id: run.id,
       model_id: target.modelId,
       man_id: target.manId,
       mode: store.mode,
@@ -777,10 +858,8 @@ async function dispatchMessage(
       images: attached.map(({ mime, data }) => ({ mime, data })),
     });
 
-    const streamed = store.entries.find((e) => e.transient && e.sender === "assistant");
-    const thoughts =
-      output.thoughts || ((streamed?.meta as { thoughts?: string })?.thoughts ?? "");
-    store.entries = store.entries.filter((e) => !e.transient);
+    const thoughts = output.thoughts || ((run.live.meta as { thoughts?: string })?.thoughts ?? "");
+    endRun(run);
     // A reply the app wrote itself arrives as a key, so it reads in the
     // interface language rather than the one the core was written in.
     const reply = output.reply_key ? t(output.reply_key) : output.reply;
@@ -808,13 +887,11 @@ async function dispatchMessage(
       store.thread = await api.getChat(store.activeModelId, store.activeManId);
     }
   } catch (error) {
-    store.entries = store.entries.filter((e) => !e.transient);
+    endRun(run);
     deliver(target, makeEntry("system", t("chat.error", { message: errorText(error) })));
     toast(errorText(error), "error");
   } finally {
-    store.busy = false;
-    runTarget = null;
-    markSending(false);
+    endRun(run);
     renderAll();
     void refreshContextGauge();
   }
@@ -1013,10 +1090,7 @@ async function toggleDictation() {
           toast(t("toast.nothingHeard"), "error");
         }
       } catch (error) {
-        toast(
-          error instanceof SilentClipError ? t("toast.silentClip") : errorText(error),
-          "error",
-        );
+        toast(error instanceof SilentClipError ? t("toast.silentClip") : errorText(error), "error");
       } finally {
         setMicState("idle");
       }
@@ -1152,7 +1226,10 @@ function bindTopbar() {
 /** Re-render the notes the app wrote, in the language now selected. */
 function retranslateEntries() {
   for (const entry of store.entries) {
-    const meta = entry.meta as { key?: string; params?: Record<string, string | number> } | null;
+    const meta = entry.meta as {
+      key?: string;
+      params?: Record<string, string | number>;
+    } | null;
     if (meta?.key) entry.text = t(meta.key, meta.params ?? {});
   }
 }
@@ -1331,7 +1408,10 @@ function profileEntries(modelId: string): MenuEntry[] {
     { label: t("ctx.copyName"), onSelect: () => copyText(profile.name) },
     { label: t("ctx.copyId"), onSelect: () => copyText(profile.id) },
     "separator",
-    { label: t("ctx.addProfile"), onSelect: () => void openProfileForm(deps, null) },
+    {
+      label: t("ctx.addProfile"),
+      onSelect: () => void openProfileForm(deps, null),
+    },
     {
       label: t("ctx.deleteProfile"),
       danger: true,
@@ -1418,7 +1498,11 @@ function messageEntries(bubble: Element, entryId: string | undefined): MenuEntry
   const text = entry?.text ?? bubble.textContent?.trim() ?? "";
   const entries: MenuEntry[] = [
     ...selectionEntry(bubble),
-    { label: t("ctx.copyText"), disabled: !text, onSelect: () => copyText(text) },
+    {
+      label: t("ctx.copyText"),
+      disabled: !text,
+      onSelect: () => copyText(text),
+    },
   ];
   if (entry?.sender === "assistant" && !entry.transient) {
     entries.push({
@@ -1555,15 +1639,12 @@ async function refreshContextGauge() {
     gauge.classList.toggle("warn", stats.ratio >= (store.settings?.auto_compact_at ?? 0.85));
     $("ctxFill").style.width = `${percent}%`;
     $("ctxLabel").textContent = `${percent}%`;
-    gauge.title = t(
-      store.master ? "composer.contextDetailChat" : "composer.contextDetail",
-      {
-        used: stats.used_tokens,
-        window: stats.window_tokens,
-        live: stats.live_messages,
-        total: stats.total_messages,
-      },
-    );
+    gauge.title = t(store.master ? "composer.contextDetailChat" : "composer.contextDetail", {
+      used: stats.used_tokens,
+      window: stats.window_tokens,
+      live: stats.live_messages,
+      total: stats.total_messages,
+    });
   } catch {
     gauge.hidden = true;
   }
@@ -1692,6 +1773,8 @@ async function toggleMasterChat() {
       console.error("master log", error);
     }
     restoreParked(currentTarget());
+    restoreRunning(currentTarget());
+    syncBusy();
     cancelSelection();
     if (store.entries.length === 0) pushEntry(systemNote("master.hello"));
   } else {
@@ -1705,22 +1788,19 @@ async function sendToMaster(
   attached: Attachment[] = [],
   target: ChatTarget = currentTarget(),
 ) {
-  store.busy = true;
-  runTarget = target;
-  markSending(true);
-  deliver(target, makeEntry("user", text, attached.length > 0 ? { images: attached } : null));
-  renderChat();
-  renderScope();
+  const asked = makeEntry("user", text, attached.length > 0 ? { images: attached } : null);
+  const run = startRun(target, [asked]);
 
   try {
     const output = await api.masterChat({
+      run_id: run.id,
       message: text,
       security: store.security,
       thinking_effort: store.thinking || undefined,
       temporary: store.temporary,
       images: attached.map(({ mime, data }) => ({ mime, data })),
     });
-    store.entries = store.entries.filter((e) => !e.transient);
+    endRun(run);
     deliver(
       target,
       makeEntry("assistant", output.reply, {
@@ -1737,13 +1817,11 @@ async function sendToMaster(
     store.pending = await api.pendingList();
     if (store.activeModelId) store.men = await api.listMen(store.activeModelId);
   } catch (error) {
-    store.entries = store.entries.filter((e) => !e.transient);
+    endRun(run);
     deliver(target, makeEntry("system", t("chat.error", { message: errorText(error) })));
     toast(errorText(error), "error");
   } finally {
-    store.busy = false;
-    runTarget = null;
-    markSending(false);
+    endRun(run);
     renderAll();
     void refreshContextGauge();
   }
@@ -1761,7 +1839,7 @@ async function writeLetters(brief: string, target: ChatTarget = currentTarget())
     toast(t("toast.pickProfile"), "error");
     return;
   }
-  if (store.busy) return;
+  if (isRunning(target)) return;
 
   const recipients = target.manId ? [target.manId] : visibleMen().map((m) => m.id);
   if (recipients.length === 0) {
@@ -1777,16 +1855,13 @@ async function writeLetters(brief: string, target: ChatTarget = currentTarget())
     if (!ok) return;
   }
 
-  store.busy = true;
-  runTarget = target;
-  markSending(true);
-  if (brief) deliver(target, makeEntry("user", brief));
-  pushEntry(makeEntry("system", t("letters.writing", { n: recipients.length }), null, true));
-  renderChat();
-  renderScope();
+  const opening = brief ? [makeEntry("user", brief)] : [];
+  const run = startRun(target, opening);
+  run.live.text = t("letters.writing", { n: recipients.length });
 
   try {
     const output = await api.writeLetters({
+      run_id: run.id,
       model_id: target.modelId,
       man_ids: target.manId ? recipients : [],
       brief,
@@ -1794,7 +1869,7 @@ async function writeLetters(brief: string, target: ChatTarget = currentTarget())
       thinking_effort: store.thinking || undefined,
       temporary: store.temporary,
     });
-    store.entries = store.entries.filter((e) => !e.transient);
+    endRun(run);
     for (const letter of output.letters) {
       deliver(
         target,
@@ -1808,13 +1883,11 @@ async function writeLetters(brief: string, target: ChatTarget = currentTarget())
       );
     }
   } catch (error) {
-    store.entries = store.entries.filter((e) => !e.transient);
-    pushEntry(makeEntry("system", t("chat.error", { message: errorText(error) })));
+    endRun(run);
+    deliver(target, makeEntry("system", t("chat.error", { message: errorText(error) })));
     toast(errorText(error), "error");
   } finally {
-    store.busy = false;
-    runTarget = null;
-    markSending(false);
+    endRun(run);
     renderAll();
   }
 }
@@ -1893,7 +1966,16 @@ function bindComposer() {
   $("queue").addEventListener("click", (event) => {
     const drop = (event.target as HTMLElement).closest<HTMLElement>("[data-queue]");
     if (!drop) return;
-    store.queue.splice(Number(drop.dataset.queue), 1);
+    // The strip counts only this chat's messages, so the queue is walked the
+    // same way to find the one that was clicked.
+    const wanted = Number(drop.dataset.queue);
+    let seen = -1;
+    const index = store.queue.findIndex((item) => {
+      if (!sameTarget(item.target as ChatTarget, currentTarget())) return false;
+      seen += 1;
+      return seen === wanted;
+    });
+    if (index !== -1) store.queue.splice(index, 1);
     renderQueue();
   });
   micButton().addEventListener("click", () => void toggleDictation());
@@ -1964,22 +2046,6 @@ function bindTabs() {
   };
   tabs.forEach((tab) => tab.addEventListener("click", () => apply(tab.dataset.pane!)));
   apply("paneChat");
-}
-
-/**
- * The bubble a run is currently filling.
- *
- * Tool calls used to land as separate centred rows, which pushed the actual
- * answer around and looked nothing like the finished message. Now a run opens
- * one assistant bubble and the steps accumulate inside it, so the layout while
- * working is the layout afterwards.
- */
-function liveEntry(): UiEntry {
-  const existing = store.entries.find((e) => e.transient && e.sender === "assistant");
-  if (existing) return existing;
-  const entry = makeEntry("assistant", "", { steps: [], live: true, thoughts: "" }, true);
-  pushEntry(entry);
-  return entry;
 }
 
 /**
@@ -2132,19 +2198,19 @@ function bindAgentEvents() {
   void onAgentEvent((payload) => {
     const kind = String(payload.kind ?? "");
 
-    // The operator may have walked to another chat while this run goes on. Its
-    // progress belongs to the chat it was started in, so nothing is drawn into
-    // the one now on screen; the answer itself is put back on return.
-    if (runTarget && !sameTarget(runTarget, currentTarget())) return;
-
-    const entry = liveEntry();
+    // Every event names its run, so it reaches the right bubble even when it
+    // belongs to a chat the operator is not looking at.
+    const id = String(payload.run ?? "");
+    const run = [...running.values()].find((known) => known.id === id);
+    if (!run) return;
+    const entry = run.live;
     const meta = entry.meta as {
-    steps?: RunStep[];
-    note?: string;
-    live?: boolean;
-    thoughts?: string;
-    thinkingSince?: number;
-  };
+      steps?: RunStep[];
+      note?: string;
+      live?: boolean;
+      thoughts?: string;
+      thinkingSince?: number;
+    };
 
     if (kind === "delta") {
       // The answer as it is written. `live` stays set until the run ends, so
@@ -2171,7 +2237,8 @@ function bindAgentEvents() {
     } else {
       return;
     }
-    renderChat();
+    // Only the chat on screen needs redrawing; the rest keep filling quietly.
+    if (sameTarget(run.target, currentTarget())) renderChat();
   });
 }
 
@@ -2201,7 +2268,8 @@ async function boot() {
     applyLanguage(data.settings.ui_language === "en" ? "en" : "ru");
 
     const speech = $("speechLang") as HTMLSelectElement;
-    speech.value = data.settings.speech_language || (data.settings.ui_language === "en" ? "en" : "ru");
+    speech.value =
+      data.settings.speech_language || (data.settings.ui_language === "en" ? "en" : "ru");
     const thinking = $("thinkingSelect") as HTMLSelectElement;
     store.thinking =
       data.settings.providers.find((p) => p.id === data.settings.active_provider)

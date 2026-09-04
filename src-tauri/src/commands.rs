@@ -14,8 +14,17 @@ use crate::storage;
 
 pub const AGENT_EVENT: &str = "velvetdesk://agent";
 
-fn emitter(app: &AppHandle) -> impl Fn(Value) + Send + Sync + '_ {
+/// Progress events, stamped with the run they came from.
+///
+/// Several runs can be in flight at once — one per chat — and the interface has
+/// to know whose delta, step or retry it is looking at. The id is the caller's:
+/// it labels its own run and recognises the events coming back.
+fn emitter(app: &AppHandle, run: Option<String>) -> impl Fn(Value) + Send + Sync + '_ {
     move |payload: Value| {
+        let mut payload = payload;
+        if let (Some(run), Some(fields)) = (run.as_deref(), payload.as_object_mut()) {
+            fields.insert("run".into(), json!(run));
+        }
         let _ = app.emit(AGENT_EVENT, payload);
     }
 }
@@ -440,7 +449,7 @@ pub async fn run_agent(
     let settings = state.settings_view();
     let provider = state.active_provider()?;
     let pool = state.pool(&provider.id);
-    let emit = emitter(&app);
+    let emit = emitter(&app, input.run_id.clone());
 
     let deps = AgentDeps {
         paths: &state.paths,
@@ -531,7 +540,7 @@ pub async fn compact_chat(
     let settings = state.settings_view();
     let provider = state.active_provider()?;
     let pool = state.pool(&provider.id);
-    let emit = emitter(&app);
+    let emit = emitter(&app, None);
 
     let deps = AgentDeps {
         paths: &state.paths,
@@ -556,7 +565,7 @@ pub async fn compact_context(
     let settings = state.settings_view();
     let provider = state.active_provider()?;
     let pool = state.pool(&provider.id);
-    let emit = emitter(&app);
+    let emit = emitter(&app, None);
     let scope = state.paths.scope(&model_id)?;
 
     let deps = AgentDeps {
@@ -583,7 +592,7 @@ pub async fn write_letters(
     let settings = state.settings_view();
     let provider = state.active_provider()?;
     let pool = state.pool(&provider.id);
-    let emit = emitter(&app);
+    let emit = emitter(&app, None);
 
     let deps = AgentDeps {
         paths: &state.paths,
@@ -605,7 +614,7 @@ pub async fn master_chat(
     let settings = state.settings_view();
     let provider = state.active_provider()?;
     let pool = state.pool(&provider.id);
-    let emit = emitter(&app);
+    let emit = emitter(&app, input.run_id.clone());
 
     let deps = AgentDeps {
         paths: &state.paths,
@@ -632,7 +641,7 @@ pub async fn master_context_stats(
     let settings = state.settings_view();
     let provider = state.active_provider()?;
     let pool = state.pool(&provider.id);
-    let emit = emitter(&app);
+    let emit = emitter(&app, None);
 
     let deps = AgentDeps {
         paths: &state.paths,
@@ -1107,7 +1116,7 @@ pub fn delete_local_model(
 pub async fn test_provider(app: AppHandle, state: State<'_, AppState>) -> Result<Value> {
     let provider = state.active_provider()?;
     let pool = state.pool(&provider.id);
-    let emit = emitter(&app);
+    let emit = emitter(&app, None);
     let mut request = crate::llm::ChatRequest::new(
         "You are a connectivity probe. Answer with the single word: ok",
     );
