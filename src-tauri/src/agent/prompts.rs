@@ -29,7 +29,12 @@ Hard rules:
   `add_tone_rules` with what those letters show about how she writes — sentence
   length, warmth, openings and sign-offs, punctuation and emoji, the mistakes
   she makes. Do this once, quietly, alongside the answer you were asked for;
-  never invent a habit her letters do not show.";
+  never invent a habit her letters do not show.
+- A letter you wrote yourself can join those examples once it has been sent, and
+  a letter filed as sent is stored as a sample on its own. Before that it is a
+  draft: if you think a draft of yours is worth keeping as an example of her
+  voice, end your answer by asking the operator whether to keep it, in one
+  short line, and store it with `add_writing_samples` only after they say so.";
 
 pub fn security_block(level: SecurityLevel) -> &'static str {
     match level {

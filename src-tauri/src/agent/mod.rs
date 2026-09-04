@@ -181,6 +181,14 @@ pub async fn run(deps: &AgentDeps<'_>, input: RunInput) -> Result<RunOutput> {
     request.temperature = deps.provider.temperature;
     request.max_output_tokens = deps.provider.max_output_tokens;
     request.thinking = thinking_for(deps.provider, input.thinking_effort.as_deref());
+
+    // What the operator and the copilot have already said to each other. Without
+    // it every message starts from nothing: "make it shorter" has no letter to
+    // shorten, "as we agreed" refers to nobody. The correspondence with the man
+    // is separate — that is the block below — and this is the working
+    // conversation about it.
+    push_operator_history(&scope, input.man_id.as_deref(), &mut request);
+
     request.messages.push(LlmMessage::user_with_images(
         user_block,
         input.images.clone(),
@@ -793,11 +801,35 @@ pub fn next_request(
     if settings.agent_mode == AgentMode::Auto {
         request.tools = all_tool_defs();
     }
+    push_operator_history(scope, man_id, &mut request);
     let context = prompts::context_block(thread.as_ref(), settings.history_limit);
     if !context.is_empty() {
         request.messages.push(LlmMessage::user(context));
     }
     Ok(request)
+}
+
+/// How many turns of the operator's own conversation are carried into a run.
+const OPERATOR_HISTORY: usize = 20;
+
+/// Replay the recent operator/copilot turns into a request.
+///
+/// A compacted chat is one summary entry followed by whatever came after it, so
+/// replaying the tail of the log is also what makes `/compact` mean anything.
+fn push_operator_history(scope: &Scope, man_id: Option<&str>, request: &mut ChatRequest) {
+    let Ok(log) = scope.read_agent_log(man_id) else {
+        return;
+    };
+    for entry in log.entries.iter().rev().take(OPERATOR_HISTORY).rev() {
+        match entry.sender.as_str() {
+            "user" => request.messages.push(LlmMessage::user(entry.text.clone())),
+            "assistant" => request
+                .messages
+                .push(LlmMessage::assistant(entry.text.clone(), vec![])),
+            // System notes are the interface talking to itself.
+            _ => {}
+        }
+    }
 }
 
 /// Everything an AUTO run declares: the profile tools plus files and commands.
@@ -1610,6 +1642,38 @@ mod tests {
         assert_eq!(pending[0].after["facts"].as_array().unwrap().len(), 1);
         assert_eq!(pending[0].after["notes"].as_array().unwrap().len(), 1);
         assert_eq!(scope.read_all_men().unwrap().len(), 1);
+    }
+
+    /// The copilot is given the conversation the operator is having with it,
+    /// not only the correspondence it is about.
+    #[test]
+    fn the_prompt_carries_the_operators_own_chat() {
+        let scope = scope();
+        scope
+            .append_agent_entry(None, AgentEntry::new("user", "напиши ему про рыбалку"))
+            .unwrap();
+        scope
+            .append_agent_entry(None, AgentEntry::new("assistant", "Готово, вот письмо"))
+            .unwrap();
+        scope
+            .append_agent_entry(None, AgentEntry::new("system", "внутренняя пометка"))
+            .unwrap();
+
+        let settings = Settings::default();
+        let provider = settings.providers[0].clone();
+        let request = next_request(&scope, &settings, &provider, None).unwrap();
+
+        let said: Vec<&str> = request
+            .messages
+            .iter()
+            .map(|m| m.content.as_str())
+            .collect();
+        assert!(said.contains(&"напиши ему про рыбалку"));
+        assert!(said.contains(&"Готово, вот письмо"));
+        assert!(
+            !said.contains(&"внутренняя пометка"),
+            "notes the interface writes to itself are not the operator's words"
+        );
     }
 
     /// What the model is given about a dossier: the digest of the letters that

@@ -1068,9 +1068,44 @@ pub fn commit(scope: &Scope, target: &MutTarget) -> Result<()> {
     match target {
         MutTarget::Man(man) => scope.write_man(man),
         MutTarget::Profile(profile) => scope.write_profile(profile),
-        MutTarget::Chat(thread) => scope.write_chat(thread),
+        MutTarget::Chat(thread) => {
+            scope.write_chat(thread)?;
+            // A letter filed as sent is the truest sample of how she writes:
+            // it is what actually went out over her name. Nothing is asked of
+            // the model for this, and a profile that cannot be read simply
+            // keeps the samples it had.
+            if let Some(last) = thread.messages.last() {
+                if last.role == MsgRole::Outgoing {
+                    let _ = remember_sample(scope, &last.text);
+                }
+            }
+            Ok(())
+        }
         MutTarget::DeleteMan(id) => scope.delete_man(id),
     }
+}
+
+/// Keep one of her letters among the profile's examples: the newest ten, no
+/// repeats.
+fn remember_sample(scope: &Scope, text: &str) -> Result<()> {
+    let letter = text.trim();
+    if letter.is_empty() {
+        return Ok(());
+    }
+    let mut profile = scope.read_profile()?;
+    if push_unique(&mut profile.writing_samples, vec![letter.to_string()]) == 0 {
+        return Ok(());
+    }
+    profile.writing_samples = profile
+        .writing_samples
+        .iter()
+        .rev()
+        .take(10)
+        .rev()
+        .cloned()
+        .collect();
+    profile.updated_at = Utc::now();
+    scope.write_profile(&profile)
 }
 
 fn truncate(text: &str, max: usize) -> String {
@@ -1190,6 +1225,25 @@ mod tests {
         });
         execute(&scope, SecurityLevel::Yolo, "append_chat", &incoming).unwrap();
         assert_eq!(scope.read_chat("1219749").unwrap().messages.len(), 3);
+    }
+
+    /// A letter filed as sent joins her examples by itself; his does not.
+    #[test]
+    fn a_sent_letter_becomes_a_sample() {
+        let scope = scope();
+        let hers = json!({
+            "man_id": "1219749",
+            "role": "outgoing",
+            "text": "Доброе утро! Читала твоё письмо за кофе и улыбалась."
+        });
+        execute(&scope, SecurityLevel::Yolo, "append_chat", &hers).unwrap();
+        let his =
+            json!({ "man_id": "1219749", "role": "incoming", "text": "Good morning, Marina!" });
+        execute(&scope, SecurityLevel::Yolo, "append_chat", &his).unwrap();
+
+        let profile = scope.read_profile().unwrap();
+        assert_eq!(profile.writing_samples.len(), 1);
+        assert!(profile.writing_samples[0].starts_with("Доброе утро"));
     }
 
     /// Her own letters are kept as samples, newest ten, without repeats.
