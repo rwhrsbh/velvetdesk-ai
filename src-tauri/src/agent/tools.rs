@@ -370,7 +370,8 @@ pub fn tool_defs() -> Vec<ToolDef> {
         ),
         def(
             "update_profile",
-            "Update the model's own profile: bio, facts, tone rules, banned phrases.",
+            "Update the model's own profile: bio, facts, tone rules, banned phrases, \
+             writing samples.",
             json!({
                 "type": "object",
                 "properties": {
@@ -384,7 +385,12 @@ pub fn tool_defs() -> Vec<ToolDef> {
                         }
                     },
                     "add_tone_rules": { "type": "array", "items": { "type": "string" } },
-                    "add_banned_phrases": { "type": "array", "items": { "type": "string" } }
+                    "add_banned_phrases": { "type": "array", "items": { "type": "string" } },
+                    "add_writing_samples": {
+                        "type": "array",
+                        "description": "letters she actually sent, kept verbatim as examples of her voice",
+                        "items": { "type": "string" }
+                    }
                 }
             }),
         ),
@@ -911,16 +917,24 @@ pub fn plan_mutation(scope: &Scope, tool: &str, args: &Value) -> Result<Mutation
             let mut thread = before.clone();
             thread.messages.push(ChatMessage {
                 id: new_id(),
-                role,
+                role: role.clone(),
                 channel,
                 text: text.clone(),
                 ts: Utc::now(),
             });
             thread.updated_at = Utc::now();
+            // Whose message this is decides what the operator reads on the
+            // step: filing his letter and filing her reply look identical
+            // otherwise, and one of them means the reply has been sent.
+            let key = match &role {
+                MsgRole::Incoming => "step.appendIncoming",
+                MsgRole::Outgoing => "step.appendOutgoing",
+                MsgRole::Note => "step.appendNote",
+            };
             Ok(MutationPlan {
                 summary: format!("в переписку {id}: {}", truncate(&text, 60)),
                 phrase: Phrase::new(
-                    "step.appendChat",
+                    key,
                     // The whole message, not a preview: this is the letter the
                     // operator is about to send, and it belongs on screen.
                     json!({ "id": id, "text": text }),
@@ -963,6 +977,23 @@ pub fn plan_mutation(scope: &Scope, tool: &str, args: &Value) -> Result<Mutation
             }
             if push_unique(&mut profile.tone_rules, arg_vec(args, "add_tone_rules")) > 0 {
                 changed.push("tone_rules");
+            }
+            // Examples are the voice: a model copies one far more reliably than
+            // it follows a rule, so the letters themselves are worth storing.
+            if push_unique(
+                &mut profile.writing_samples,
+                arg_vec(args, "add_writing_samples"),
+            ) > 0
+            {
+                profile.writing_samples = profile
+                    .writing_samples
+                    .iter()
+                    .rev()
+                    .take(10)
+                    .rev()
+                    .cloned()
+                    .collect();
+                changed.push("writing_samples");
             }
             if push_unique(
                 &mut profile.banned_phrases,
@@ -1159,6 +1190,25 @@ mod tests {
         });
         execute(&scope, SecurityLevel::Yolo, "append_chat", &incoming).unwrap();
         assert_eq!(scope.read_chat("1219749").unwrap().messages.len(), 3);
+    }
+
+    /// Her own letters are kept as samples, newest ten, without repeats.
+    #[test]
+    fn writing_samples_keep_the_last_ten() {
+        let scope = scope();
+        for round in 0..12 {
+            let args = json!({ "add_writing_samples": [format!("letter {round}")] });
+            execute(&scope, SecurityLevel::Yolo, "update_profile", &args).unwrap();
+        }
+        // The same letter twice adds nothing, and a call that changes nothing
+        // is refused rather than written.
+        let again = json!({ "add_writing_samples": ["letter 11"] });
+        assert!(execute(&scope, SecurityLevel::Yolo, "update_profile", &again).is_err());
+
+        let profile = scope.read_profile().unwrap();
+        assert_eq!(profile.writing_samples.len(), 10);
+        assert_eq!(profile.writing_samples.first().unwrap(), "letter 2");
+        assert_eq!(profile.writing_samples.last().unwrap(), "letter 11");
     }
 
     #[test]

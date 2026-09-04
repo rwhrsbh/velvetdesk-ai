@@ -22,7 +22,14 @@ Hard rules:
 - Length matches the channel: chat replies are 1-4 sentences, letters are
   3-6 short paragraphs.
 - Every concrete new fact he reveals must be stored through the memory tools or
-  the memory patch. Storing facts is not optional.";
+  the memory patch. Storing facts is not optional.
+- Her voice is part of the record too. When the profile carries no tone rules,
+  or fewer than ten writing samples, read what she has already sent and store
+  it: `add_writing_samples` with her letters as they were written, and
+  `add_tone_rules` with what those letters show about how she writes — sentence
+  length, warmth, openings and sign-offs, punctuation and emoji, the mistakes
+  she makes. Do this once, quietly, alongside the answer you were asked for;
+  never invent a habit her letters do not show.";
 
 pub fn security_block(level: SecurityLevel) -> &'static str {
     match level {
@@ -287,6 +294,48 @@ operator's own wording for names, ids and numbers.
 
 Drop: greetings, retries, tool chatter, anything already stored in a dossier.
 Write it as short lines, no preface, no headings.";
+
+/// Asks for the digest that *replaces* a correspondence for good.
+///
+/// Compaction only stops sending the old messages; this one deletes them, so
+/// the digest is the only memory left of them and has to carry considerably
+/// more than the terse version above.
+pub const THREAD_DIGEST: &str = "\
+You are given a dating-agency correspondence that is about to be deleted and
+replaced by your summary. Whatever you leave out is lost for good, so write the
+account the woman would need to carry the relationship on without ever reading
+those letters again.
+
+Write it in the operator's language, as short labelled lines under these
+headings, skipping a heading that has nothing under it:
+
+WHO HE IS — name, age, city, work, family, health, faith, money, everything he
+has said about himself, with his own wording for names and numbers.
+WHAT HAPPENED — the story of the correspondence in order: how they met, what
+each letter was about, what changed between them, dates where he gave them.
+AGREED — plans, promises, dates, gifts and money in either direction.
+HER SIDE — what she has told him about herself, including anything invented for
+him, so she never contradicts it later.
+HIS VOICE — how he writes, what he responds to, what he avoids, jokes that
+landed, subjects that cool him down.
+OPEN — questions he asked and she has not answered, and the other way round.
+TONE NOW — where the relationship stands.
+
+Never invent anything. No preface, no JSON, no headings other than these.";
+
+/// Asks the model to describe how this woman writes, from her own letters.
+pub const VOICE_ANALYST: &str = "\
+You are given letters one woman wrote to men on a dating site. Describe how she
+writes, as instructions another writer could follow to be mistaken for her.
+
+Cover: sentence length and rhythm, how warm she is and how she shows it, what
+she opens and signs off with, punctuation and emoji habits, her level of the
+language and the mistakes she makes in it, what she asks about, what she tells
+about herself, how she flirts, what she never does.
+
+Write in the operator's language, as short imperative lines — 'writes in two to
+four sentences', 'opens by answering his last question', not an essay about
+her. No preface, no JSON. Never invent a habit you cannot see in the letters.";
 
 /// Asks for the summary that replaces the messages dropped by compaction.
 pub const COMPACTOR: &str = "\

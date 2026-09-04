@@ -97,6 +97,10 @@ export interface ChatThread {
   model_id: string;
   man_id: string;
   messages: ChatMessage[];
+  /** What the folded-away letters said; written by the digest, editable. */
+  context_summary: string;
+  /** Index of the first message that still goes into the prompt. */
+  context_from: number;
   updated_at: string;
 }
 

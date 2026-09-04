@@ -165,8 +165,12 @@ export const api = {
   deleteAgentEntries: (model_id: string, man_id: string | null, ids: string[]) =>
     invoke<AgentLog>("delete_agent_entries", { modelId: model_id, manId: man_id, ids }),
   deleteMasterEntries: (ids: string[]) => invoke<AgentLog>("delete_master_entries", { ids }),
-  saveChat: (model_id: string, man_id: string, messages: unknown[]) =>
-    invoke<ChatThread>("save_chat", { modelId: model_id, manId: man_id, messages }),
+  saveChat: (model_id: string, man_id: string, messages: unknown[], summary?: string) =>
+    invoke<ChatThread>("save_chat", { modelId: model_id, manId: man_id, messages, summary }),
+  digestChat: (model_id: string, man_id: string, keep_last?: number) =>
+    invoke<ChatThread>("digest_chat", { modelId: model_id, manId: man_id, keepLast: keep_last }),
+  learnVoice: (model_id: string, samples?: number) =>
+    invoke<Profile>("learn_voice", { modelId: model_id, samples }),
   deleteChatMessages: (model_id: string, man_id: string, ids: string[]) =>
     invoke<ChatThread>("delete_chat_messages", { modelId: model_id, manId: man_id, ids }),
 

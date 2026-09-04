@@ -1380,6 +1380,12 @@ select.dressed {
 }
 
 /* One row per message while the correspondence is being corrected. */
+.modal-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .msg-rows {
   display: flex;
   flex-direction: column;

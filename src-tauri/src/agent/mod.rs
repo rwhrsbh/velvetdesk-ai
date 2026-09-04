@@ -375,6 +375,152 @@ pub async fn compact_context(
     Ok(thread.context_summary.clone())
 }
 
+/// Replace the older half of a correspondence with a written digest.
+///
+/// Compaction stops *sending* old messages; this deletes them. A thread that
+/// has run for months costs tokens on every turn and eventually outgrows the
+/// window, and the operator would rather keep a thorough account of it than a
+/// hundred letters. The last few messages stay as they are, so the next reply
+/// still has the immediate exchange to answer.
+pub async fn digest_chat(
+    deps: &AgentDeps<'_>,
+    model_id: &str,
+    man_id: &str,
+    keep_last: usize,
+) -> Result<ChatThread> {
+    let scope = deps.paths.scope(model_id)?;
+    let mut thread = scope.read_chat(man_id)?;
+    let keep_last = keep_last.min(thread.messages.len());
+    if thread.messages.len().saturating_sub(keep_last) < 2 {
+        return Err(AppError::message("error.nothingToCompact", json!({})));
+    }
+
+    let cut = thread.messages.len() - keep_last;
+    let older: Vec<String> = thread.messages[..cut]
+        .iter()
+        .map(|m| {
+            let who = match m.role {
+                crate::models::MsgRole::Incoming => "HIM",
+                crate::models::MsgRole::Outgoing => "HER",
+                crate::models::MsgRole::Note => "OPERATOR-NOTE",
+            };
+            format!("{who} ({}): {}", m.ts.format("%Y-%m-%d"), m.text)
+        })
+        .collect();
+
+    let mut request = ChatRequest::new(format!(
+        "{}\n\nWrite it in {}.",
+        prompts::THREAD_DIGEST,
+        prompts::operator_language(&deps.settings.ui_language)
+    ));
+    request.temperature = 0.2;
+    let previous = if thread.context_summary.trim().is_empty() {
+        String::new()
+    } else {
+        format!(
+            "The digest written last time, which these messages continue:\n{}\n\n",
+            thread.context_summary.trim()
+        )
+    };
+    request.messages.push(LlmMessage::user(format!(
+        "{previous}Correspondence to fold away ({} messages):\n{}",
+        older.len(),
+        older.join("\n")
+    )));
+
+    let response = deps
+        .llm
+        .chat(deps.provider, deps.pool.clone(), &request, deps.emit)
+        .await?;
+    let digest = response.text.trim().to_string();
+    if digest.is_empty() {
+        return Err(AppError::message("error.emptySummary", json!({})));
+    }
+
+    thread.context_summary = digest;
+    thread.messages = thread.messages.split_off(cut);
+    thread.context_from = 0;
+    thread.updated_at = chrono::Utc::now();
+    scope.write_chat(&thread)?;
+    Ok(thread)
+}
+
+/// Learn how this woman writes, from what she has already written.
+///
+/// A profile carries tone rules and writing samples, and both are usually left
+/// empty — nobody sits down to describe their own voice. Her outgoing letters
+/// are right there, so the description is taken from them: the newest ones are
+/// kept verbatim as samples, because a model copies an example far more
+/// reliably than it follows a rule.
+pub async fn learn_voice(
+    deps: &AgentDeps<'_>,
+    model_id: &str,
+    sample_limit: usize,
+) -> Result<Profile> {
+    let scope = deps.paths.scope(model_id)?;
+    let mut profile = scope.read_profile()?;
+
+    let mut letters: Vec<(chrono::DateTime<chrono::Utc>, String)> = vec![];
+    for man in scope.read_all_men()? {
+        let Ok(thread) = scope.read_chat(&man.id) else {
+            continue;
+        };
+        for message in thread.messages {
+            if message.role == crate::models::MsgRole::Outgoing && !message.text.trim().is_empty() {
+                letters.push((message.ts, message.text));
+            }
+        }
+    }
+    if letters.len() < 2 {
+        return Err(AppError::message("error.notEnoughLetters", json!({})));
+    }
+    // Newest first: the way she writes now is what should be copied.
+    letters.sort_by_key(|(ts, _)| std::cmp::Reverse(*ts));
+    letters.truncate(sample_limit.clamp(2, 10));
+
+    let mut request = ChatRequest::new(format!(
+        "{}\n\nWrite it in {}.",
+        prompts::VOICE_ANALYST,
+        prompts::operator_language(&deps.settings.ui_language)
+    ));
+    request.temperature = 0.3;
+    request.messages.push(LlmMessage::user(format!(
+        "Letters written by {} ({} of them, newest first):\n\n{}",
+        profile.name,
+        letters.len(),
+        letters
+            .iter()
+            .map(|(_, text)| format!("---\n{text}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    )));
+
+    let response = deps
+        .llm
+        .chat(deps.provider, deps.pool.clone(), &request, deps.emit)
+        .await?;
+
+    let rules: Vec<String> = response
+        .text
+        .lines()
+        .map(|line| {
+            line.trim_start_matches(['-', '*', '•', ' '])
+                .trim()
+                .to_string()
+        })
+        .filter(|line| !line.is_empty())
+        .collect();
+    if rules.is_empty() {
+        return Err(AppError::message("error.emptySummary", json!({})));
+    }
+
+    profile.tone_rules = rules;
+    profile.writing_samples = letters.into_iter().map(|(_, text)| text).collect();
+    profile.updated_at = chrono::Utc::now();
+    scope.write_profile(&profile)?;
+    Ok(profile)
+}
+
 /// Fold a whole conversation into one summary.
 ///
 /// The chat is what grows: every turn carries the ones before it. Compaction
@@ -1464,6 +1610,38 @@ mod tests {
         assert_eq!(pending[0].after["facts"].as_array().unwrap().len(), 1);
         assert_eq!(pending[0].after["notes"].as_array().unwrap().len(), 1);
         assert_eq!(scope.read_all_men().unwrap().len(), 1);
+    }
+
+    /// What the model is given about a dossier: the digest of the letters that
+    /// were folded away, and every message still on file after it.
+    #[test]
+    fn the_prompt_carries_the_correspondence() {
+        let mut thread = ChatThread::new("2428653".into(), "1219749".into());
+        thread.context_summary = "Он писал про рыбалку и обещал фото.".into();
+        for n in 0..4 {
+            thread.messages.push(crate::models::ChatMessage {
+                id: format!("m{n}"),
+                role: if n % 2 == 0 {
+                    crate::models::MsgRole::Incoming
+                } else {
+                    crate::models::MsgRole::Outgoing
+                },
+                channel: crate::models::Channel::Chat,
+                text: format!("message {n}"),
+                ts: Utc::now(),
+            });
+        }
+
+        let block = prompts::context_block(Some(&thread), 40);
+        assert!(block.contains("Он писал про рыбалку"));
+        for n in 0..4 {
+            assert!(
+                block.contains(&format!("message {n}")),
+                "message {n} is missing"
+            );
+        }
+        assert!(block.contains("HIM: message 0"));
+        assert!(block.contains("HER: message 1"));
     }
 
     /// A pasted roster of admirers becomes dossiers, and the stray top-level

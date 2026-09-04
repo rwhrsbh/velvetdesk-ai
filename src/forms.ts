@@ -205,6 +205,10 @@ export async function openProfileForm(deps: ModalDeps, existing?: Profile | null
 
     <details class="advanced">
       <summary>${t("profile.toneSection")}</summary>
+      <div class="field">
+        <button class="btn btn-secondary" id="btnLearnVoice" type="button">${t("profile.learnVoice")}</button>
+        <div class="modal-sub">${t("profile.learnVoiceHint")}</div>
+      </div>
       <div class="field"><label>${t("profile.tone")}</label>
         <textarea class="field-area" id="fTone" placeholder="${t("profile.toneHint")}">${escapeHtml(
           (p?.tone_rules ?? []).join("\n"),
@@ -235,6 +239,29 @@ export async function openProfileForm(deps: ModalDeps, existing?: Profile | null
 
   bindAvatarField(card);
   dressCombo(card.querySelector<HTMLInputElement>("#fSite")!, SITES);
+
+  // Her voice, read off her own letters: nobody writes their own style guide,
+  // and the letters she has already sent are the truthful version of one.
+  card.querySelector<HTMLButtonElement>("#btnLearnVoice")?.addEventListener("click", async () => {
+    if (!p) return;
+    const button = card.querySelector<HTMLButtonElement>("#btnLearnVoice")!;
+    button.disabled = true;
+    button.textContent = t("profile.learningVoice");
+    try {
+      const learned = await api.learnVoice(p.id, 10);
+      const tone = card.querySelector<HTMLTextAreaElement>("#fTone");
+      const samples = card.querySelector<HTMLTextAreaElement>("#fSamples");
+      if (tone) tone.value = learned.tone_rules.join("\n");
+      if (samples) samples.value = learned.writing_samples.join("\n\n");
+      toast(t("toast.voiceLearned", { n: learned.tone_rules.length }), "success");
+      await deps.refresh();
+    } catch (error) {
+      toast(errorText(error), "error");
+    } finally {
+      button.disabled = false;
+      button.textContent = t("profile.learnVoice");
+    }
+  });
   card.querySelector<HTMLInputElement>("#fName")?.focus();
   card.querySelector<HTMLButtonElement>('[data-act="close"]')?.addEventListener("click", closeModal);
 
@@ -397,11 +424,27 @@ export async function openChatEditor(deps: ModalDeps, man: Man) {
     return;
   }
 
+  let summary = "";
+  try {
+    summary = (await api.getChat(man.model_id, man.id)).context_summary ?? "";
+  } catch {
+    /* the messages loaded; an absent digest is not worth a second complaint */
+  }
+
   const card = openModal(`
     <h3>${t("chat.editTitle", { name: escapeHtml(man.name) })}</h3>
     <div class="modal-sub">${t("chat.editSub")}</div>
+    <div class="field">
+      <label>${t("chat.digestLabel")}</label>
+      <textarea class="field-area tall" id="chatDigest" placeholder="${t("chat.digestHint")}">${escapeHtml(
+        summary,
+      )}</textarea>
+    </div>
     <div class="msg-rows" id="msgRows"></div>
-    <button class="btn btn-secondary" id="btnAddMessage" type="button">${t("chat.addMessage")}</button>
+    <div class="modal-row">
+      <button class="btn btn-secondary" id="btnAddMessage" type="button">${t("chat.addMessage")}</button>
+      <button class="btn btn-secondary" id="btnDigest" type="button">${t("chat.digest")}</button>
+    </div>
     <div class="modal-actions">
       <button class="btn btn-secondary" data-act="close">${t("common.cancel")}</button>
       <button class="btn btn-primary" id="btnSaveChat">${t("common.save")}</button>
@@ -465,6 +508,35 @@ export async function openChatEditor(deps: ModalDeps, man: Man) {
     draw();
   });
 
+  // Folding the thread away is not undoable: the messages are deleted and the
+  // digest is what is left of them, so it is asked for plainly.
+  card.querySelector<HTMLButtonElement>("#btnDigest")?.addEventListener("click", async () => {
+    const ok = await confirmDialog({
+      title: t("chat.digest"),
+      body: t("chat.digestBody", { n: Math.max(0, messages.length - 6) }),
+      confirmLabel: t("chat.digest"),
+      danger: true,
+    });
+    if (!ok) return;
+    const button = card.querySelector<HTMLButtonElement>("#btnDigest")!;
+    button.disabled = true;
+    button.textContent = t("chat.digesting");
+    try {
+      const thread = await api.digestChat(man.model_id, man.id, 6);
+      messages = thread.messages;
+      summary = thread.context_summary;
+      const field = card.querySelector<HTMLTextAreaElement>("#chatDigest");
+      if (field) field.value = summary;
+      draw();
+      toast(t("toast.digested"), "success");
+    } catch (error) {
+      toast(errorText(error), "error");
+    } finally {
+      button.disabled = false;
+      button.textContent = t("chat.digest");
+    }
+  });
+
   card.querySelector<HTMLButtonElement>("#btnAddMessage")?.addEventListener("click", () => {
     collect();
     messages.push({
@@ -481,8 +553,9 @@ export async function openChatEditor(deps: ModalDeps, man: Man) {
     collect();
     // An empty row is a row the operator meant to throw away.
     const kept = messages.filter((message) => message.text.trim());
+    const digest = card.querySelector<HTMLTextAreaElement>("#chatDigest")?.value ?? summary;
     try {
-      await api.saveChat(man.model_id, man.id, kept);
+      await api.saveChat(man.model_id, man.id, kept, digest);
       toast(t("toast.chatSaved"), "success");
       closeModal();
       await deps.refresh();

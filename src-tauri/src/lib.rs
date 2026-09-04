@@ -129,6 +129,8 @@ pub fn run() {
             commands::delete_master_entries,
             commands::delete_chat_messages,
             commands::save_chat,
+            commands::digest_chat,
+            commands::learn_voice,
             commands::run_agent,
             commands::fetch_image,
             commands::check_update,

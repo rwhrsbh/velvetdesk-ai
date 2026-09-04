@@ -378,14 +378,66 @@ pub fn save_chat(
     model_id: String,
     man_id: String,
     messages: Vec<ChatMessage>,
+    summary: Option<String>,
 ) -> Result<ChatThread> {
     let scope = state.paths.scope(&model_id)?;
     let mut thread = scope.read_chat(&man_id)?;
     thread.messages = messages;
+    // The digest of what was folded away is the operator's text too.
+    if let Some(summary) = summary {
+        thread.context_summary = summary;
+    }
     thread.context_from = thread.context_from.min(thread.messages.len());
     thread.updated_at = chrono::Utc::now();
     scope.write_chat(&thread)?;
     Ok(thread)
+}
+
+/// Fold the older part of a correspondence into a written digest.
+#[tauri::command]
+pub async fn digest_chat(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    model_id: String,
+    man_id: String,
+    keep_last: Option<usize>,
+) -> Result<ChatThread> {
+    let settings = state.settings_view();
+    let provider = state.active_provider()?;
+    let pool = state.pool(&provider.id);
+    let emit = emitter(&app, None);
+    let deps = AgentDeps {
+        paths: &state.paths,
+        settings: &settings,
+        provider: &provider,
+        pool,
+        llm: &state.llm,
+        emit: &emit,
+    };
+    agent::digest_chat(&deps, &model_id, &man_id, keep_last.unwrap_or(6)).await
+}
+
+/// Describe how this woman writes, from the letters she has already sent.
+#[tauri::command]
+pub async fn learn_voice(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    model_id: String,
+    samples: Option<usize>,
+) -> Result<Profile> {
+    let settings = state.settings_view();
+    let provider = state.active_provider()?;
+    let pool = state.pool(&provider.id);
+    let emit = emitter(&app, None);
+    let deps = AgentDeps {
+        paths: &state.paths,
+        settings: &settings,
+        provider: &provider,
+        pool,
+        llm: &state.llm,
+        emit: &emit,
+    };
+    agent::learn_voice(&deps, &model_id, samples.unwrap_or(10)).await
 }
 
 /// Drop the picked entries from a conversation.
