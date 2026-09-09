@@ -193,6 +193,22 @@ impl Scope {
         Ok(self.men_dir().join(format!("{man_id}.json")))
     }
 
+    /// Copy a man's correspondence aside, returning where it went.
+    ///
+    /// Folding a thread into a digest deletes the letters it summarised, and a
+    /// summary is a judgement — the operator may disagree with it tomorrow.
+    /// The copy costs a few kilobytes and is the difference between an edit and
+    /// a loss.
+    pub fn back_up_chat(&self, man_id: &str) -> Result<PathBuf> {
+        let source = self.chat_file(man_id)?;
+        let dir = self.chats_dir().join("backups");
+        fs::create_dir_all(&dir)?;
+        let stamp = chrono::Utc::now().format("%Y-%m-%dT%H-%M-%S");
+        let target = dir.join(format!("{man_id}-{stamp}.json"));
+        fs::copy(&source, &target)?;
+        Ok(target)
+    }
+
     pub fn chat_file(&self, man_id: &str) -> Result<PathBuf> {
         if !is_safe_id(man_id) {
             return Err(AppError::Scope(format!("unsafe man id: {man_id}")));
@@ -453,6 +469,31 @@ fn floor_char_boundary(s: &str, mut idx: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
+    /// The letters are copied aside before anything rewrites them.
+    #[test]
+    fn a_chat_can_be_put_aside_before_it_is_rewritten() {
+        use super::*;
+        let dir = std::env::temp_dir().join(format!("velvet-backup-{}", crate::models::new_id()));
+        let paths = Paths::new(dir).unwrap();
+        let scope = paths.scope("2428653").unwrap();
+        let mut thread = crate::models::ChatThread::new("2428653".into(), "1219749".into());
+        thread.messages.push(crate::models::ChatMessage {
+            id: "m1".into(),
+            role: crate::models::MsgRole::Incoming,
+            channel: crate::models::Channel::Chat,
+            text: "Hi Val".into(),
+            ts: chrono::Utc::now(),
+        });
+        scope.write_chat(&thread).unwrap();
+
+        let copy = scope.back_up_chat("1219749").unwrap();
+        assert!(copy.exists(), "the copy is on disk");
+        let saved: crate::models::ChatThread =
+            serde_json::from_str(&std::fs::read_to_string(&copy).unwrap()).unwrap();
+        assert_eq!(saved.messages.len(), 1);
+        assert_eq!(saved.messages[0].text, "Hi Val");
+    }
+
     use super::*;
 
     fn temp_paths(tag: &str) -> Paths {

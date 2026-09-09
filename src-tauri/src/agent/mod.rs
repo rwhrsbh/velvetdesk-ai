@@ -445,6 +445,21 @@ pub async fn digest_chat(
         return Err(AppError::message("error.emptySummary", json!({})));
     }
 
+    // The letters are about to be deleted; a copy of them goes aside first, and
+    // if that copy cannot be written the digest does not happen at all.
+    let backup = scope.back_up_chat(man_id)?;
+    (deps.emit)(json!({
+        "kind": "step",
+        "step": {
+            "kind": "tool",
+            "tool": "backup_chat",
+            "summary": format!("переписка сохранена: {}", backup.display()),
+            "key": "step.chatBackedUp",
+            "params": { "path": crate::workspace::display_path(&backup) },
+            "detail": Value::Null,
+        }
+    }));
+
     thread.context_summary = digest;
     thread.messages = thread.messages.split_off(cut);
     thread.context_from = 0;
