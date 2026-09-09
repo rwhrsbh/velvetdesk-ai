@@ -81,17 +81,29 @@ pub fn resolve(
     if requested.is_empty() {
         return Err(AppError::Invalid("path is required".into()));
     }
-    let candidate = PathBuf::from(requested);
-    if !candidate.is_absolute() {
-        return Err(AppError::Scope(format!(
-            "{requested} is relative; give an absolute path"
-        )));
-    }
+    let mut candidate = PathBuf::from(requested);
     if candidate
         .components()
         .any(|c| matches!(c, Component::ParentDir))
     {
         return Err(AppError::Scope(format!("{requested} contains ..")));
+    }
+
+    // A relative path is the natural way to say "here", and an agent that has
+    // been given a folder to work in has an obvious "here": that folder, or the
+    // first of them. With none granted there is nowhere for it to point, and
+    // saying so is more use than complaining about the shape of the path.
+    if !candidate.is_absolute() {
+        let Some(base) = roots.first() else {
+            return Err(AppError::Scope(format!(
+                "{requested} is relative and this agent has been given no folder yet —                  ask for one with request_access, or give an absolute path"
+            )));
+        };
+        let here = PathBuf::from(&base.path);
+        candidate = match requested {
+            "." | "./" | "" => here,
+            _ => here.join(candidate.strip_prefix("./").unwrap_or(&candidate)),
+        };
     }
 
     let real = canonical_target(&candidate)?;
@@ -248,6 +260,40 @@ mod tests {
         std::fs::canonicalize(&dir).unwrap()
     }
 
+    /// A relative path is taken from the folder the agent was given, and means
+    /// nothing at all when it has been given none.
+    #[test]
+    fn a_relative_path_starts_at_the_granted_folder() {
+        let dir = std::env::temp_dir().join(format!("velvet-rel-{}", crate::models::new_id()));
+        std::fs::create_dir_all(dir.join("letters")).unwrap();
+        let paths = Paths::new(dir.join("data")).unwrap();
+        let root = TrustedRoot {
+            path: dir.to_string_lossy().to_string(),
+            writable: true,
+            granted_at: chrono::Utc::now(),
+            reason: "test".into(),
+        };
+
+        let here = resolve(&paths, std::slice::from_ref(&root), ".", Access::Read).unwrap();
+        assert_eq!(here, std::fs::canonicalize(&dir).unwrap());
+
+        let inside = resolve(&paths, std::slice::from_ref(&root), "letters", Access::Read).unwrap();
+        assert!(inside.ends_with("letters"));
+
+        // With nothing granted there is nowhere for "." to point.
+        let refused = resolve(&paths, &[], ".", Access::Read);
+        assert!(refused.is_err());
+
+        // And a relative path still cannot climb out of the folder.
+        assert!(resolve(
+            &paths,
+            std::slice::from_ref(&root),
+            "../secrets",
+            Access::Read
+        )
+        .is_err());
+    }
+
     #[test]
     fn nothing_outside_a_granted_root_is_reachable() {
         let paths = paths();
@@ -290,8 +336,10 @@ mod tests {
         assert!(resolve(&paths, &roots, &file.to_string_lossy(), Access::Write).is_err());
     }
 
+    /// `..` is refused wherever it appears — a relative path is a convenience,
+    /// not a way out of the folder that was granted.
     #[test]
-    fn traversal_and_relative_paths_are_refused() {
+    fn traversal_is_refused_however_it_is_written() {
         let paths = paths();
         let root = temp_root("traversal");
         let roots = vec![TrustedRoot {
@@ -303,7 +351,10 @@ mod tests {
 
         let escape = format!("{}/../secret.txt", root.to_string_lossy());
         assert!(resolve(&paths, &roots, &escape, Access::Read).is_err());
-        assert!(resolve(&paths, &roots, "relative/path.txt", Access::Read).is_err());
+        assert!(resolve(&paths, &roots, "../secret.txt", Access::Read).is_err());
+        // A relative path into a folder that does not exist is a miss, not an
+        // escape, and it says so.
+        assert!(resolve(&paths, &roots, "missing/path.txt", Access::Read).is_err());
     }
 
     #[test]

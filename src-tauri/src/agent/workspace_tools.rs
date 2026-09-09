@@ -89,7 +89,7 @@ pub fn tool_defs() -> Vec<ToolDef> {
                 "type": "object",
                 "properties": {
                     "command": { "type": "string", "description": "the command line" },
-                    "cwd": { "type": "string", "description": "absolute path to run it in" },
+                    "cwd": { "type": "string", "description": "where to run it: an absolute path, or one relative to the first granted folder (\".\" is that folder)" },
                     "shell": { "type": "string", "description": "powershell | bash; defaults to the platform's own" }
                 },
                 "required": ["command", "cwd"]

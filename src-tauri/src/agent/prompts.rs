@@ -182,6 +182,7 @@ pub fn build_system(
         "Storage sandbox: profiles/{}/ — you cannot read or write any other profile.\n\n",
         profile.id
     ));
+    out.push_str(&machine_block());
     out.push_str(&folders_block(folders));
     out.push_str(&format!(
         "Operator language: {}. Everything addressed to the operator — summaries, \
@@ -197,6 +198,23 @@ pub fn build_system(
         out.push_str(global_rules.trim());
     }
     out
+}
+
+/// The machine underneath: which shell answers, and how paths are written.
+///
+/// An agent told nothing about the host writes `ls -la` on Windows and `dir` on
+/// a Mac, and spends a turn discovering that neither worked.
+pub fn machine_block() -> String {
+    if cfg!(windows) {
+        "Machine: Windows. The shell tool runs PowerShell — write PowerShell, not bash \
+         (Get-ChildItem, not ls -la), and use backslashes in paths. Ask for `bash` only \
+         if the operator has said it is installed.\n\n"
+            .to_string()
+    } else if cfg!(target_os = "macos") {
+        "Machine: macOS. The shell tool runs bash; paths use forward slashes.\n\n".to_string()
+    } else {
+        "Machine: Linux. The shell tool runs bash; paths use forward slashes.\n\n".to_string()
+    }
 }
 
 /// The folders on disk this agent may use.
@@ -223,8 +241,9 @@ fn folders_block(folders: &[crate::workspace::TrustedRoot]) -> String {
         ));
     }
     out.push_str(
-        "Always pass absolute paths from this list — relative ones are refused. For any \
-         other folder, call request_access and wait for the operator to answer.\n\n",
+        "An absolute path from this list always works, and a relative one is taken from \
+         the first folder above — \".\" is that folder. For anything outside them, call \
+         request_access and wait for the operator to answer.\n\n",
     );
     out
 }

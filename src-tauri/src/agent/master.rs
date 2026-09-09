@@ -276,6 +276,7 @@ fn system_prompt(deps: &AgentDeps<'_>, security: SecurityLevel) -> Result<String
         .map(|m| json!({ "model_id": m.id, "name": m.name, "site": m.site, "men": m.men.len() }))
         .collect();
 
+    let machine = super::prompts::machine_block();
     let folders = if deps.settings.trusted_roots.is_empty() {
         String::new()
     } else {
@@ -303,7 +304,7 @@ fn system_prompt(deps: &AgentDeps<'_>, security: SecurityLevel) -> Result<String
     };
 
     Ok(format!(
-        "{MASTER_SYSTEM}{folders}\n\nOperator language: {}.\n\nProfiles in this installation:\n{}\n\n{}",
+        "{MASTER_SYSTEM}\n\n{machine}{folders}\n\nOperator language: {}.\n\nProfiles in this installation:\n{}\n\n{}",
         super::prompts::operator_language(&deps.settings.ui_language),
         serde_json::to_string_pretty(&roster)?,
         super::prompts::security_block(security)
