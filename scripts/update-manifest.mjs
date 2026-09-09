@@ -34,6 +34,18 @@ function platformOf(name) {
   return null;
 }
 
+/**
+ * The name a release asset ends up with.
+ *
+ * GitHub rewrites anything outside `[A-Za-z0-9._-]` to a dot when a file is
+ * uploaded, so "VelvetDesk AI_0.2.49_x64-setup.exe" is served as
+ * "VelvetDesk.AI_0.2.49_x64-setup.exe". A manifest that percent-encoded the
+ * space pointed at a file that does not exist, and every update died on a 404.
+ */
+function assetName(name) {
+  return name.replace(/[^A-Za-z0-9._-]/g, ".");
+}
+
 const platforms = {};
 for (const name of files) {
   if (name.endsWith(".sig")) continue;
@@ -45,7 +57,7 @@ for (const name of files) {
 
   platforms[platform] = {
     signature: readFileSync(join(dir, signature), "utf8").trim(),
-    url: `https://github.com/${REPO}/releases/download/v${version}/${encodeURIComponent(name)}`,
+    url: `https://github.com/${REPO}/releases/download/v${version}/${assetName(name)}`,
   };
 }
 
