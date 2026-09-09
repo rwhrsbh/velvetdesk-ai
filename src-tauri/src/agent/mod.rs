@@ -383,21 +383,20 @@ pub async fn compact_context(
     Ok(thread.context_summary.clone())
 }
 
-/// Replace the older half of a correspondence with a written digest.
+/// Write the digest of a correspondence without touching anything.
 ///
-/// Compaction stops *sending* old messages; this deletes them. A thread that
-/// has run for months costs tokens on every turn and eventually outgrows the
-/// window, and the operator would rather keep a thorough account of it than a
-/// hundred letters. The last few messages stay as they are, so the next reply
-/// still has the immediate exchange to answer.
-pub async fn digest_chat(
+/// Summarising and deleting are two different acts, and the operator gets to
+/// read the summary before the letters it replaces are gone. Nothing here is
+/// written to disk: the digest comes back as text, and `apply_digest` is what
+/// makes it the record.
+pub async fn digest_preview(
     deps: &AgentDeps<'_>,
     model_id: &str,
     man_id: &str,
     keep_last: usize,
-) -> Result<ChatThread> {
+) -> Result<DigestPreview> {
     let scope = deps.paths.scope(model_id)?;
-    let mut thread = scope.read_chat(man_id)?;
+    let thread = scope.read_chat(man_id)?;
     let keep_last = keep_last.min(thread.messages.len());
     if thread.messages.len().saturating_sub(keep_last) < 2 {
         return Err(AppError::message("error.nothingToCompact", json!({})));
@@ -445,22 +444,46 @@ pub async fn digest_chat(
         return Err(AppError::message("error.emptySummary", json!({})));
     }
 
-    // The letters are about to be deleted; a copy of them goes aside first, and
-    // if that copy cannot be written the digest does not happen at all.
-    let backup = scope.back_up_chat(man_id)?;
-    (deps.emit)(json!({
-        "kind": "step",
-        "step": {
-            "kind": "tool",
-            "tool": "backup_chat",
-            "summary": format!("переписка сохранена: {}", backup.display()),
-            "key": "step.chatBackedUp",
-            "params": { "path": crate::workspace::display_path(&backup) },
-            "detail": Value::Null,
-        }
-    }));
+    Ok(DigestPreview {
+        digest,
+        folding: older.len(),
+        keeping: keep_last,
+        usage: response.usage,
+    })
+}
 
-    thread.context_summary = digest;
+/// A digest the operator has not accepted yet.
+#[derive(Debug, Clone, Serialize)]
+pub struct DigestPreview {
+    pub digest: String,
+    /// How many letters this would replace, and how many would stay.
+    pub folding: usize,
+    pub keeping: usize,
+    pub usage: Usage,
+}
+
+/// Make an accepted digest the record: the letters it replaces are deleted.
+///
+/// A copy of the correspondence is written first, and if that copy cannot be
+/// written nothing else happens — the digest is a judgement, and the operator
+/// may want the letters back tomorrow.
+pub fn apply_digest(
+    paths: &Paths,
+    model_id: &str,
+    man_id: &str,
+    keep_last: usize,
+    digest: &str,
+) -> Result<ChatThread> {
+    let scope = paths.scope(model_id)?;
+    let mut thread = scope.read_chat(man_id)?;
+    let keep_last = keep_last.min(thread.messages.len());
+    let cut = thread.messages.len() - keep_last;
+    if digest.trim().is_empty() {
+        return Err(AppError::message("error.emptySummary", json!({})));
+    }
+
+    scope.back_up_chat(man_id)?;
+    thread.context_summary = digest.trim().to_string();
     thread.messages = thread.messages.split_off(cut);
     thread.context_from = 0;
     thread.updated_at = chrono::Utc::now();

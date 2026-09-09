@@ -1,10 +1,27 @@
 import { api, errorText } from "./api";
 import type { ModalDeps } from "./deps";
-import { closeModal, confirmDialog, escapeHtml, formatDate, openModal, toast } from "./dom";
+import {
+  closeModal,
+  confirmDialog,
+  escapeHtml,
+  formatDate,
+  notify,
+  openModal,
+  toast,
+} from "./dom";
 import { dressCombo, dressSelectsIn } from "./dropdown";
 import { t } from "./i18n";
 import { store } from "./store";
-import type { Channel, ChatMessage, Fact, Man, MsgRole, Note, Profile } from "./types";
+import type {
+  Channel,
+  ChatMessage,
+  DigestPreview,
+  Fact,
+  Man,
+  MsgRole,
+  Note,
+  Profile,
+} from "./types";
 
 const AVATAR_SIZE = 256;
 
@@ -415,6 +432,88 @@ function editedNotes(text: string | undefined, man: Man): Note[] {
  * row: who wrote it, over which channel, and the text; rows can be added and
  * removed, and what is left is written back in the order shown.
  */
+/** How many of the latest letters a summary leaves untouched. */
+const SUMMARY_KEEPS = 6;
+
+/**
+ * Write a summary of a correspondence and bring it back for approval.
+ *
+ * Nothing is deleted while this runs, and the dialog it was started from can be
+ * closed — the operator has other men to answer. If they are still looking when
+ * it arrives, the summary opens for review; if they are not, a notice waits in
+ * the corner until they are.
+ */
+async function summarise(deps: ModalDeps, man: Man, total: number) {
+  // No confirmation to get past: nothing is deleted by writing a summary, and
+  // the dialog that follows is where the operator decides. A confirmation here
+  // would also tear down the editor it was started from — they share a card.
+  toast(t("chat.digestBody", { n: Math.max(0, total - SUMMARY_KEEPS) }), "info");
+
+  const working = document.querySelector<HTMLElement>("#digestWorking");
+  if (working) working.hidden = false;
+
+  let preview: DigestPreview;
+  try {
+    preview = await api.digestChat(man.model_id, man.id, SUMMARY_KEEPS);
+  } catch (error) {
+    toast(errorText(error), "error");
+    return;
+  } finally {
+    const still = document.querySelector<HTMLElement>("#digestWorking");
+    if (still) still.hidden = true;
+  }
+
+  // Still in front of the operator: show it now. Otherwise it waits.
+  if (document.querySelector("#digestWorking")) {
+    openSummaryReview(deps, man, preview);
+  } else {
+    notify(t("chat.summaryReady", { name: man.name }), () =>
+      openSummaryReview(deps, man, preview),
+    );
+  }
+}
+
+/**
+ * The summary, before it becomes the record.
+ *
+ * Three ways out, and only one of them touches the letters: accept replaces
+ * them (after a copy is filed away), write it again asks for another summary,
+ * and closing leaves the correspondence exactly as it was.
+ */
+export function openSummaryReview(deps: ModalDeps, man: Man, preview: DigestPreview) {
+  const card = openModal(
+    `<h3>${escapeHtml(t("chat.summaryTitle", { name: man.name }))}</h3>` +
+      `<div class="modal-sub">${escapeHtml(
+        t("chat.summarySub", { folding: preview.folding, keeping: preview.keeping }),
+      )}</div>` +
+      `<textarea class="field-area tall" id="summaryText">${escapeHtml(preview.digest)}</textarea>` +
+      `<div class="modal-actions">` +
+      `<button class="btn btn-secondary" data-act="close">${t("common.cancel")}</button>` +
+      `<button class="btn btn-secondary" data-act="again">${t("chat.summaryAgain")}</button>` +
+      `<button class="btn btn-primary" data-act="accept">${t("chat.summaryAccept")}</button>` +
+      `</div>`,
+  );
+
+  card.querySelector('[data-act="close"]')?.addEventListener("click", closeModal);
+
+  card.querySelector('[data-act="again"]')?.addEventListener("click", () => {
+    closeModal();
+    void summarise(deps, man, preview.folding + preview.keeping);
+  });
+
+  card.querySelector('[data-act="accept"]')?.addEventListener("click", async () => {
+    const text = card.querySelector<HTMLTextAreaElement>("#summaryText")?.value ?? preview.digest;
+    try {
+      await api.applyDigest(man.model_id, man.id, text, SUMMARY_KEEPS);
+      closeModal();
+      toast(t("toast.digested"), "success");
+      await deps.refresh();
+    } catch (error) {
+      toast(errorText(error), "error");
+    }
+  });
+}
+
 export async function openChatEditor(deps: ModalDeps, man: Man) {
   let messages: ChatMessage[] = [];
   try {
@@ -439,6 +538,9 @@ export async function openChatEditor(deps: ModalDeps, man: Man) {
       <textarea class="field-area tall" id="chatDigest" placeholder="${t("chat.digestHint")}">${escapeHtml(
         summary,
       )}</textarea>
+    </div>
+    <div class="digest-working" id="digestWorking" hidden>
+      <span class="spinner"></span><span>${t("chat.digesting")}</span>
     </div>
     <div class="msg-rows" id="msgRows"></div>
     <div class="modal-row">
@@ -508,33 +610,12 @@ export async function openChatEditor(deps: ModalDeps, man: Man) {
     draw();
   });
 
-  // Folding the thread away is not undoable: the messages are deleted and the
-  // digest is what is left of them, so it is asked for plainly.
-  card.querySelector<HTMLButtonElement>("#btnDigest")?.addEventListener("click", async () => {
-    const ok = await confirmDialog({
-      title: t("chat.digest"),
-      body: t("chat.digestBody", { n: Math.max(0, messages.length - 6) }),
-      confirmLabel: t("chat.digest"),
-      danger: true,
-    });
-    if (!ok) return;
-    const button = card.querySelector<HTMLButtonElement>("#btnDigest")!;
-    button.disabled = true;
-    button.textContent = t("chat.digesting");
-    try {
-      const thread = await api.digestChat(man.model_id, man.id, 6);
-      messages = thread.messages;
-      summary = thread.context_summary;
-      const field = card.querySelector<HTMLTextAreaElement>("#chatDigest");
-      if (field) field.value = summary;
-      draw();
-      toast(t("toast.digested"), "success");
-    } catch (error) {
-      toast(errorText(error), "error");
-    } finally {
-      button.disabled = false;
-      button.textContent = t("chat.digest");
-    }
+  // Writing the summary changes nothing on its own: it is read first, and the
+  // letters are only replaced once the operator accepts it. The dialog can be
+  // closed while it is being written — the answer finds its way back.
+  card.querySelector<HTMLButtonElement>("#btnDigest")?.addEventListener("click", () => {
+    collect();
+    void summarise(deps, man, messages.length);
   });
 
   card.querySelector<HTMLButtonElement>("#btnAddMessage")?.addEventListener("click", () => {

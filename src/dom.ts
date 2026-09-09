@@ -43,14 +43,62 @@ export function formatDate(value: string | null | undefined): string {
   });
 }
 
-export function toast(message: string, kind: "info" | "success" | "error" = "info", ms = 4200) {
+/**
+ * A short-lived notice.
+ *
+ * A long one used to vanish in the same four seconds as "Saved", which is not
+ * enough time to read a sentence — so it stays on screen for as long as it
+ * takes to read it, and a click dismisses it early.
+ */
+export function toast(message: string, kind: "info" | "success" | "error" = "info", ms = 0) {
   const stack = document.getElementById("toastStack");
   if (!stack) return;
   const node = document.createElement("div");
   node.className = `toast ${kind}`;
   node.textContent = message;
+  node.title = message;
   stack.appendChild(node);
-  setTimeout(() => node.remove(), ms);
+
+  // Roughly a comfortable reading pace, floored at a glance and capped so a
+  // wall of text does not sit there forever.
+  const life = ms || Math.min(18_000, 3_400 + message.length * 55);
+  const timer = window.setTimeout(() => node.remove(), life);
+  node.addEventListener("click", () => {
+    window.clearTimeout(timer);
+    node.remove();
+  });
+}
+
+/**
+ * A notice that stays until it is dealt with.
+ *
+ * An ordinary toast is for things that already happened; this is for something
+ * waiting — a summary written while the operator was elsewhere. It sits in the
+ * corner until they open it or dismiss it.
+ */
+export function notify(message: string, onOpen: () => void) {
+  const stack = document.getElementById("toastStack");
+  if (!stack) return;
+  const node = document.createElement("div");
+  node.className = "toast info sticky";
+
+  const body = document.createElement("button");
+  body.type = "button";
+  body.className = "toast-open";
+  body.textContent = message;
+  body.addEventListener("click", () => {
+    node.remove();
+    onOpen();
+  });
+
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "toast-close";
+  close.textContent = "×";
+  close.addEventListener("click", () => node.remove());
+
+  node.append(body, close);
+  stack.appendChild(node);
 }
 
 let closeHandler: (() => void) | null = null;

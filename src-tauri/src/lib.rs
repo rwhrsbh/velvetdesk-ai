@@ -130,6 +130,7 @@ pub fn run() {
             commands::delete_chat_messages,
             commands::save_chat,
             commands::digest_chat,
+            commands::apply_digest,
             commands::learn_voice,
             commands::run_agent,
             commands::fetch_image,

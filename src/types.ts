@@ -104,6 +104,15 @@ export interface ChatThread {
   updated_at: string;
 }
 
+/** A summary of a correspondence the operator has not accepted yet. */
+export interface DigestPreview {
+  digest: string;
+  /** How many letters it would replace, and how many would stay. */
+  folding: number;
+  keeping: number;
+  usage: Usage;
+}
+
 /** What the release page says about the newest version. */
 export interface UpdateInfo {
   version: string;

@@ -20,6 +20,7 @@ import type {
   Profile,
   RunOutput,
   SearchHit,
+  DigestPreview,
   Settings,
   UpdateInfo,
 } from "./types";
@@ -168,7 +169,18 @@ export const api = {
   saveChat: (model_id: string, man_id: string, messages: unknown[], summary?: string) =>
     invoke<ChatThread>("save_chat", { modelId: model_id, manId: man_id, messages, summary }),
   digestChat: (model_id: string, man_id: string, keep_last?: number) =>
-    invoke<ChatThread>("digest_chat", { modelId: model_id, manId: man_id, keepLast: keep_last }),
+    invoke<DigestPreview>("digest_chat", {
+      modelId: model_id,
+      manId: man_id,
+      keepLast: keep_last,
+    }),
+  applyDigest: (model_id: string, man_id: string, digest: string, keep_last?: number) =>
+    invoke<ChatThread>("apply_digest", {
+      modelId: model_id,
+      manId: man_id,
+      digest,
+      keepLast: keep_last,
+    }),
   learnVoice: (model_id: string, samples?: number) =>
     invoke<Profile>("learn_voice", { modelId: model_id, samples }),
   deleteChatMessages: (model_id: string, man_id: string, ids: string[]) =>

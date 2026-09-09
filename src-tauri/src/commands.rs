@@ -393,7 +393,7 @@ pub fn save_chat(
     Ok(thread)
 }
 
-/// Fold the older part of a correspondence into a written digest.
+/// Write the digest of a correspondence, changing nothing.
 #[tauri::command]
 pub async fn digest_chat(
     app: AppHandle,
@@ -401,7 +401,7 @@ pub async fn digest_chat(
     model_id: String,
     man_id: String,
     keep_last: Option<usize>,
-) -> Result<ChatThread> {
+) -> Result<agent::DigestPreview> {
     let settings = state.settings_view();
     let provider = state.active_provider()?;
     let pool = state.pool(&provider.id);
@@ -414,7 +414,25 @@ pub async fn digest_chat(
         llm: &state.llm,
         emit: &emit,
     };
-    agent::digest_chat(&deps, &model_id, &man_id, keep_last.unwrap_or(6)).await
+    agent::digest_preview(&deps, &model_id, &man_id, keep_last.unwrap_or(6)).await
+}
+
+/// Accept a digest: the letters it replaces are copied aside and deleted.
+#[tauri::command]
+pub fn apply_digest(
+    state: State<'_, AppState>,
+    model_id: String,
+    man_id: String,
+    keep_last: Option<usize>,
+    digest: String,
+) -> Result<ChatThread> {
+    agent::apply_digest(
+        &state.paths,
+        &model_id,
+        &man_id,
+        keep_last.unwrap_or(6),
+        &digest,
+    )
 }
 
 /// Describe how this woman writes, from the letters she has already sent.
