@@ -157,6 +157,65 @@ function usageLine(usage: Usage | undefined, extra: string[]): string {
   return `<div class="usage">${escapeHtml(bits.join(" \u00b7 "))}</div>`;
 }
 
+/**
+ * The little markdown a copilot actually writes.
+ *
+ * Answers come back with **bold**, bullet lists and `code` in them, and raw
+ * asterisks in a letter look like a bug. This is deliberately not a markdown
+ * parser: the text is escaped first and only then given tags, so nothing a
+ * model writes can turn into markup of its own.
+ */
+export function markdown(text: string): string {
+  const inline = (line: string) =>
+    escapeHtml(line)
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
+      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+      .replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s.,!?)]|$)/g, "$1<em>$2</em>")
+      .replace(/(^|[\s(])_([^_\n]+)_(?=[\s.,!?)]|$)/g, "$1<em>$2</em>");
+
+  const out: string[] = [];
+  let list: "ul" | "ol" | null = null;
+
+  const closeList = () => {
+    if (list) out.push(`</${list}>`);
+    list = null;
+  };
+
+  for (const raw of text.split("\n")) {
+    const line = raw.trimEnd();
+    const bullet = /^\s*[-*•]\s+(.*)$/.exec(line);
+    const numbered = /^\s*(\d+)[.)]\s+(.*)$/.exec(line);
+    const heading = /^#{1,6}\s+(.*)$/.exec(line);
+
+    if (bullet) {
+      if (list !== "ul") {
+        closeList();
+        out.push("<ul>");
+        list = "ul";
+      }
+      out.push(`<li>${inline(bullet[1])}</li>`);
+      continue;
+    }
+    if (numbered) {
+      if (list !== "ol") {
+        closeList();
+        out.push("<ol>");
+        list = "ol";
+      }
+      out.push(`<li>${inline(numbered[2])}</li>`);
+      continue;
+    }
+    closeList();
+    if (heading) {
+      out.push(`<div class="md-head">${inline(heading[1])}</div>`);
+      continue;
+    }
+    out.push(line.trim() ? `<div>${inline(line)}</div>` : `<div class="md-gap"></div>`);
+  }
+  closeList();
+  return out.join("");
+}
+
 /** What a step says, translated when the core named it. */
 export function stepText(step: {
   key?: string;
@@ -378,7 +437,9 @@ export function renderChat() {
 
       return (
         `<div class="msg ${entry.sender}${picked ? " picked" : ""}" data-entry="${escapeHtml(entry.id)}">` +
-        `<div class="bubble">${recipient}${thinking}${shots}<span class="bubble-text">${escapeHtml(entry.text)}</span>` +
+        `<div class="bubble">${recipient}${thinking}${shots}<span class="bubble-text">${
+          entry.sender === "assistant" ? markdown(entry.text) : escapeHtml(entry.text)
+        }</span>` +
         `${steps}${working}${usageLine(meta.usage, extras)}${actions}</div></div>`
       );
     })

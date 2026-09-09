@@ -599,6 +599,8 @@ export async function openKeysModal(deps: ModalDeps) {
         return;
       }
       drawChain();
+      // Reordering the fallback chain is an edit too.
+      later();
     });
 
     list?.addEventListener("click", (event) => {
@@ -607,6 +609,7 @@ export async function openKeysModal(deps: ModalDeps) {
       if (add) {
         if (!chain.includes(add) && add !== chosenModel) chain.push(add);
         drawChain();
+        later();
         return;
       }
       const row = target.closest<HTMLElement>("[data-model]");
@@ -616,6 +619,8 @@ export async function openKeysModal(deps: ModalDeps) {
       applyPublishedLimits(chosenModel);
       drawChain();
       redrawModels();
+      // Choosing a model is an edit like any other: it saves itself.
+      later();
     });
 
     /**
