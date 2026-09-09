@@ -137,6 +137,8 @@ const ru: Dict = {
   "step.note": "заметка о {name}",
   "step.gift": "подарок {name} → {title}",
   "step.tags": "метки {name} (+{n})",
+  // Written by builds before the sides were told apart; old logs still carry it.
+  "step.appendChat": "записано в переписку с {id}",
   "step.appendIncoming": "его письмо записано в переписку с {id}",
   "step.appendOutgoing": "её письмо записано как отправленное — {id}",
   "step.appendNote": "заметка в переписке с {id}",
@@ -623,6 +625,7 @@ const en: Dict = {
   "step.note": "note on {name}",
   "step.gift": "gift {name} → {title}",
   "step.tags": "tags on {name} (+{n})",
+  "step.appendChat": "written into the thread with {id}",
   "step.appendIncoming": "his letter filed in the thread with {id}",
   "step.appendOutgoing": "her letter filed as sent — {id}",
   "step.appendNote": "note filed in the thread with {id}",
