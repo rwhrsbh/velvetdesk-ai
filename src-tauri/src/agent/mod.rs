@@ -1071,9 +1071,22 @@ async fn run_auto(
     // answer the operator asked for — the run used to end in silence here.
     if !answered && !steps.is_empty() {
         request.tools.clear();
-        request.messages.push(LlmMessage::user(
-            "Answer the operator now, in full, from what you have already              gathered. Do not call tools and do not narrate what you did.",
-        ));
+        // A model that started writing and then reached for a tool has half a
+        // letter in the conversation already. Told to answer from scratch it
+        // writes a different one; told what it started, it finishes that one.
+        let ask = if reply.trim().is_empty() {
+            "Answer the operator now, in full, from what you have already gathered. \
+             Do not call tools and do not narrate what you did."
+                .to_string()
+        } else {
+            format!(
+                "You began your answer with:\n\n{}\n\nWrite it out in full now, from the \
+                 beginning, using what you have gathered. Do not call tools and do not \
+                 narrate what you did.",
+                reply.trim()
+            )
+        };
+        request.messages.push(LlmMessage::user(ask));
         if let Ok(response) = deps
             .llm
             .chat(deps.provider, deps.pool.clone(), &request, deps.emit)

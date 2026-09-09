@@ -162,10 +162,40 @@ export function stepText(step: {
   key?: string;
   params?: Record<string, string | number>;
   summary: string;
+  detail?: unknown;
 }): string {
-  if (!step.key) return step.summary;
-  const translated = t(step.key, step.params ?? {});
-  return translated === step.key ? step.summary : translated;
+  const key = modernKey(step);
+  if (!key) return step.summary;
+  const translated = t(key, step.params ?? {});
+  return translated === key ? step.summary : translated;
+}
+
+/**
+ * The key a step would carry if it ran today.
+ *
+ * A log is written once and read for months, and the wording it was written
+ * with can turn out to be wrong — "written into the thread" said nothing about
+ * whose letter it was, which is the difference between filing what he sent and
+ * sending what she wrote. The old steps kept the arguments, so the side can be
+ * read back out of them and the old runs say what they actually did.
+ */
+function modernKey(step: { key?: string; detail?: unknown }): string | undefined {
+  if (step.key !== "step.appendChat") return step.key;
+  const args = (step.detail as { args?: { role?: string } } | undefined)?.args;
+  switch (args?.role) {
+    case "incoming":
+    case "him":
+    case "his":
+      return "step.appendIncoming";
+    case "note":
+      return "step.appendNote";
+    case undefined:
+      // Written before the role was recorded: nothing to go on, so it keeps
+      // the wording it was written with.
+      return step.key;
+    default:
+      return "step.appendOutgoing";
+  }
 }
 
 /**
