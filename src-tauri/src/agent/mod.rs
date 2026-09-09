@@ -819,6 +819,29 @@ fn is_cut_short(finish_reason: &str) -> bool {
     reason.is_empty() || reason.eq_ignore_ascii_case("MAX_TOKENS") || reason == "length"
 }
 
+/// What the model writes to say it has finished.
+const END_MARKER: &str = "/END/";
+
+/// Take the end marker off an answer, saying whether it was there.
+///
+/// Its presence is the one reliable sign that nothing was lost on the way: a
+/// stream cut in the middle ends wherever it ended, and no model writes the
+/// marker before it has finished. It never reaches the operator, and never
+/// reaches the man.
+fn take_end_marker(text: &mut String) -> bool {
+    let trimmed = text.trim_end();
+    let Some(stripped) = trimmed.strip_suffix(END_MARKER) else {
+        // A model that forgot the marker mid-sentence still leaves it nowhere
+        // else, so a stray one anywhere is cleaned up but proves nothing.
+        if text.contains(END_MARKER) {
+            *text = text.replace(END_MARKER, "").trim_end().to_string();
+        }
+        return false;
+    };
+    *text = stripped.trim_end().to_string();
+    true
+}
+
 /// Whether this turn needs carrying on.
 ///
 /// A provider that ran out of output tokens says so, and that is enough. A
@@ -900,9 +923,12 @@ async fn continue_reply(
             carried.raw.push('\n');
         }
         carried.raw.push_str(&response.raw);
-        carried.text.push_str(&response.text);
 
-        if !is_cut_short(&response.finish_reason) {
+        let mut piece = response.text;
+        let finished = take_end_marker(&mut piece);
+        carried.text.push_str(&piece);
+
+        if finished || !is_cut_short(&response.finish_reason) {
             carried.still_cut = false;
             return carried;
         }
@@ -1032,14 +1058,16 @@ async fn run_auto(
 
         if response.tool_calls.is_empty() {
             reply = response.text;
+            let finished = take_end_marker(&mut reply);
             answered = !reply.trim().is_empty();
 
             // The stream can end in the middle of a sentence: the connection
             // closes, or the model runs into its output ceiling, and what
             // arrives is "В досье по" with no finish reason to explain it.
             // Asking it to carry on from exactly there costs one more call and
-            // saves the letter.
-            if answered && was_interrupted(&response.finish_reason, &reply) {
+            // saves the letter. A model that signed off with the marker is
+            // taken at its word and nothing more is spent on it.
+            if answered && !finished && was_interrupted(&response.finish_reason, &reply) {
                 let carried = continue_reply(deps, &mut request, &reply, &mut usage).await;
                 turns += carried.turns;
                 push_raw(&mut raw, turns, &carried.raw);
@@ -1216,8 +1244,10 @@ async fn run_auto(
             usage.total_tokens += response.usage.total_tokens;
             turns += 1;
             push_raw(&mut raw, turns, &response.raw);
-            if !response.text.trim().is_empty() {
-                reply = response.text;
+            let mut text = response.text;
+            take_end_marker(&mut text);
+            if !text.trim().is_empty() {
+                reply = text;
                 answered = true;
             }
         }
@@ -1833,6 +1863,27 @@ mod tests {
         assert_eq!(pending[0].after["facts"].as_array().unwrap().len(), 1);
         assert_eq!(pending[0].after["notes"].as_array().unwrap().len(), 1);
         assert_eq!(scope.read_all_men().unwrap().len(), 1);
+    }
+
+    /// The marker proves the answer arrived whole, and never reaches the letter.
+    #[test]
+    fn the_end_marker_is_taken_off_the_answer() {
+        let mut whole = "Привет, Neil!
+
+/END/"
+            .to_string();
+        assert!(take_end_marker(&mut whole));
+        assert_eq!(whole, "Привет, Neil!");
+
+        let mut cut = "Привет, Neil".to_string();
+        assert!(!take_end_marker(&mut cut));
+        assert_eq!(cut, "Привет, Neil");
+
+        // A marker that wandered into the middle proves nothing but is still
+        // not something to send to a man.
+        let mut stray = "Первая часть /END/ вторая".to_string();
+        assert!(!take_end_marker(&mut stray));
+        assert!(!stray.contains("/END/"));
     }
 
     /// A silent stop only counts as an interruption when the text broke off;

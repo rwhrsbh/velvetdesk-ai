@@ -366,6 +366,11 @@ export async function openKeysModal(deps: ModalDeps) {
             <input class="field-input" id="contextTokens" type="number" min="1024" step="1024"
                    placeholder="${t("keys.contextAuto")}" value="${p.context_tokens ?? ""}" />
           </div>
+          <div class="field">
+            <label>${t("keys.maxOutput")}</label>
+            <input class="field-input" id="maxOutput" type="number" min="256" step="256"
+                   placeholder="${t("keys.maxOutputHint")}" value="${p.max_output_tokens ?? ""}" />
+          </div>
         </div>
         <div class="field-grid">
           <div class="field">
@@ -608,9 +613,32 @@ export async function openKeysModal(deps: ModalDeps) {
       if (!row?.dataset.model) return;
       chosenModel = row.dataset.model;
       chain = chain.filter((id) => id !== chosenModel);
+      applyPublishedLimits(chosenModel);
       drawChain();
       redrawModels();
     });
+
+    /**
+     * Fill the limits the provider publishes for the model just picked.
+     *
+     * Gemini lists an input and an output ceiling per model, OpenRouter lists
+     * a context length and a completion ceiling; a plain OpenAI endpoint lists
+     * neither. Nobody knows these numbers by heart, and the wrong ones are how
+     * an answer ends mid-sentence — so picking a model fills them in, and a
+     * number typed by hand is left exactly as it was typed.
+     */
+    const applyPublishedLimits = (modelId: string) => {
+      const known = catalogs.get(provider().id)?.models.find((m) => m.id === modelId);
+      if (!known) return;
+      const context = card.querySelector<HTMLInputElement>("#contextTokens");
+      const output = card.querySelector<HTMLInputElement>("#maxOutput");
+      if (context && known.context_tokens && !context.value.trim()) {
+        context.value = String(known.context_tokens);
+      }
+      if (output && known.max_output_tokens && !output.value.trim()) {
+        output.value = String(known.max_output_tokens);
+      }
+    };
 
     // Folders an agent may read and write. Revoking one takes effect on the
     // next tool call; nothing on disk is touched either way.
@@ -736,6 +764,7 @@ export async function openKeysModal(deps: ModalDeps) {
         model_chain: chain,
         thinking_budget: numberOrNull("#thinkingBudget"),
         context_tokens: numberOrNull("#contextTokens"),
+        max_output_tokens: numberOrNull("#maxOutput"),
         reasoning_dialect:
           card.querySelector<HTMLSelectElement>("#reasoningDialect")?.value ?? p.reasoning_dialect,
         extra_headers: (card.querySelector<HTMLTextAreaElement>("#headers")?.value ?? "")

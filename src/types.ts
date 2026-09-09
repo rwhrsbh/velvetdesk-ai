@@ -194,6 +194,9 @@ export interface ModelInfo {
   audio: boolean;
   /** Costs nothing to call — listed first. */
   free: boolean;
+  /** What the provider says this model takes in and gives back, when it says. */
+  context_tokens?: number | null;
+  max_output_tokens?: number | null;
 }
 
 export interface ModelCatalog {

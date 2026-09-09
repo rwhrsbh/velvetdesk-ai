@@ -75,7 +75,10 @@ before answering, then persist what changed. The recent correspondence with the
 open dossier is already attached below under 'Recent correspondence' — read it
 there instead of asking for it again; call get_chat when you need more of it
 (raise `limit`) or the history of a different man. Finish with the drafted reply
-as plain text — no JSON, no preamble, no explanation of what you did."
+as plain text — no JSON, no preamble, no explanation of what you did.
+End every answer with /END/ on a line of its own, and write nothing after it.
+It is how the app knows the answer arrived whole rather than being cut off
+halfway; the marker is stripped before anyone reads the letter."
         }
         AgentMode::Act => {
             "\

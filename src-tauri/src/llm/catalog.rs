@@ -21,6 +21,15 @@ pub struct ModelInfo {
     /// hundreds of models.
     #[serde(default)]
     pub free: bool,
+    /// What the provider says this model can take in and give back. Gemini
+    /// publishes `inputTokenLimit` / `outputTokenLimit`, OpenRouter
+    /// `context_length` and `top_provider.max_completion_tokens`; a plain
+    /// OpenAI endpoint publishes neither, and then these stay empty and the
+    /// provider's own defaults apply.
+    #[serde(default)]
+    pub context_tokens: Option<u32>,
+    #[serde(default)]
+    pub max_output_tokens: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -129,6 +138,8 @@ fn parse_gemini_models(value: &Value) -> Vec<ModelInfo> {
                 // Google publishes no prices here; the free tier is a property
                 // of the key, not of the model.
                 free: false,
+                context_tokens: limit(entry, "inputTokenLimit"),
+                max_output_tokens: limit(entry, "outputTokenLimit"),
             })
         })
         .collect();
@@ -257,6 +268,12 @@ async fn list_openai(
     })
 }
 
+/// One published limit, when the endpoint publishes it as a sane number.
+fn limit(entry: &Value, field: &str) -> Option<u32> {
+    let value = entry.get(field)?.as_u64()?;
+    (value > 0).then_some(value.min(u32::MAX as u64) as u32)
+}
+
 fn parse_openai_models(value: &Value) -> Vec<ModelInfo> {
     let list = value
         .get("data")
@@ -274,7 +291,16 @@ fn parse_openai_models(value: &Value) -> Vec<ModelInfo> {
                 .unwrap_or_else(|| id.clone());
             let audio = id.contains("whisper") || id.contains("transcribe") || id.contains("audio");
             let free = is_free(entry, &id);
+            let ceiling = entry
+                .get("top_provider")
+                .and_then(|top| limit(top, "max_completion_tokens"));
             Some(ModelInfo {
+                context_tokens: limit(entry, "context_length").or_else(|| {
+                    entry
+                        .get("top_provider")
+                        .and_then(|t| limit(t, "context_length"))
+                }),
+                max_output_tokens: ceiling,
                 id,
                 label,
                 chat: true,
@@ -702,6 +728,49 @@ mod tests {
         assert_eq!(models[0].id, "gemini-2.5-pro", "newest model comes first");
         assert!(models[0].label.starts_with("Gemini 2.5 Pro"));
         assert!(models[0].audio);
+    }
+
+    /// The limits a provider publishes come back with the model, so the
+    /// interface can fill them in instead of asking the operator to know them.
+    #[test]
+    fn published_limits_travel_with_the_model() {
+        let gemini = json!({
+            "models": [{
+                "name": "models/gemini-3.8-flash",
+                "displayName": "Gemini 3.8 Flash",
+                "supportedGenerationMethods": ["generateContent"],
+                "inputTokenLimit": 1048576,
+                "outputTokenLimit": 65536
+            }]
+        });
+        let model = &parse_gemini_models(&gemini)[0];
+        assert_eq!(model.context_tokens, Some(1_048_576));
+        assert_eq!(model.max_output_tokens, Some(65_536));
+
+        let openrouter = json!({
+            "data": [
+                {
+                    "id": "google/gemini-3.8-flash",
+                    "context_length": 1048576,
+                    "top_provider": { "context_length": 1048576, "max_completion_tokens": 65536 }
+                },
+                { "id": "gpt-4o-mini" }
+            ]
+        });
+        let models = parse_openai_models(&openrouter);
+        let listed = models
+            .iter()
+            .find(|m| m.id == "google/gemini-3.8-flash")
+            .unwrap();
+        assert_eq!(listed.context_tokens, Some(1_048_576));
+        assert_eq!(listed.max_output_tokens, Some(65_536));
+
+        let bare = models.iter().find(|m| m.id == "gpt-4o-mini").unwrap();
+        assert_eq!(
+            bare.context_tokens, None,
+            "an endpoint that says nothing sets nothing"
+        );
+        assert_eq!(bare.max_output_tokens, None);
     }
 
     #[test]
