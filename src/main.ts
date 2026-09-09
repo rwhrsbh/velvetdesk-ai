@@ -35,7 +35,14 @@ import {
   type Attachment,
   type UiEntry,
 } from "./store";
-import type { AgentMode, RunStep, SecurityLevel, Settings, UpdateInfo } from "./types";
+import type {
+  AgentMode,
+  PendingAction,
+  RunStep,
+  SecurityLevel,
+  Settings,
+  UpdateInfo,
+} from "./types";
 import {
   renderAll,
   renderChat,
@@ -1281,6 +1288,25 @@ function bindPanels() {
     if (act === "select-delete") void deleteSelected();
   });
 
+  // Approving from the chat: the same two answers the panel offers, next to the
+  // step that is waiting for them.
+  $("messages").addEventListener("click", async (event) => {
+    const target = event.target as HTMLElement;
+    const approve = target.closest<HTMLElement>("[data-approve]")?.dataset.approve;
+    const reject = target.closest<HTMLElement>("[data-reject]")?.dataset.reject;
+    if (!approve && !reject) return;
+    event.stopPropagation();
+    try {
+      if (approve) await api.pendingApprove(approve);
+      if (reject) await api.pendingReject(reject);
+      store.pending = await api.pendingList();
+      toast(t(approve ? "queue.approve" : "queue.reject"), "success");
+      await refresh();
+    } catch (error) {
+      toast(errorText(error), "error");
+    }
+  });
+
   $("messages").addEventListener("click", async (event) => {
     const btn = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-act]");
     if (!btn) return;
@@ -2221,6 +2247,15 @@ function bindAgentEvents() {
       if (!meta.thinkingSince) meta.thinkingSince = Date.now();
     } else if (kind === "no_stream") {
       meta.note = t("chat.noStream");
+    } else if (kind === "pending") {
+      // Queued mid-run: the panel and the bubble both learn about it now, so
+      // the operator can let the agent through instead of waiting for the run
+      // to end first.
+      const action = payload.action as PendingAction | undefined;
+      if (action && !store.pending.some((known) => known.id === action.id)) {
+        store.pending = [...store.pending, action];
+        renderTopbar();
+      }
     } else if (kind === "step") {
       const step = payload.step as RunStep | undefined;
       if (!step) return;

@@ -122,7 +122,8 @@ pub fn resolve(
         if real.starts_with(&root_path) {
             if access == Access::Write && !root.writable {
                 return Err(AppError::Scope(format!(
-                    "{} is granted for reading only",
+                    "{} is granted for reading only — ask for it again with \
+                     request_access(writable: true) if it has to be written to",
                     root.path
                 )));
             }

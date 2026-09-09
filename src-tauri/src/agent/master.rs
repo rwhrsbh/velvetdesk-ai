@@ -427,6 +427,7 @@ pub async fn chat(deps: &AgentDeps<'_>, input: MasterInput) -> Result<MasterOutp
             ) {
                 Ok(outcome) => {
                     if let Some(action) = outcome.queued.clone() {
+                        (deps.queue)(&action);
                         pending.push(action);
                     }
                     let step = RunStep {

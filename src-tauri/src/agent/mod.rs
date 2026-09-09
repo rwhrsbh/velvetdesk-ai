@@ -97,6 +97,13 @@ pub struct AgentDeps<'a> {
     pub pool: Arc<KeyPool>,
     pub llm: &'a LlmClient,
     pub emit: &'a (dyn Fn(Value) + Send + Sync),
+    /// Where an action that needs a human goes the moment it is created.
+    ///
+    /// A run can take a minute, and an approval that only reaches the operator
+    /// when the run ends is an approval they cannot give while the agent is
+    /// still waiting for it. This hands it over at once — to the queue behind
+    /// the panel, and to the chat that asked for it.
+    pub queue: &'a (dyn Fn(&PendingAction) + Send + Sync),
 }
 
 pub async fn run(deps: &AgentDeps<'_>, input: RunInput) -> Result<RunOutput> {
@@ -1198,7 +1205,9 @@ async fn run_auto(
                     risk,
                     tool,
                 }) => {
+                    let waiting = queued.as_ref().map(|action| action.id.clone());
                     if let Some(action) = queued {
+                        (deps.queue)(&action);
                         pending.push(action);
                     }
                     let step = RunStep {
@@ -1217,6 +1226,9 @@ async fn run_auto(
                             "args": call.args,
                             "risk": risk,
                             "applied": applied,
+                            // The chat shows its own approve/reject buttons for
+                            // this one, so it carries the action's name.
+                            "pending": waiting,
                             "result": crate::llm::cap_raw(&result.to_string()),
                             "changes": changes,
                         }),
@@ -1391,8 +1403,14 @@ async fn run_single_turn(
         .cloned()
         .unwrap_or(Value::Object(Default::default()));
 
-    let (steps, pending) =
-        apply_patch(scope, security, input.man_id.as_deref(), &patch, deps.emit)?;
+    let (steps, pending) = apply_patch(
+        scope,
+        security,
+        input.man_id.as_deref(),
+        &patch,
+        deps.emit,
+        deps.queue,
+    )?;
 
     finish(
         scope,
@@ -1477,6 +1495,7 @@ pub fn apply_patch(
     man_id: Option<&str>,
     patch: &Value,
     emit: &(dyn Fn(Value) + Send + Sync),
+    queue: &(dyn Fn(&PendingAction) + Send + Sync),
 ) -> Result<(Vec<RunStep>, Vec<PendingAction>)> {
     let mut steps = vec![];
     let mut pending = vec![];
@@ -1522,7 +1541,9 @@ pub fn apply_patch(
     for (tool, args) in calls {
         match tools::execute(scope, security, &tool, &args) {
             Ok(outcome) => {
+                let waiting = outcome.queued.as_ref().map(|action| action.id.clone());
                 if let Some(action) = outcome.queued {
+                    queue(&action);
                     pending.push(action);
                 }
                 let step = RunStep {
@@ -1535,7 +1556,7 @@ pub fn apply_patch(
                     summary: outcome.summary,
                     key: outcome.phrase.key,
                     params: outcome.phrase.params,
-                    detail: json!({ "args": args, "changes": outcome.changes }),
+                    detail: json!({ "args": args, "changes": outcome.changes, "pending": waiting }),
                 };
                 emit(json!({ "kind": "step", "step": step }));
                 steps.push(step);
@@ -1789,6 +1810,7 @@ mod tests {
             Some("1219749"),
             &patch,
             &|_| {},
+            &|_| {},
         )
         .unwrap();
         assert!(pending.is_empty());
@@ -1812,6 +1834,7 @@ mod tests {
             SecurityLevel::Safe,
             None,
             &json!({ "status": "x" }),
+            &|_| {},
             &|_| {},
         )
         .unwrap();
@@ -1839,7 +1862,7 @@ mod tests {
             ]
         });
         let (steps, pending) =
-            apply_patch(&scope, SecurityLevel::Yolo, None, &patch, &|_| {}).unwrap();
+            apply_patch(&scope, SecurityLevel::Yolo, None, &patch, &|_| {}, &|_| {}).unwrap();
 
         assert!(pending.is_empty());
         assert!(
@@ -1872,7 +1895,7 @@ mod tests {
                 { "name": "Anything", "id": "1219749", "status": "ждёт письма" }
             ]
         });
-        apply_patch(&scope, SecurityLevel::Yolo, None, &patch, &|_| {}).unwrap();
+        apply_patch(&scope, SecurityLevel::Yolo, None, &patch, &|_| {}, &|_| {}).unwrap();
 
         assert_eq!(scope.read_all_men().unwrap().len(), 1);
         let man = scope.read_man("1219749").unwrap();
@@ -1894,7 +1917,7 @@ mod tests {
             }]
         });
         let (_steps, pending) =
-            apply_patch(&scope, SecurityLevel::Ask, None, &patch, &|_| {}).unwrap();
+            apply_patch(&scope, SecurityLevel::Ask, None, &patch, &|_| {}, &|_| {}).unwrap();
 
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].tool, "create_man");
@@ -2047,7 +2070,8 @@ mod tests {
                 { "name": "ERIC COX", "id": "628101GDN", "age": 36, "tags": ["admirer"] }
             ]
         });
-        let (steps, _) = apply_patch(&scope, SecurityLevel::Yolo, None, &patch, &|_| {}).unwrap();
+        let (steps, _) =
+            apply_patch(&scope, SecurityLevel::Yolo, None, &patch, &|_| {}, &|_| {}).unwrap();
 
         assert!(steps.iter().all(|s| s.kind != "warn"));
         let men = scope.read_all_men().unwrap();
@@ -2064,7 +2088,8 @@ mod tests {
     fn top_level_patch_with_a_name_is_attributed() {
         let scope = scope();
         let patch = json!({ "name": "Hartwig", "status": "перезвонит вечером" });
-        let (steps, _) = apply_patch(&scope, SecurityLevel::Yolo, None, &patch, &|_| {}).unwrap();
+        let (steps, _) =
+            apply_patch(&scope, SecurityLevel::Yolo, None, &patch, &|_| {}, &|_| {}).unwrap();
 
         assert!(steps.iter().all(|s| s.kind != "warn"));
         assert_eq!(
@@ -2192,6 +2217,7 @@ mod tests {
             SecurityLevel::Ask,
             Some("1219749"),
             &json!({ "notes": ["новая заметка"] }),
+            &|_| {},
             &|_| {},
         )
         .unwrap();

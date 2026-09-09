@@ -84,7 +84,9 @@ pub fn tool_defs() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "shell".into(),
-            description: "Run one shell command in a folder the agent has access to.".into(),
+            description: "Run one shell command in a folder the agent has access to. \
+                          A read-only folder is enough to run something that only reads."
+                .into(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -104,7 +106,7 @@ pub fn tool_defs() -> Vec<ToolDef> {
                 "properties": {
                     "path": { "type": "string", "description": "absolute path to the folder" },
                     "reason": { "type": "string", "description": "why it is needed, one line" },
-                    "writable": { "type": "boolean", "description": "false asks for read-only" }
+                    "writable": { "type": "boolean", "description": "true to be able to write there; false asks for read-only, which still allows reading and running commands that only read" }
                 },
                 "required": ["path", "reason"]
             }),
@@ -424,7 +426,12 @@ fn fs_delete(paths: &Paths, roots: &[TrustedRoot], args: &Value) -> Result<ToolO
 fn shell(paths: &Paths, roots: &[TrustedRoot], args: &Value) -> Result<ToolOutcome> {
     let command = arg_str(args, "command")?;
     let cwd = arg_str(args, "cwd")?;
-    let dir = workspace::resolve(paths, roots, &cwd, Access::Write)?;
+    // Standing in a folder is not writing to it: a read-only grant is enough to
+    // run `Get-ChildItem` there. What the command then does to the disk is not
+    // something a path check can promise either way — that is what the security
+    // level and the approval queue are for, and the shell is the one tool that
+    // always counts as destructive.
+    let dir = workspace::resolve(paths, roots, &cwd, Access::Read)?;
     if !dir.is_dir() {
         return Err(AppError::Invalid(format!(
             "{} is not a folder",
@@ -745,6 +752,51 @@ mod tests {
             &json!({ "path": dir.join("secret.txt").to_string_lossy() }),
         );
         assert!(result.is_err());
+    }
+
+    /// A folder granted for reading is somewhere to stand: looking around it
+    /// from the shell does not need permission to write to it.
+    #[test]
+    fn a_read_only_folder_still_answers_a_command() {
+        let paths = paths();
+        let dir = std::env::temp_dir().join(format!("velvet-ro-{}", crate::models::new_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("marker.txt"), b"hi").unwrap();
+        let roots = vec![TrustedRoot {
+            path: dir.to_string_lossy().to_string(),
+            writable: false,
+            granted_at: chrono::Utc::now(),
+            reason: "read only".into(),
+        }];
+
+        let outcome = execute(
+            &paths,
+            &roots,
+            SecurityLevel::Yolo,
+            "shell",
+            &json!({
+                "command": if cfg!(windows) { "Get-ChildItem -Name" } else { "ls" },
+                "cwd": ".",
+            }),
+        )
+        .unwrap();
+        assert_eq!(outcome.result["exit_code"], 0);
+        assert!(outcome.result["stdout"]
+            .as_str()
+            .unwrap()
+            .contains("marker.txt"));
+
+        // Writing there is still refused, and the refusal says what to do.
+        let refused = execute(
+            &paths,
+            &roots,
+            SecurityLevel::Yolo,
+            "fs_write",
+            &json!({ "path": "note.txt", "content": "no" }),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(refused.contains("reading only"), "message was {refused}");
     }
 
     #[test]

@@ -135,6 +135,8 @@ impl Harness {
             pool: self.pool.clone(),
             llm: &self.llm,
             emit,
+            // Nothing to approve in a test run: everything is applied outright.
+            queue: &|_| {},
         }
     }
 }

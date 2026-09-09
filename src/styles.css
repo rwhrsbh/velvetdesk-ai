@@ -866,6 +866,17 @@ details.step[open] > .step-head .step-caret {
   transform: rotate(90deg);
 }
 
+.step-answer {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: 4px;
+}
+
+.step-answer .btn {
+  padding: 1px 8px;
+  font-size: 11px;
+}
+
 .step-tool {
   flex: none;
   font-family: var(--mono);

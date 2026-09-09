@@ -19,6 +19,25 @@ pub const AGENT_EVENT: &str = "velvetdesk://agent";
 /// Several runs can be in flight at once — one per chat — and the interface has
 /// to know whose delta, step or retry it is looking at. The id is the caller's:
 /// it labels its own run and recognises the events coming back.
+/// Hand an action that needs a human straight to the queue and to the chat.
+///
+/// The panel and the bubble both learn about it while the run is still going,
+/// which is the only time approving it does the run any good.
+fn queueing<'a>(
+    app: &'a AppHandle,
+    state: &'a AppState,
+    run: Option<String>,
+) -> impl Fn(&tools::PendingAction) + Send + Sync + 'a {
+    move |action: &tools::PendingAction| {
+        state.pending.write().push(action.clone());
+        let mut payload = json!({ "kind": "pending", "action": action });
+        if let (Some(run), Some(fields)) = (run.as_deref(), payload.as_object_mut()) {
+            fields.insert("run".into(), json!(run));
+        }
+        let _ = app.emit(AGENT_EVENT, payload);
+    }
+}
+
 fn emitter(app: &AppHandle, run: Option<String>) -> impl Fn(Value) + Send + Sync + '_ {
     move |payload: Value| {
         let mut payload = payload;
@@ -406,6 +425,7 @@ pub async fn digest_chat(
     let provider = state.active_provider()?;
     let pool = state.pool(&provider.id);
     let emit = emitter(&app, None);
+    let queue = queueing(&app, &state, None);
     let deps = AgentDeps {
         paths: &state.paths,
         settings: &settings,
@@ -413,6 +433,7 @@ pub async fn digest_chat(
         pool,
         llm: &state.llm,
         emit: &emit,
+        queue: &queue,
     };
     agent::digest_preview(&deps, &model_id, &man_id, keep_last.unwrap_or(6)).await
 }
@@ -447,6 +468,7 @@ pub async fn learn_voice(
     let provider = state.active_provider()?;
     let pool = state.pool(&provider.id);
     let emit = emitter(&app, None);
+    let queue = queueing(&app, &state, None);
     let deps = AgentDeps {
         paths: &state.paths,
         settings: &settings,
@@ -454,6 +476,7 @@ pub async fn learn_voice(
         pool,
         llm: &state.llm,
         emit: &emit,
+        queue: &queue,
     };
     agent::learn_voice(&deps, &model_id, samples.unwrap_or(10)).await
 }
@@ -520,6 +543,7 @@ pub async fn run_agent(
     let provider = state.active_provider()?;
     let pool = state.pool(&provider.id);
     let emit = emitter(&app, input.run_id.clone());
+    let queue = queueing(&app, &state, input.run_id.clone());
 
     let deps = AgentDeps {
         paths: &state.paths,
@@ -528,12 +552,11 @@ pub async fn run_agent(
         pool,
         llm: &state.llm,
         emit: &emit,
+        queue: &queue,
     };
 
     let output = agent::run(&deps, input).await?;
-    if !output.pending.is_empty() {
-        state.pending.write().extend(output.pending.clone());
-    }
+    // The actions reached the queue as they were made; nothing to add here.
     storage::rebuild_index(&state.paths)?;
     Ok(output)
 }
@@ -611,6 +634,7 @@ pub async fn compact_chat(
     let provider = state.active_provider()?;
     let pool = state.pool(&provider.id);
     let emit = emitter(&app, None);
+    let queue = queueing(&app, &state, None);
 
     let deps = AgentDeps {
         paths: &state.paths,
@@ -619,6 +643,7 @@ pub async fn compact_chat(
         pool,
         llm: &state.llm,
         emit: &emit,
+        queue: &queue,
     };
     agent::compact_chat(&deps, &model_id, man_id.as_deref()).await
 }
@@ -636,6 +661,7 @@ pub async fn compact_context(
     let provider = state.active_provider()?;
     let pool = state.pool(&provider.id);
     let emit = emitter(&app, None);
+    let queue = queueing(&app, &state, None);
     let scope = state.paths.scope(&model_id)?;
 
     let deps = AgentDeps {
@@ -645,6 +671,7 @@ pub async fn compact_context(
         pool,
         llm: &state.llm,
         emit: &emit,
+        queue: &queue,
     };
 
     agent::compact_context(&deps, &scope, &man_id, keep_last.unwrap_or(6)).await?;
@@ -663,6 +690,7 @@ pub async fn write_letters(
     let provider = state.active_provider()?;
     let pool = state.pool(&provider.id);
     let emit = emitter(&app, None);
+    let queue = queueing(&app, &state, None);
 
     let deps = AgentDeps {
         paths: &state.paths,
@@ -671,6 +699,7 @@ pub async fn write_letters(
         pool,
         llm: &state.llm,
         emit: &emit,
+        queue: &queue,
     };
     agent::write_letters(&deps, input).await
 }
@@ -685,6 +714,7 @@ pub async fn master_chat(
     let provider = state.active_provider()?;
     let pool = state.pool(&provider.id);
     let emit = emitter(&app, input.run_id.clone());
+    let queue = queueing(&app, &state, input.run_id.clone());
 
     let deps = AgentDeps {
         paths: &state.paths,
@@ -693,12 +723,11 @@ pub async fn master_chat(
         pool,
         llm: &state.llm,
         emit: &emit,
+        queue: &queue,
     };
 
     let output = agent::master::chat(&deps, input).await?;
-    if !output.pending.is_empty() {
-        state.pending.write().extend(output.pending.clone());
-    }
+    // The actions reached the queue as they were made; nothing to add here.
     Ok(output)
 }
 
@@ -712,6 +741,7 @@ pub async fn master_context_stats(
     let provider = state.active_provider()?;
     let pool = state.pool(&provider.id);
     let emit = emitter(&app, None);
+    let queue = queueing(&app, &state, None);
 
     let deps = AgentDeps {
         paths: &state.paths,
@@ -720,6 +750,7 @@ pub async fn master_context_stats(
         pool,
         llm: &state.llm,
         emit: &emit,
+        queue: &queue,
     };
     let mut stats = agent::master::context_stats(&deps)?;
     if let Ok(request) = agent::master::next_request(&deps) {

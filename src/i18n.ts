@@ -201,6 +201,7 @@ const ru: Dict = {
   "chat.key": "ключ #{n}",
   "chat.turns": "{n} циклов",
   "chat.pending": "ждёт подтверждения",
+  "chat.pendingDone": "решено",
   "chat.done": "выполнено",
   "chat.failed": "ошибка",
 
@@ -697,6 +698,7 @@ const en: Dict = {
   "chat.key": "key #{n}",
   "chat.turns": "{n} turns",
   "chat.pending": "awaiting approval",
+  "chat.pendingDone": "answered",
   "chat.done": "done",
   "chat.failed": "failed",
 

@@ -271,8 +271,18 @@ function stepHtml(step: RunStep): string {
     : step.kind.includes("pending")
       ? "pending"
       : "";
+  const waiting = (step.detail as { pending?: string } | undefined)?.pending;
+  // Still in the queue: the operator can answer it here rather than hunting for
+  // the panel, and the agent is still standing there waiting for the answer.
+  const open = waiting ? store.pending.some((action) => action.id === waiting) : false;
   const badge = step.kind.includes("pending")
-    ? `<span class="step-badge">${escapeHtml(t("chat.pending"))}</span>`
+    ? `<span class="step-badge">${escapeHtml(t(open ? "chat.pending" : "chat.pendingDone"))}</span>`
+    : "";
+  const answer = open
+    ? `<span class="step-answer">` +
+      `<button class="btn btn-secondary" data-approve="${escapeHtml(waiting!)}">${t("queue.approve")}</button>` +
+      `<button class="btn btn-secondary" data-reject="${escapeHtml(waiting!)}">${t("queue.reject")}</button>` +
+      `</span>`
     : "";
   const tool = step.tool ? `<span class="step-tool">${escapeHtml(step.tool)}</span>` : "";
 
@@ -325,7 +335,8 @@ function stepHtml(step: RunStep): string {
     `<span class="step-caret">›</span>` +
     tool +
     `<span class="step-text">${escapeHtml(stepText(step))}</span>` +
-    badge;
+    badge +
+    answer;
 
   if (parts.length === 0) {
     return `<div class="step ${cls} step-plain">${head}</div>`;
