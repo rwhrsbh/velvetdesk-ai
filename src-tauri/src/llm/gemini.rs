@@ -277,6 +277,30 @@ pub async fn call_streaming(
         }
     }
 
+    // A stream can end on its last event without the blank line that closes it,
+    // and that event would sit in the buffer unread — the answer ending
+    // mid-sentence with nothing to explain why.
+    if !buffer.trim().is_empty() {
+        buffer.push_str("\n\n");
+        for value in take_events(&mut buffer) {
+            if let Some(parts) = value["candidates"][0]["content"]["parts"].as_array() {
+                for part in parts {
+                    if let Some(piece) = part.get("text").and_then(|t| t.as_str()) {
+                        if part.get("thought").and_then(|t| t.as_bool()) == Some(true) {
+                            thoughts.push_str(piece);
+                        } else {
+                            text.push_str(piece);
+                            on_event(json!({ "kind": "delta", "text": piece }));
+                        }
+                    }
+                }
+            }
+            if let Some(reason) = value["candidates"][0]["finishReason"].as_str() {
+                finish_reason = reason.to_string();
+            }
+        }
+    }
+
     Ok(ChatResponse {
         text: text.trim().to_string(),
         raw: super::cap_raw(&seen),
@@ -882,6 +906,39 @@ mod tests {
         let part = &build_body(&provider(), &req)["contents"][0]["parts"][0];
         assert_eq!(part["functionCall"]["name"], "list_men");
         assert_eq!(part["thoughtSignature"], "Cs4BAdHtim8abc");
+    }
+
+    /// The last event of a stream may arrive without the blank line that
+    /// closes it; dropping it truncates the answer mid-sentence.
+    #[test]
+    fn a_stream_ending_without_a_blank_line_keeps_its_last_event() {
+        let mut buffer = String::new();
+        buffer.push_str(
+            "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"first \"}]}}]}
+
+",
+        );
+        let events = take_events(&mut buffer);
+        assert_eq!(events.len(), 1);
+
+        // What a closing chunk looks like when the connection ends on it.
+        buffer.push_str("data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"second\"}]},\"finishReason\":\"STOP\"}]}");
+        assert!(
+            take_events(&mut buffer).is_empty(),
+            "an unterminated event waits"
+        );
+
+        buffer.push_str(
+            "
+
+",
+        );
+        let tail = take_events(&mut buffer);
+        assert_eq!(tail.len(), 1);
+        assert_eq!(
+            tail[0]["candidates"][0]["content"]["parts"][0]["text"],
+            "second"
+        );
     }
 
     /// A screenshot goes out beside the words that ask about it.

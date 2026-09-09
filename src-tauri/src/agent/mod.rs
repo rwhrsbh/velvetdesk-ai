@@ -809,6 +809,30 @@ pub fn next_request(
     Ok(request)
 }
 
+/// Collect one turn's payload into the run's record of what the provider said.
+///
+/// Capped as it grows rather than at the end, so a chain of long answers cannot
+/// hold a megabyte of JSON in memory on its way to being trimmed.
+fn push_raw(raw: &mut String, turn: usize, payload: &str) {
+    if payload.trim().is_empty() {
+        return;
+    }
+    if !raw.is_empty() {
+        raw.push_str(
+            "
+
+",
+        );
+    }
+    raw.push_str(&format!(
+        "--- turn {turn} ---
+{payload}"
+    ));
+    if raw.len() > crate::llm::RAW_LIMIT {
+        *raw = crate::llm::cap_raw(raw);
+    }
+}
+
 /// How many turns of the operator's own conversation are carried into a run.
 const OPERATOR_HISTORY: usize = 20;
 
@@ -854,6 +878,11 @@ async fn run_auto(
     let mut usage = Usage::default();
     let mut key_index = 0usize;
     let mut reply = String::new();
+    // True once a turn that called no tools produced text: that is an answer.
+    // Anything a model types *before* calling a tool is a preamble — often a
+    // half-written sentence — and one of those standing in for the answer is
+    // what left the operator with "We had some rough" and nothing after it.
+    let mut answered = false;
     let mut thoughts = String::new();
     let mut reply_key = String::new();
     let mut model = String::new();
@@ -883,7 +912,10 @@ async fn run_auto(
         usage.total_tokens += response.usage.total_tokens;
         key_index = response.key_index;
         model = response.model.clone();
-        raw = response.raw.clone();
+        // Every turn of the chain, not only the last one: a run that called
+        // three tools answered four times, and "the provider's answer" means
+        // all four when the operator opens it.
+        push_raw(&mut raw, turns, &response.raw);
         if !response.thoughts.is_empty() {
             if !thoughts.is_empty() {
                 thoughts.push_str("\n\n");
@@ -896,6 +928,7 @@ async fn run_auto(
 
         if response.tool_calls.is_empty() {
             reply = response.text;
+            answered = !reply.trim().is_empty();
             // A provider that declines an answer returns a finished turn with
             // nothing in it. Saying so beats an empty bubble the operator has
             // to guess at.
@@ -917,6 +950,8 @@ async fn run_auto(
             response.text.clone(),
             response.tool_calls.clone(),
         ));
+        // Kept only as a fallback: if every later turn fails, half a sentence
+        // still beats an empty bubble — but it never ends the run on its own.
         if !response.text.trim().is_empty() {
             reply = response.text.clone();
         }
@@ -1034,7 +1069,7 @@ async fn run_auto(
     // The turns ran out while the model was still calling tools. One more
     // call, with nothing left to reach for, turns what it gathered into the
     // answer the operator asked for — the run used to end in silence here.
-    if reply.trim().is_empty() && !steps.is_empty() {
+    if !answered && !steps.is_empty() {
         request.tools.clear();
         request.messages.push(LlmMessage::user(
             "Answer the operator now, in full, from what you have already              gathered. Do not call tools and do not narrate what you did.",
@@ -1048,8 +1083,10 @@ async fn run_auto(
             usage.completion_tokens += response.usage.completion_tokens;
             usage.total_tokens += response.usage.total_tokens;
             turns += 1;
+            push_raw(&mut raw, turns, &response.raw);
             if !response.text.trim().is_empty() {
                 reply = response.text;
+                answered = true;
             }
         }
     }
@@ -1057,6 +1094,19 @@ async fn run_auto(
     if reply.trim().is_empty() {
         reply_key = "chat.noReplyText".to_string();
         reply = "Инструменты отработали, но модель не вернула текст ответа.".into();
+    } else if !answered {
+        // All that survived is what the model typed before it reached for a
+        // tool — usually half a sentence. It is still shown, because half a
+        // draft beats none, but it is labelled rather than passed off as the
+        // finished answer.
+        steps.push(RunStep {
+            kind: "warn".into(),
+            tool: None,
+            summary: "Ответ оборван: модель ушла в инструменты и не дописала".into(),
+            key: "step.replyCutShort".into(),
+            params: json!({}),
+            detail: Value::Null,
+        });
     }
 
     finish(
@@ -1642,6 +1692,29 @@ mod tests {
         assert_eq!(pending[0].after["facts"].as_array().unwrap().len(), 1);
         assert_eq!(pending[0].after["notes"].as_array().unwrap().len(), 1);
         assert_eq!(scope.read_all_men().unwrap().len(), 1);
+    }
+
+    /// The provider's answer means every turn of the chain, trimmed as it grows.
+    #[test]
+    fn the_raw_record_keeps_every_turn() {
+        let mut raw = String::new();
+        push_raw(&mut raw, 1, "{\"first\":true}");
+        push_raw(&mut raw, 2, "   ");
+        push_raw(&mut raw, 3, "{\"third\":true}");
+
+        assert!(raw.contains("--- turn 1 ---"));
+        assert!(raw.contains("--- turn 3 ---"));
+        assert!(
+            !raw.contains("--- turn 2 ---"),
+            "an empty payload adds nothing"
+        );
+        assert!(raw.contains("{\"first\":true}") && raw.contains("{\"third\":true}"));
+
+        push_raw(&mut raw, 4, &"x".repeat(crate::llm::RAW_LIMIT + 100));
+        assert!(
+            raw.len() < crate::llm::RAW_LIMIT + 200,
+            "it is trimmed as it grows"
+        );
     }
 
     /// The copilot is given the conversation the operator is having with it,
