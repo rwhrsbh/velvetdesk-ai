@@ -123,12 +123,6 @@ export async function decodeAudio(blob: Blob): Promise<Float32Array> {
   }
 }
 
-export interface LocalTranscribeOptions {
-  /** "ru", "uk", "en". Whisper falls back to English — and translates — when
-   *  nothing is given, so callers should always pass one. */
-  language?: string;
-}
-
 /** Root-mean-square level of a clip, 0 … 1. */
 export function loudness(samples: Float32Array): number {
   if (samples.length === 0) return 0;
@@ -149,11 +143,7 @@ export class SilentClipError extends Error {
 }
 
 /** Transcribe a recorded clip entirely on this device. */
-export async function transcribeLocally(
-  repo: string,
-  blob: Blob,
-  options: LocalTranscribeOptions = {},
-): Promise<string> {
+export async function transcribeLocally(repo: string, blob: Blob): Promise<string> {
   const recogniser = await loadModel(repo);
   const samples = await decodeAudio(blob);
 
@@ -165,7 +155,6 @@ export async function transcribeLocally(
     // Long clips are processed in chunks with overlap so nothing is lost.
     chunk_length_s: 30,
     stride_length_s: 5,
-    language: options.language || undefined,
     // Always transcribe: "translate" would turn dictated Russian into English.
     task: "transcribe",
   });

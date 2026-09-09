@@ -155,8 +155,8 @@ export const api = {
   compactContext: (modelId: string, manId: string, keepLast?: number) =>
     invoke<ContextStats>("compact_context", { modelId, manId, keepLast }),
 
-  transcribe: (audioBase64: string, mime: string, language?: string) =>
-    invoke<string>("transcribe", { audioBase64, mime, language }),
+  transcribe: (audioBase64: string, mime: string) =>
+    invoke<string>("transcribe", { audioBase64, mime }),
   listLocalModels: () => invoke<LocalModel[]>("list_local_models"),
   downloadLocalModel: (modelId: string) => invoke<LocalModel>("download_local_model", { modelId }),
   deleteLocalModel: (modelId: string) => invoke<LocalModel[]>("delete_local_model", { modelId }),

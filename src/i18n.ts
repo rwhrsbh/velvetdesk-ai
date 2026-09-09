@@ -231,7 +231,6 @@ const ru: Dict = {
   "composer.micDevice": "Микрофон",
   "composer.micDefault": "микрофон по умолчанию",
   "composer.micNumbered": "микрофон {n}",
-  "composer.speechLang": "Язык диктовки",
   "composer.thinkingHint": "Сколько модель думает перед ответом",
   "composer.contextHint": "Заполнение контекста модели",
   "composer.contextDetail":
@@ -728,7 +727,6 @@ const en: Dict = {
   "composer.micDevice": "Microphone",
   "composer.micDefault": "default microphone",
   "composer.micNumbered": "microphone {n}",
-  "composer.speechLang": "Dictation language",
   "composer.thinkingHint": "How long the model thinks before answering",
   "composer.contextHint": "Context window usage",
   "composer.contextDetail":

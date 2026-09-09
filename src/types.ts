@@ -252,7 +252,6 @@ export interface Settings {
   speech_engine: "provider" | "local";
   local_speech_model: string;
   speech_device: string;
-  speech_language: string;
   auto_compact_at: number;
   /** Look for a newer release on start. */
   update_check: boolean;

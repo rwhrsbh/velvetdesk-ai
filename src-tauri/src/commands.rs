@@ -1123,7 +1123,6 @@ pub async fn transcribe(
     state: State<'_, AppState>,
     audio_base64: String,
     mime: String,
-    language: Option<String>,
 ) -> Result<String> {
     if audio_base64.trim().is_empty() {
         return Err(AppError::message("error.emptyRecording", json!({})));
@@ -1140,18 +1139,12 @@ pub async fn transcribe(
         AppError::message("error.noWorkingKey", json!({ "provider": provider.id }))
     })?;
 
-    let language = language.unwrap_or_else(|| {
-        let settings = state.settings.read();
-        settings.speech_language.clone()
-    });
-
     match crate::llm::catalog::transcribe(
         &state.llm.http,
         &provider,
         &lease.key,
         &audio_base64,
         &mime,
-        &language,
     )
     .await
     {

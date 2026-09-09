@@ -216,11 +216,6 @@ pub struct Settings {
     /// default, which is not always the one that actually works.
     #[serde(default)]
     pub speech_device: String,
-    /// Dictation language: "ru", "uk", "en" — or empty to follow the UI. An
-    /// empty language makes Whisper fall back to English and quietly translate,
-    /// which is never what an operator dictating Russian wants.
-    #[serde(default)]
-    pub speech_language: String,
     /// Compact the correspondence automatically once the prompt reaches this
     /// share of the context window.
     #[serde(default = "default_auto_compact")]
@@ -345,7 +340,6 @@ impl Default for Settings {
             update_check: true,
             update_skipped: String::new(),
             speech_device: String::new(),
-            speech_language: String::new(),
             auto_compact_at: default_auto_compact(),
         }
     }

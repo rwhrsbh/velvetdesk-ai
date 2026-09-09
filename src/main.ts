@@ -949,27 +949,21 @@ function warmLocalModel() {
 }
 
 /**
- * Language for dictation: the operator's choice, or the interface language.
- * Never empty — Whisper treats "no language" as English and silently
- * translates, which turns dictated Russian into English prose.
+ * Run the clip through whichever engine the operator picked.
+ *
+ * No language is named. Every engine hears which one is being spoken, the
+ * hosted endpoint rejected the field outright, and naming the wrong one is how
+ * dictated Russian came back as English prose.
  */
-function speechLanguage(): string {
-  const chosen = store.settings?.speech_language?.trim();
-  if (chosen) return chosen;
-  return lang();
-}
-
-/** Run the clip through whichever engine the operator picked. */
 async function transcribeClip(blob: Blob, mime: string): Promise<string> {
-  const language = speechLanguage();
   if (store.settings?.speech_engine === "local") {
     const repo = localModelRepo();
     if (!repo) throw new Error(t("toast.localNoModel"));
     $("micLabel").textContent = t("composer.loadingModel");
-    return transcribeLocally(repo, blob, { language });
+    return transcribeLocally(repo, blob);
   }
   const base64 = await blobToBase64(blob);
-  return api.transcribe(base64, mime.split(";")[0], language);
+  return api.transcribe(base64, mime.split(";")[0]);
 }
 
 /**
@@ -2032,14 +2026,9 @@ function bindComposer() {
 
   // The row of controls under the composer opens the app's own menus rather
   // than the platform's popup.
-  for (const id of ["speechLang", "thinkingSelect", "channelSelect"]) {
+  for (const id of ["thinkingSelect", "channelSelect"]) {
     dressSelect($(id) as HTMLSelectElement);
   }
-
-  const speech = $("speechLang") as HTMLSelectElement;
-  speech.addEventListener("change", () => {
-    void persistSettings({ speech_language: speech.value });
-  });
 
   const thinking = $("thinkingSelect") as HTMLSelectElement;
   thinking.addEventListener("change", () => {
@@ -2301,10 +2290,6 @@ async function boot() {
     store.mode = data.settings.agent_mode;
     store.security = data.settings.security_level;
     applyLanguage(data.settings.ui_language === "en" ? "en" : "ru");
-
-    const speech = $("speechLang") as HTMLSelectElement;
-    speech.value =
-      data.settings.speech_language || (data.settings.ui_language === "en" ? "en" : "ru");
     const thinking = $("thinkingSelect") as HTMLSelectElement;
     store.thinking =
       data.settings.providers.find((p) => p.id === data.settings.active_provider)
