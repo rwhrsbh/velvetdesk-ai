@@ -809,6 +809,107 @@ pub fn next_request(
     Ok(request)
 }
 
+/// Whether a finished turn actually finished.
+///
+/// Gemini says STOP when it is done and MAX_TOKENS when it hit the ceiling; a
+/// stream that is cut off says nothing at all, because the event carrying the
+/// reason never arrived.
+fn is_cut_short(finish_reason: &str) -> bool {
+    let reason = finish_reason.trim();
+    reason.is_empty() || reason.eq_ignore_ascii_case("MAX_TOKENS") || reason == "length"
+}
+
+/// Whether this turn needs carrying on.
+///
+/// A provider that ran out of output tokens says so, and that is enough. A
+/// silent stop is ambiguous — some endpoints simply never send a reason — so
+/// the text has to look unfinished as well, or every complete answer would
+/// cost a second call to confirm it was complete.
+fn was_interrupted(finish_reason: &str, text: &str) -> bool {
+    let reason = finish_reason.trim();
+    if reason.eq_ignore_ascii_case("MAX_TOKENS") || reason == "length" {
+        return true;
+    }
+    reason.is_empty() && looks_unfinished(text)
+}
+
+/// A sentence that was never closed: no final punctuation, no closing quote.
+fn looks_unfinished(text: &str) -> bool {
+    /// What the end of a finished message looks like.
+    const CLOSERS: &str = ".!?\u{2026}\"'\u{00bb})]}:\u{2014}";
+
+    let Some(last) = text.trim_end().chars().next_back() else {
+        return false;
+    };
+    if CLOSERS.contains(last) || last.is_numeric() {
+        return false;
+    }
+    // An emoji ends a message as firmly as a full stop does.
+    !matches!(last as u32, 0x1F300..=0x1FAFF | 0x2600..=0x27BF)
+}
+
+/// What a continuation brought back.
+struct Continued {
+    text: String,
+    raw: String,
+    turns: usize,
+    still_cut: bool,
+}
+
+/// Carry on an answer the provider stopped writing.
+///
+/// Up to two more calls: the model is handed what it has written so far and
+/// asked to continue from exactly there. More than that and a model stuck in a
+/// loop would spend the operator's quota on it.
+async fn continue_reply(
+    deps: &AgentDeps<'_>,
+    request: &mut ChatRequest,
+    written: &str,
+    usage: &mut Usage,
+) -> Continued {
+    let mut carried = Continued {
+        text: String::new(),
+        raw: String::new(),
+        turns: 0,
+        still_cut: true,
+    };
+    request.tools.clear();
+
+    for _ in 0..2 {
+        let so_far = format!("{written}{}", carried.text);
+        request
+            .messages
+            .push(LlmMessage::assistant(so_far.clone(), vec![]));
+        request.messages.push(LlmMessage::user(
+            "Your answer was cut off mid-sentence. Continue it from exactly where it              stops, in the same language and voice. Do not repeat a single word of what              is already written, do not start again, do not explain — just carry on.",
+        ));
+
+        let Ok(response) = deps
+            .llm
+            .chat(deps.provider, deps.pool.clone(), request, deps.emit)
+            .await
+        else {
+            return carried;
+        };
+
+        usage.prompt_tokens += response.usage.prompt_tokens;
+        usage.completion_tokens += response.usage.completion_tokens;
+        usage.total_tokens += response.usage.total_tokens;
+        carried.turns += 1;
+        if !carried.raw.is_empty() {
+            carried.raw.push('\n');
+        }
+        carried.raw.push_str(&response.raw);
+        carried.text.push_str(&response.text);
+
+        if !is_cut_short(&response.finish_reason) {
+            carried.still_cut = false;
+            return carried;
+        }
+    }
+    carried
+}
+
 /// Collect one turn's payload into the run's record of what the provider said.
 ///
 /// Capped as it grows rather than at the end, so a chain of long answers cannot
@@ -883,6 +984,9 @@ async fn run_auto(
     // half-written sentence — and one of those standing in for the answer is
     // what left the operator with "We had some rough" and nothing after it.
     let mut answered = false;
+    // Set when the provider stopped mid-answer and even the continuation did
+    // not finish it: the operator is told rather than left guessing.
+    let mut cut_short = false;
     let mut thoughts = String::new();
     let mut reply_key = String::new();
     let mut model = String::new();
@@ -929,6 +1033,21 @@ async fn run_auto(
         if response.tool_calls.is_empty() {
             reply = response.text;
             answered = !reply.trim().is_empty();
+
+            // The stream can end in the middle of a sentence: the connection
+            // closes, or the model runs into its output ceiling, and what
+            // arrives is "В досье по" with no finish reason to explain it.
+            // Asking it to carry on from exactly there costs one more call and
+            // saves the letter.
+            if answered && was_interrupted(&response.finish_reason, &reply) {
+                let carried = continue_reply(deps, &mut request, &reply, &mut usage).await;
+                turns += carried.turns;
+                push_raw(&mut raw, turns, &carried.raw);
+                if !carried.text.trim().is_empty() {
+                    reply.push_str(&carried.text);
+                }
+                cut_short = carried.still_cut;
+            }
             // A provider that declines an answer returns a finished turn with
             // nothing in it. Saying so beats an empty bubble the operator has
             // to guess at.
@@ -1107,6 +1226,15 @@ async fn run_auto(
     if reply.trim().is_empty() {
         reply_key = "chat.noReplyText".to_string();
         reply = "Инструменты отработали, но модель не вернула текст ответа.".into();
+    } else if cut_short {
+        steps.push(RunStep {
+            kind: "warn".into(),
+            tool: None,
+            summary: "Ответ оборван: провайдер прекратил передачу".into(),
+            key: "step.replyTruncated".into(),
+            params: json!({}),
+            detail: Value::Null,
+        });
     } else if !answered {
         // All that survived is what the model typed before it reached for a
         // tool — usually half a sentence. It is still shown, because half a
@@ -1705,6 +1833,29 @@ mod tests {
         assert_eq!(pending[0].after["facts"].as_array().unwrap().len(), 1);
         assert_eq!(pending[0].after["notes"].as_array().unwrap().len(), 1);
         assert_eq!(scope.read_all_men().unwrap().len(), 1);
+    }
+
+    /// A silent stop only counts as an interruption when the text broke off;
+    /// otherwise every finished answer would cost a call to confirm it.
+    #[test]
+    fn only_an_unfinished_sentence_is_carried_on() {
+        assert!(was_interrupted("", "В досье по"));
+        assert!(was_interrupted("MAX_TOKENS", "Готово."));
+        assert!(!was_interrupted("", "Готово."));
+        assert!(!was_interrupted("", "Написала ему, жду ответа!"));
+        assert!(!was_interrupted("STOP", "В досье по"));
+    }
+
+    /// A turn that says nothing about why it stopped did not stop on purpose.
+    #[test]
+    fn a_missing_finish_reason_means_the_answer_was_cut() {
+        assert!(is_cut_short(""));
+        assert!(is_cut_short("   "));
+        assert!(is_cut_short("MAX_TOKENS"));
+        assert!(is_cut_short("max_tokens"));
+        assert!(is_cut_short("length"));
+        assert!(!is_cut_short("STOP"));
+        assert!(!is_cut_short("stop"));
     }
 
     /// The provider's answer means every turn of the chain, trimmed as it grows.
