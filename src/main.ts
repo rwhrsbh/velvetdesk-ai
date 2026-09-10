@@ -1538,47 +1538,62 @@ function bindPanels() {
     if (btn.dataset.act === "raw") {
       const meta = (entry.meta ?? {}) as { raw?: string; raw_kept?: boolean };
       const raw = meta.raw ?? "";
-      // What the core could not keep is said in the operator's language, and
-      // said plainly: no button brings back what was never written down.
+      // The payload ends where the chat log stopped keeping it, and the line
+      // that says so is the way to the rest: it is the thing you reach after
+      // scrolling to the bottom, so it is the thing that carries on the text.
       const capped = /\[\[capped:(\d+)\]\]/.exec(raw);
-      const shown = capped ? raw.replace(capped[0], t("chat.rawCapped", { n: capped[1] })) : raw;
+      const body = capped ? raw.slice(0, capped.index) : raw;
+      const more = capped
+        ? `<button class="raw-more" data-act="more-raw">${escapeHtml(
+            t(meta.raw_kept ? "chat.rawMore" : "chat.rawCapped", { n: capped[1] }),
+          )}</button>`
+        : "";
+
       const card = openModal(
         `<h3>${t("chat.rawTitle")}</h3>` +
           `<div class="modal-sub">${t("chat.rawSub")}</div>` +
-          `<div class="code-block raw-payload">${escapeHtml(shown)}</div>` +
+          `<div class="code-block raw-payload">${escapeHtml(body)}${more}</div>` +
           `<div class="modal-actions">` +
-          `<button class="btn btn-secondary" data-act="expand-raw">${t("chat.rawExpand")}</button>` +
           `<button class="btn btn-secondary" data-act="copy-raw">${t("ctx.copy")}</button>` +
           `<button class="btn btn-primary" data-act="close">${t("common.close")}</button></div>`,
       );
       card.querySelector('[data-act="close"]')?.addEventListener("click", closeModal);
-      // The payload opens at a readable height. The button takes the ceiling
-      // off it — and when the log kept only a slice, it first fetches the whole
-      // payload from beside the conversation, which is the only place it is.
+
       const block = card.querySelector<HTMLElement>(".raw-payload");
-      const expand = card.querySelector<HTMLButtonElement>('[data-act="expand-raw"]');
-      let whole = meta.raw_kept ? null : shown;
-      expand?.addEventListener("click", () => {
+      card.querySelector('[data-act="more-raw"]')?.addEventListener("click", (event) => {
+        const line = event.currentTarget as HTMLButtonElement;
+        // Nothing was kept past this point: the line says so and stays put.
+        if (!meta.raw_kept) return;
+        line.disabled = true;
+        line.textContent = t("chat.rawLoading");
         void (async () => {
-          if (whole === null) {
-            expand.disabled = true;
-            try {
-              whole = (await api.readRaw(entry.id)) ?? shown;
-            } catch (error) {
-              console.error("raw payload", error);
-              whole = shown;
+          try {
+            const whole = (await api.readRaw(entry.id)) ?? body;
+            const rest = /\[\[capped:(\d+)\]\]/.exec(whole);
+            if (block) {
+              block.textContent = rest ? whole.slice(0, rest.index) : whole;
+              // Even the kept copy has a ceiling; when it was reached, the
+              // same line says so, this time with nowhere further to go.
+              if (rest) {
+                const tail = document.createElement("div");
+                tail.className = "raw-more done";
+                tail.textContent = t("chat.rawCapped", { n: rest[1] });
+                block.appendChild(tail);
+              }
             }
-            expand.disabled = false;
-            if (block) block.textContent = whole;
+          } catch (error) {
+            console.error("raw payload", error);
+            line.disabled = false;
+            line.textContent = t("chat.rawMore", { n: capped?.[1] ?? "" });
+            toast(errorText(error), "error");
           }
-          const open = block?.classList.toggle("expanded");
-          expand.textContent = t(open ? "chat.rawCollapse" : "chat.rawExpand");
         })();
       });
+
       card.querySelector('[data-act="copy-raw"]')?.addEventListener("click", () => {
-        // Copying takes whatever is on screen: the slice, or the whole of it
-        // once it has been fetched.
-        void copyText(block?.textContent ?? shown);
+        // Whatever is on screen: the slice, or the whole of it once the line
+        // at the bottom has been pressed.
+        void copyText(block?.textContent ?? raw);
         toast(t("chat.copied"), "success");
       });
       return;

@@ -924,10 +924,30 @@ input[type="range"] {
   line-height: 1.5;
 }
 
-/* Taken off the leash: the whole payload, however long, inside a dialog that
-   scrolls with it. */
-.raw-payload.expanded {
-  max-height: none;
+/* The line at the end of a cut payload: press it and the rest arrives. */
+.raw-more {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: var(--accent, var(--text));
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.raw-more:hover {
+  text-decoration: underline;
+}
+
+/* The same line once there is nothing further to fetch. */
+.raw-more.done,
+.raw-more:disabled {
+  color: var(--text-faint);
+  cursor: default;
+  text-decoration: none;
 }
 
 /* A draft already in the thread says so where its button used to be. */
