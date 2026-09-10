@@ -26,7 +26,9 @@ export function renderTopbar() {
   if (provider) {
     label.textContent = provider.key_count
       ? t("provider.keys", {
-          model: provider.model,
+          // A provider whose model has not been chosen yet says so, rather
+          // than leaving the line starting with a dot and nothing before it.
+          model: provider.model.trim() || t("provider.pickModel"),
           count: provider.key_count,
           word: keyWord(provider.key_count),
         })

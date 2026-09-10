@@ -333,6 +333,12 @@ impl LlmClient {
         on_event: &(dyn Fn(Value) + Send + Sync),
     ) -> Result<ChatResponse> {
         let models = provider.models();
+        if models.is_empty() {
+            return Err(AppError::message(
+                "error.noModelPicked",
+                serde_json::json!({ "provider": provider.label.clone() }),
+            ));
+        }
         let mut last_error = AppError::Provider("no model was tried".into());
         // A model that declined is not a broken key or a flat network: when
         // every model in the chain declines, the operator is told that, and

@@ -91,7 +91,13 @@ impl ProviderConfig {
     /// Every model this provider may answer with, in order: the chosen one
     /// first, then the fallbacks, without repeats.
     pub fn models(&self) -> Vec<String> {
-        let mut models = vec![self.model.trim().to_string()];
+        let mut models = vec![];
+        // A provider whose model has not been chosen yet has none: an empty
+        // name reaches the endpoint as a request for a model called "", and
+        // the error it answers with explains nothing.
+        if !self.model.trim().is_empty() {
+            models.push(self.model.trim().to_string());
+        }
         for fallback in &self.model_chain {
             let fallback = fallback.trim();
             if !fallback.is_empty() && !models.iter().any(|m| m == fallback) {
@@ -313,7 +319,10 @@ impl Default for Settings {
                     kind: ProviderKind::OpenaiCompatible,
                     base_url: "https://integrate.api.nvidia.com/v1".into(),
                     api_version: "v1".into(),
-                    model: "deepseek-ai/deepseek-v4-flash-0731".into(),
+                    // Nothing is picked for the operator: the endpoint
+                    // publishes its whole catalogue, and naming one model here
+                    // would only be a guess at which of them they want.
+                    model: String::new(),
                     extra_headers: vec![],
                     temperature: 0.85,
                     max_output_tokens: None,
@@ -452,6 +461,22 @@ fn restrict_permissions(_path: &std::path::Path) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A provider that ships without a model — the operator picks one from
+    /// the endpoint's own catalogue — has no models until they do, and an
+    /// empty name must never be sent as if it were one.
+    #[test]
+    fn a_provider_with_no_model_chosen_has_none() {
+        let mut provider = Settings::default()
+            .providers
+            .into_iter()
+            .find(|p| p.id == "nvidia")
+            .unwrap();
+        assert!(provider.models().is_empty());
+
+        provider.model = "deepseek-ai/deepseek-v4-flash-0731".into();
+        assert_eq!(provider.models(), vec![provider.model.clone()]);
+    }
 
     /// A provider added in a later version has to reach the people already
     /// running the app: their settings file lists the providers it was written

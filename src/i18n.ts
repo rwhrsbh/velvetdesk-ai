@@ -10,6 +10,7 @@ const ru: Dict = {
   "provider.loading": "загрузка…",
   "provider.noKey": "{label} — нет ключа",
   "provider.keys": "{model} · {count} {word}",
+  "provider.pickModel": "модель не выбрана",
   "provider.title": "Провайдер и ключи",
 
   "mode.auto": "Auto",
@@ -178,6 +179,7 @@ const ru: Dict = {
   "error.profileExists": "Анкета {id} уже существует",
   "error.emptyRecording": "Запись пустая",
   "error.noWorkingKey": "У провайдера {provider} нет рабочего ключа",
+  "error.noModelPicked": "У провайдера {provider} не выбрана модель — откройте ключи и выберите её из списка",
   "error.notAFolder": "{path} — не папка",
   "chat.stopped": "Остановлено оператором.",
   "chat.stopping": "Останавливаю…",
@@ -519,6 +521,7 @@ const en: Dict = {
   "provider.loading": "loading…",
   "provider.noKey": "{label} — no key",
   "provider.keys": "{model} · {count} {word}",
+  "provider.pickModel": "no model chosen",
   "provider.title": "Provider and keys",
 
   "mode.auto": "Auto",
@@ -686,6 +689,7 @@ const en: Dict = {
   "error.profileExists": "Profile {id} already exists",
   "error.emptyRecording": "The recording is empty",
   "error.noWorkingKey": "Provider {provider} has no usable key",
+  "error.noModelPicked": "Provider {provider} has no model chosen — open the keys dialog and pick one from the list",
   "error.notAFolder": "{path} is not a folder",
   "chat.stopped": "Stopped by the operator.",
   "chat.stopping": "Stopping…",
