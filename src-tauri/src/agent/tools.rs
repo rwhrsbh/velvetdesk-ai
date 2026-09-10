@@ -255,6 +255,7 @@ pub fn tool_defs() -> Vec<ToolDef> {
                     "age": { "type": "integer" },
                     "location": str_prop("city / country"),
                     "country": str_prop("country"),
+                    "avatar": str_prop(AVATAR_HINT),
                     "status": str_prop("one-line status"),
                     "stage": str_prop("new|warming|attached|dating|cooled"),
                     "next_action": str_prop("what the operator should do next"),
@@ -295,6 +296,7 @@ pub fn tool_defs() -> Vec<ToolDef> {
                     "location": str_prop("city / country"),
                     "country": str_prop("country"),
                     "age": { "type": "integer" },
+                    "avatar": str_prop(AVATAR_HINT),
                     "touch_last_contact": { "type": "boolean", "description": "set last contact to now" }
                 },
                 "required": ["man_id"]
@@ -363,7 +365,7 @@ pub fn tool_defs() -> Vec<ToolDef> {
                     "man_id": str_prop("dossier id"),
                     "role": str_prop("incoming|outgoing|note"),
                     "channel": str_prop("chat|letter|note"),
-                    "text": str_prop("message body")
+                    "text": str_prop("message body — the message itself, with no commentary and no /DRAFT/ markers")
                 },
                 "required": ["man_id", "role", "text"]
             }),
@@ -377,6 +379,7 @@ pub fn tool_defs() -> Vec<ToolDef> {
                 "properties": {
                     "bio": str_prop("short bio"),
                     "site": str_prop("dating site"),
+                    "avatar": str_prop(AVATAR_HINT),
                     "add_facts": {
                         "type": "array",
                         "items": {
@@ -414,6 +417,14 @@ pub fn tool_defs() -> Vec<ToolDef> {
         ),
     ]
 }
+
+/// What to put in a picture field.
+///
+/// The operator sends a photo or a link and expects it on the card. A link is
+/// used as it stands; a picture they attached to this very message has no
+/// address of its own, so it is named by its place in the message and the app
+/// puts the picture itself there.
+pub const AVATAR_HINT: &str = "photo: a URL, or attachment:1 for the first picture      the operator attached to this message (attachment:2 for the second, and so on)";
 
 // ---------------------------------------------------------------------------
 // Execution
@@ -732,6 +743,10 @@ pub fn plan_mutation(scope: &Scope, tool: &str, args: &Value) -> Result<Mutation
                 man.age = Some(age);
                 changed.push(format!("age={age}"));
             }
+            if let Some(avatar) = arg_str(args, "avatar") {
+                man.avatar = avatar;
+                changed.push("avatar=set".into());
+            }
             if args
                 .get("touch_last_contact")
                 .and_then(|v| v.as_bool())
@@ -886,6 +901,12 @@ pub fn plan_mutation(scope: &Scope, tool: &str, args: &Value) -> Result<Mutation
             let id = require_man_id(args)?;
             let text = arg_str(args, "text")
                 .ok_or_else(|| AppError::Invalid("text is required".into()))?;
+            // A model that wrapped the message in its draft markers means the
+            // message, not the markers: what is filed is what would be sent.
+            let text = match super::draft_of(&text) {
+                Some(draft) => draft,
+                None => super::strip_draft_markers(&text),
+            };
             let role = match arg_str(args, "role").unwrap_or_default().as_str() {
                 "incoming" | "him" | "his" => MsgRole::Incoming,
                 "note" => MsgRole::Note,
@@ -956,6 +977,10 @@ pub fn plan_mutation(scope: &Scope, tool: &str, args: &Value) -> Result<Mutation
             if let Some(site) = arg_str(args, "site") {
                 profile.site = site;
                 changed.push("site");
+            }
+            if let Some(avatar) = arg_str(args, "avatar") {
+                profile.avatar = avatar;
+                changed.push("avatar");
             }
             if let Some(Value::Array(facts)) = args.get("add_facts") {
                 for f in facts {

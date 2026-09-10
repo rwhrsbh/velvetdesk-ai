@@ -590,6 +590,47 @@ input[type="range"] {
   text-align: center;
 }
 
+/* What the model wrote for him, set apart from what it said to the operator:
+   it is what the buttons file and copy, so it has to read as its own thing. */
+.draft {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border-left: 2px solid var(--accent, var(--text-faint));
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+}
+
+.draft-label {
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 4px;
+}
+
+/* A dossier dump should not push the conversation off the screen. */
+.bubble-text.folded {
+  display: block;
+  max-height: 320px;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, #000 74%, transparent 100%);
+}
+
+.show-more {
+  display: block;
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.show-more:hover {
+  color: var(--text);
+}
+
 .msg-actions {
   display: flex;
   gap: 6px;

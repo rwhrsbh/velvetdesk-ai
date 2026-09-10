@@ -401,6 +401,7 @@ async fn the_agent_stores_what_it_is_told() {
         thinking_effort: Some("low".into()),
         temporary: true,
         images: vec![],
+        avatars: vec![],
         run_id: None,
     };
 
@@ -479,6 +480,7 @@ async fn the_context_gauge_matches_what_the_provider_counts() {
         thinking_effort: Some("none".into()),
         temporary: true,
         images: vec![],
+        avatars: vec![],
         run_id: None,
     };
     let output = agent::run(&harness.deps(&config, &emit), input)
@@ -818,6 +820,7 @@ async fn the_master_creates_a_profile_and_its_men() {
             thinking_effort: Some("medium".into()),
             temporary: true,
             images: vec![],
+            avatars: vec![],
             run_id: None,
         },
     )
@@ -896,6 +899,7 @@ async fn the_agent_runs_a_command_and_writes_a_file() {
         thinking_effort: Some("low".into()),
         temporary: true,
         images: vec![],
+        avatars: vec![],
         run_id: None,
     };
 
@@ -959,6 +963,7 @@ async fn an_ungranted_folder_stays_out_of_reach() {
         thinking_effort: Some("low".into()),
         temporary: true,
         images: vec![],
+        avatars: vec![],
         run_id: None,
     };
 

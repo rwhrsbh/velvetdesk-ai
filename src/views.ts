@@ -5,6 +5,7 @@ import {
   activeProfile,
   alreadyFiled,
   attachmentUrl,
+  splitDraft,
   store,
   visibleMen,
   visibleProfiles,
@@ -389,6 +390,8 @@ export function renderChat() {
         images?: Attachment[];
         /** the provider's answer as it arrived */
         raw?: string;
+        /** set when the words are the app's own, so they read in this language */
+        reply_key?: string;
         /** letters carry their recipient */
         letter?: boolean;
         recipient?: string;
@@ -468,9 +471,7 @@ export function renderChat() {
 
       return (
         `<div class="msg ${entry.sender}${picked ? " picked" : ""}" data-entry="${escapeHtml(entry.id)}">` +
-        `<div class="bubble">${recipient}${thinking}${shots}<span class="bubble-text">${
-          entry.sender === "assistant" ? markdown(entry.text) : escapeHtml(entry.text)
-        }</span>` +
+        `<div class="bubble">${recipient}${thinking}${shots}${bubbleText(entry, meta.reply_key)}` +
         `${steps}${working}${usageLine(meta.usage, extras)}${actions}${asked}</div></div>`
       );
     })
@@ -484,6 +485,54 @@ export function renderChat() {
   } else {
     container.scrollTop = keep;
   }
+}
+
+/**
+ * How long a message may be before it is folded.
+ *
+ * Long enough that ordinary answers are never touched, short enough that a
+ * dossier dump or a pasted log does not push the rest of the conversation off
+ * the screen.
+ */
+const FOLD_AT = 1200;
+
+/**
+ * The text of a bubble: the prose, the message meant for him set apart from
+ * it, and a fold when the whole thing is too long to scroll past.
+ *
+ * The message to him gets its own block because that is what the buttons act
+ * on — filing it, copying it — and because a draft that reads as part of the
+ * commentary is a draft the operator sends with the commentary still in it.
+ */
+function bubbleText(
+  entry: { sender: string; text: string; id: string },
+  replyKey?: string,
+): string {
+  // A reply the app wrote itself is stored in the language the core was
+  // written in; the interface says it in its own.
+  const source = replyKey && t(replyKey) !== replyKey ? t(replyKey) : entry.text;
+
+  const body =
+    entry.sender === "assistant"
+      ? splitDraft(source)
+          .map((part) =>
+            part.kind === "draft"
+              ? `<div class="draft"><div class="draft-label">${escapeHtml(
+                  t("chat.draftLabel"),
+                )}</div>${markdown(part.text)}</div>`
+              : markdown(part.text),
+          )
+          .join("")
+      : escapeHtml(source);
+
+  if (source.length <= FOLD_AT) return `<span class="bubble-text">${body}</span>`;
+  const open = store.expanded.includes(entry.id);
+  return (
+    `<span class="bubble-text${open ? "" : " folded"}">${body}</span>` +
+    `<button class="show-more" data-act="expand" data-entry="${escapeHtml(entry.id)}">${
+      open ? t("chat.showLess") : t("chat.showMore")
+    }</button>`
+  );
 }
 
 /** A row of thumbnails: what is attached, or what a message went out with. */

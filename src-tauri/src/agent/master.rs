@@ -34,6 +34,10 @@ Rules:
 - Look before you write: list_profiles and search tell you what already exists.
 - Match by site id first, then by name. Never create a duplicate.
 - Keep names and ids verbatim, including their capitalisation.
+- A link or a photo the operator sends belongs on the card. `avatar` takes a URL
+  as it stands, or `attachment:1` for the first picture attached to their
+  message (`attachment:2` for the second). Fill it whenever they send one — for
+  a profile you create and for a man's dossier alike.
 - Ask the operator only for what you genuinely cannot infer, and ask once, in
   one short message, after you have done everything you can.
 - Answer in the operator language named below, plainly, in one or two sentences. No
@@ -70,6 +74,7 @@ pub fn tool_defs() -> Vec<ToolDef> {
                     "age": { "type": "integer" },
                     "site": { "type": "string" },
                     "bio": { "type": "string" },
+                    "avatar": { "type": "string", "description": tools::AVATAR_HINT },
                     "languages": { "type": "array", "items": { "type": "string" } }
                 },
                 "required": ["name"]
@@ -202,6 +207,11 @@ fn create_profile(
         .to_string();
     profile.bio = args
         .get("bio")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    profile.avatar = args
+        .get("avatar")
         .and_then(|v| v.as_str())
         .unwrap_or_default()
         .to_string();
@@ -436,12 +446,16 @@ pub async fn chat(deps: &AgentDeps<'_>, input: MasterInput) -> Result<MasterOutp
         }
 
         for call in &response.tool_calls {
+            // A picture the operator attached is named by its place in the
+            // message; here it becomes the picture itself.
+            let mut call_args = call.args.clone();
+            super::resolve_attachments(&mut call_args, &input.avatars);
             let (result, step) = match execute(
                 deps.paths,
                 &deps.settings.trusted_roots,
                 security,
                 &call.name,
-                &call.args,
+                &call_args,
             ) {
                 Ok(outcome) => {
                     if let Some(action) = outcome.queued.clone() {
@@ -499,7 +513,12 @@ pub async fn chat(deps: &AgentDeps<'_>, input: MasterInput) -> Result<MasterOutp
         log.entries.push(asked);
         let mut entry = AgentEntry::new("assistant", reply.clone());
         entry_id = entry.id.clone();
-        entry.meta = json!({ "steps": steps, "usage": usage, "pending": pending.len() });
+        entry.meta = json!({
+            "steps": steps,
+            "usage": usage,
+            "pending": pending.len(),
+            "reply_key": reply_key,
+        });
         log.entries.push(entry);
         if log.entries.len() > 400 {
             let cut = log.entries.len() - 400;
@@ -529,6 +548,9 @@ pub struct MasterInput {
     /// Screenshots and photos attached to this message.
     #[serde(default)]
     pub images: Vec<crate::llm::ImagePart>,
+    /// The same pictures shrunk to card size; see `RunInput::avatars`.
+    #[serde(default)]
+    pub avatars: Vec<String>,
     #[serde(default)]
     pub security: Option<SecurityLevel>,
     #[serde(default)]

@@ -43,6 +43,14 @@ pub struct RunInput {
     /// Screenshots and photos attached to this message.
     #[serde(default)]
     pub images: Vec<crate::llm::ImagePart>,
+    /// The same pictures shrunk to card size, in the same order.
+    ///
+    /// A photo the operator sends is usually meant for the card as well as for
+    /// the model to look at, and a card holds a picture, not a megabyte of it.
+    /// The interface shrinks them once; `attachment:1` in a tool call means
+    /// the first of these.
+    #[serde(default)]
+    pub avatars: Vec<String>,
     /// The caller's name for this run, echoed back on every progress event so
     /// parallel runs can be told apart.
     #[serde(default)]
@@ -885,8 +893,73 @@ fn is_cut_short(finish_reason: &str) -> bool {
     reason.is_empty() || reason.eq_ignore_ascii_case("MAX_TOKENS") || reason == "length"
 }
 
+/// Put the operator's own pictures where the model asked for them.
+///
+/// A picture attached to a message has no address the model could name, so it
+/// names its place instead — `attachment:1` — and the app swaps in the picture
+/// itself. Anything else, a URL above all, is left exactly as it was written.
+pub fn resolve_attachments(args: &mut Value, avatars: &[String]) {
+    match args {
+        Value::String(text) => {
+            let Some(rest) = text.strip_prefix("attachment:") else {
+                if text.trim() == "attachment" {
+                    if let Some(first) = avatars.first() {
+                        *text = first.clone();
+                    }
+                }
+                return;
+            };
+            let index: usize = rest.trim().parse().unwrap_or(0);
+            if let Some(picture) = avatars.get(index.saturating_sub(1)) {
+                *text = picture.clone();
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                resolve_attachments(item, avatars);
+            }
+        }
+        Value::Object(fields) => {
+            for (_, value) in fields.iter_mut() {
+                resolve_attachments(value, avatars);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// What the model writes to say it has finished.
 const END_MARKER: &str = "/END/";
+
+/// What the model wraps a message to him in.
+pub const DRAFT_OPEN: &str = "/DRAFT/";
+pub const DRAFT_CLOSE: &str = "/END DRAFT/";
+
+/// The part of an answer that is meant for him, when it is marked.
+///
+/// An answer usually says two things at once: a line to the operator about
+/// what was checked, and the message itself. Filing the whole of it sent the
+/// commentary to the man and kept it as an example of how she writes, which is
+/// how "Досье Нейла проверила" ended up in her voice. Only what the model put
+/// between the markers is the message.
+pub fn draft_of(text: &str) -> Option<String> {
+    let start = text.find(DRAFT_OPEN)? + DRAFT_OPEN.len();
+    let rest = &text[start..];
+    let end = rest.find(DRAFT_CLOSE).unwrap_or(rest.len());
+    let draft = rest[..end].trim();
+    (!draft.is_empty()).then(|| draft.to_string())
+}
+
+/// The same text with the markers taken out, for anything that wants it whole.
+pub fn strip_draft_markers(text: &str) -> String {
+    if !text.contains(DRAFT_OPEN) && !text.contains(DRAFT_CLOSE) {
+        return text.to_string();
+    }
+    text.replace(DRAFT_OPEN, "")
+        .replace(DRAFT_CLOSE, "")
+        .trim()
+        .to_string()
+}
 
 /// Take the end marker off an answer, saying whether it was there.
 ///
@@ -1226,6 +1299,11 @@ async fn run_auto(
                 }
             }
 
+            // A picture the operator attached is named by its place in the
+            // message; here it becomes the picture itself.
+            let mut args = call.args.clone();
+            resolve_attachments(&mut args, &input.avatars);
+
             // Files and shell commands live outside the profile sandbox and
             // are checked against the folders the operator has trusted.
             let outcome = if workspace_tools::is_workspace_tool(&call.name) {
@@ -1234,10 +1312,10 @@ async fn run_auto(
                     &deps.settings.trusted_roots,
                     security,
                     &call.name,
-                    &call.args,
+                    &args,
                 )
             } else {
-                tools::execute(scope, security, &call.name, &call.args)
+                tools::execute(scope, security, &call.name, &args)
             };
             let (result_json, step) = match outcome {
                 Ok(ToolOutcome {
@@ -1529,6 +1607,10 @@ fn finish(
             "thoughts": thoughts,
             "model": model,
             "raw": raw,
+            // Set when the words are the app's own rather than the model's:
+            // stored in the language the core was written in, said by the
+            // interface in whichever language it is running.
+            "reply_key": reply_key,
         });
         let _ = scope.append_agent_entry(man, entry);
     }
@@ -1842,6 +1924,43 @@ fn man_calls(man_id: &str, patch: &Value) -> Vec<(String, Value)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An answer says two things at once: a line to the operator, and the
+    /// message itself. Only the second is filed and only the second is kept as
+    /// an example of her voice.
+    #[test]
+    fn only_what_is_marked_is_meant_for_him() {
+        let answer = "Досье проверила, пишу вдогонку.
+                      /DRAFT/
+                      Neil, I am still curious about your coffee answer!
+                      /END DRAFT/
+                      Сохранить это как пример её голоса?";
+        assert_eq!(
+            draft_of(answer).unwrap(),
+            "Neil, I am still curious about your coffee answer!"
+        );
+        assert!(draft_of("no markers at all").is_none());
+        assert_eq!(strip_draft_markers("/DRAFT/ hi /END DRAFT/"), "hi");
+    }
+
+    /// A photo has no address of its own, so the model names its place in the
+    /// message and the app puts the picture there. Anything else is left alone.
+    #[test]
+    fn a_named_attachment_becomes_the_picture() {
+        let pictures = vec!["data:image/jpeg;base64,AAA".to_string()];
+        let mut args = json!({
+            "name": "Neil",
+            "avatar": "attachment:1",
+            "notes": ["attachment:2", "https://example.com/p.jpg"]
+        });
+        resolve_attachments(&mut args, &pictures);
+        assert_eq!(args["avatar"], "data:image/jpeg;base64,AAA");
+        // No second picture was attached: the name stays as written rather
+        // than turning into somebody else's photo.
+        assert_eq!(args["notes"][0], "attachment:2");
+        assert_eq!(args["notes"][1], "https://example.com/p.jpg");
+        assert_eq!(args["name"], "Neil");
+    }
     use crate::storage::Paths;
     use chrono::Utc;
 

@@ -28,7 +28,9 @@ import { openKeysModal } from "./provider-modal";
 import {
   activeMan,
   activeProfile,
+  attachmentUrl,
   makeEntry,
+  outgoingText,
   pushEntry,
   store,
   visibleMen,
@@ -781,6 +783,42 @@ async function copyImage(src: string) {
   }
 }
 
+/** How wide a picture may be once it is only meant for a card. */
+const CARD_PICTURE = 256;
+
+/**
+ * A card-sized copy of an attached picture.
+ *
+ * A photo the operator sends is usually meant for the profile card as well as
+ * for the model to look at. The card holds the picture itself, so it is shrunk
+ * here rather than stored at whatever size the camera produced; failing to
+ * shrink it is not worth losing the message over, so the original is used.
+ */
+async function cardPicture(attachment: Attachment): Promise<string> {
+  const source = attachmentUrl(attachment);
+  try {
+    const image = new Image();
+    image.src = source;
+    await image.decode();
+    const scale = Math.min(1, CARD_PICTURE / Math.max(image.width, image.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(image.width * scale));
+    canvas.height = Math.max(1, Math.round(image.height * scale));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return source;
+    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/jpeg", 0.82);
+  } catch (error) {
+    console.error("card picture", error);
+    return source;
+  }
+}
+
+/** Card-sized copies of everything attached to this message, in order. */
+async function cardPictures(attached: Attachment[]): Promise<string[]> {
+  return Promise.all(attached.map(cardPicture));
+}
+
 /** Add one picture that arrived as bytes rather than a file. */
 function addRaw(name: string, mime: string, data: string) {
   if (store.attachments.length >= MAX_ATTACHMENTS) {
@@ -944,6 +982,7 @@ async function dispatchMessage(
       thinking_effort: store.thinking || undefined,
       temporary: store.temporary,
       images: attached.map(({ mime, data }) => ({ mime, data })),
+      avatars: await cardPictures(attached),
     });
 
     const thoughts = output.thoughts || ((run.live.meta as { thoughts?: string })?.thoughts ?? "");
@@ -1391,8 +1430,18 @@ function bindPanels() {
     const entry = store.entries.find((e) => e.id === btn.dataset.entry);
     if (!entry) return;
 
+    if (btn.dataset.act === "expand") {
+      store.expanded = store.expanded.includes(entry.id)
+        ? store.expanded.filter((id) => id !== entry.id)
+        : [...store.expanded, entry.id];
+      renderChat();
+      return;
+    }
+
     if (btn.dataset.act === "copy") {
-      await navigator.clipboard.writeText(entry.text);
+      // What is copied is what would be sent: the message, not the line of
+      // commentary the model wrote around it.
+      await navigator.clipboard.writeText(outgoingText(entry.text));
       toast(t("chat.copied"), "success");
     }
 
@@ -1434,7 +1483,10 @@ function bindPanels() {
           man_id: manId,
           role: "outgoing",
           channel: store.channel,
-          text: entry.text,
+          // Only the message goes into the correspondence — and from there
+          // into her writing samples. The commentary around it stays in the
+          // chat where it was said.
+          text: outgoingText(entry.text),
         });
         // Filed: the button that offered it has nothing left to offer.
         if (store.thread && manId === store.activeManId) {
@@ -1908,6 +1960,7 @@ async function sendToMaster(
       thinking_effort: store.thinking || undefined,
       temporary: store.temporary,
       images: attached.map(({ mime, data }) => ({ mime, data })),
+      avatars: await cardPictures(attached),
     });
     endRun(run);
     if (output.user_entry_id) asked.id = output.user_entry_id;

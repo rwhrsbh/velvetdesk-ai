@@ -42,6 +42,8 @@ export interface RunInput {
   temporary?: boolean;
   /** Screenshots and photos attached to this message. */
   images?: ImagePart[];
+  /** The same pictures shrunk to card size, so one can become an avatar. */
+  avatars?: string[];
   /** Names this run, so its progress events can be told from another chat's. */
   run_id?: string;
 }
@@ -111,6 +113,7 @@ export const api = {
     thinking_effort?: string;
     temporary?: boolean;
     images?: ImagePart[];
+    avatars?: string[];
     run_id?: string;
   }) => invoke<MasterOutput>("master_chat", { input }),
   masterContextStats: () => invoke<ContextStats>("master_context_stats"),
