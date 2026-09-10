@@ -45,6 +45,66 @@ impl Paths {
         self.root.join("secrets.json")
     }
 
+    /// Where a payload too big for the chat log is kept whole.
+    ///
+    /// The log carries a readable slice of what the provider sent; a run of
+    /// four streamed turns is far longer than that, and "the raw answer" that
+    /// stops mid-JSON answers nothing. The whole of it goes here, under the id
+    /// of the message it belongs to, and the dialog fetches it on request.
+    pub fn raw_dir(&self) -> PathBuf {
+        self.root.join("raw")
+    }
+
+    /// Keep one payload whole, and sweep the oldest away.
+    pub fn write_raw(&self, entry_id: &str, payload: &str) -> Result<()> {
+        let dir = self.raw_dir();
+        fs::create_dir_all(&dir)?;
+        fs::write(dir.join(format!("{entry_id}.txt")), payload)?;
+        self.prune_raw(200);
+        Ok(())
+    }
+
+    /// One kept payload, or nothing when it has been swept away.
+    pub fn read_raw(&self, entry_id: &str) -> Result<Option<String>> {
+        // The id names a file, so it has to look like an id and nothing else:
+        // no separators, no dots, nothing that could climb out of the folder.
+        if entry_id.is_empty()
+            || !entry_id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            return Err(AppError::Invalid("not a message id".into()));
+        }
+        let path = self.raw_dir().join(format!("{entry_id}.txt"));
+        match fs::read_to_string(path) {
+            Ok(text) => Ok(Some(text)),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(err) => Err(err.into()),
+        }
+    }
+
+    /// Keep the newest `keep` payloads and drop the rest.
+    fn prune_raw(&self, keep: usize) {
+        let Ok(entries) = fs::read_dir(self.raw_dir()) else {
+            return;
+        };
+        let mut files: Vec<(std::time::SystemTime, PathBuf)> = entries
+            .filter_map(|entry| entry.ok())
+            .filter_map(|entry| {
+                let path = entry.path();
+                let stamp = entry.metadata().ok()?.modified().ok()?;
+                Some((stamp, path))
+            })
+            .collect();
+        if files.len() <= keep {
+            return;
+        }
+        files.sort_by_key(|(stamp, _)| *stamp);
+        for (_, path) in files.iter().take(files.len() - keep) {
+            let _ = fs::remove_file(path);
+        }
+    }
+
     /// The master agent's own conversation, above every profile.
     pub fn master_log_file(&self) -> PathBuf {
         self.root.join("master_log.json")
@@ -476,6 +536,24 @@ fn floor_char_boundary(s: &str, mut idx: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
+    /// A payload too long for the chat log is kept whole beside it, and comes
+    /// back by the id of the message it belongs to. An id that is not an id is
+    /// refused rather than followed out of the folder.
+    #[test]
+    fn the_whole_payload_waits_beside_the_conversation() {
+        use super::*;
+        let dir = std::env::temp_dir().join(format!("velvet-raw-{}", crate::models::new_id()));
+        let paths = Paths::new(dir).unwrap();
+
+        paths.write_raw("abc123", "the whole answer").unwrap();
+        assert_eq!(
+            paths.read_raw("abc123").unwrap().as_deref(),
+            Some("the whole answer")
+        );
+        assert!(paths.read_raw("nothing-here").unwrap().is_none());
+        assert!(paths.read_raw("../settings").is_err());
+    }
+
     /// The rail follows the operator's own arrangement, and falls back to the
     /// app's guess for cards they have never touched.
     #[test]

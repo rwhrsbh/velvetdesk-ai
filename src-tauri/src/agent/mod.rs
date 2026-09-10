@@ -1077,8 +1077,9 @@ async fn continue_reply(
 
 /// Collect one turn's payload into the run's record of what the provider said.
 ///
-/// Capped as it grows rather than at the end, so a chain of long answers cannot
-/// hold a megabyte of JSON in memory on its way to being trimmed.
+/// Held whole up to a ceiling, because a chain of four streamed turns is what
+/// the operator wants to read when they open "the raw answer"; the slice that
+/// goes into the chat log is cut from this at the end.
 fn push_raw(raw: &mut String, turn: usize, payload: &str) {
     if payload.trim().is_empty() {
         return;
@@ -1094,8 +1095,8 @@ fn push_raw(raw: &mut String, turn: usize, payload: &str) {
         "--- turn {turn} ---
 {payload}"
     ));
-    if raw.len() > crate::llm::RAW_LIMIT {
-        *raw = crate::llm::cap_raw(raw);
+    if raw.len() > crate::llm::RAW_KEEP {
+        *raw = crate::llm::keep_raw(raw);
     }
 }
 
@@ -1475,8 +1476,8 @@ async fn run_auto(
     }
 
     finish(
-        scope, mode, security, input, reply, reply_key, model, raw, thoughts, steps, pending,
-        usage, key_index, turns,
+        deps.paths, scope, mode, security, input, reply, reply_key, model, raw, thoughts, steps,
+        pending, usage, key_index, turns,
     )
 }
 
@@ -1500,6 +1501,7 @@ async fn run_single_turn(
     // disk. The operator decides what to do with it.
     if mode == AgentMode::Letters {
         return finish(
+            deps.paths,
             scope,
             mode,
             security,
@@ -1557,6 +1559,7 @@ async fn run_single_turn(
     )?;
 
     finish(
+        deps.paths,
         scope,
         mode,
         security,
@@ -1576,6 +1579,7 @@ async fn run_single_turn(
 
 #[allow(clippy::too_many_arguments)]
 fn finish(
+    paths: &Paths,
     scope: &Scope,
     mode: AgentMode,
     security: SecurityLevel,
@@ -1600,6 +1604,12 @@ fn finish(
         let _ = scope.append_agent_entry(man, asked);
         let mut entry = AgentEntry::new("assistant", reply.clone());
         entry_id = entry.id.clone();
+        // The log keeps a slice of the payload — enough to glance at — and the
+        // whole of it goes beside the conversation, so "the raw answer" can
+        // show the raw answer rather than its first eighty thousand characters.
+        if raw.len() > crate::llm::RAW_LIMIT {
+            let _ = paths.write_raw(&entry_id, &raw);
+        }
         entry.meta = json!({
             "mode": mode,
             "security": security,
@@ -1609,7 +1619,9 @@ fn finish(
             "usage": usage,
             "thoughts": thoughts,
             "model": model,
-            "raw": raw,
+            "raw": crate::llm::cap_raw(&raw),
+            // Set when the whole payload is on disk under this message's id.
+            "raw_kept": raw.len() > crate::llm::RAW_LIMIT,
             // Set when the words are the app's own rather than the model's:
             // stored in the language the core was written in, said by the
             // interface in whichever language it is running.
@@ -1622,7 +1634,7 @@ fn finish(
         reply,
         reply_key,
         model,
-        raw,
+        raw: crate::llm::cap_raw(&raw),
         thoughts,
         mode,
         security,

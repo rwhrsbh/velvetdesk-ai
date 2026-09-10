@@ -119,7 +119,7 @@ pub async fn call_streaming(
         buffer.push_str(&String::from_utf8_lossy(&chunk));
 
         for value in super::gemini::take_events(&mut buffer) {
-            if seen.len() < super::RAW_LIMIT {
+            if seen.len() < super::RAW_KEEP {
                 seen.push_str(&value.to_string());
                 seen.push('\n');
             }
@@ -179,7 +179,7 @@ pub async fn call_streaming(
 
     Ok(ChatResponse {
         text: text.trim().to_string(),
-        raw: super::cap_raw(&seen),
+        raw: super::keep_raw(&seen),
         // The caller fills this in: it knows which model of the chain this was.
         model: String::new(),
         thoughts: thoughts.trim().to_string(),

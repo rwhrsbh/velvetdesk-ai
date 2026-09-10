@@ -97,6 +97,15 @@ fn read_profiles(state: &State<'_, AppState>) -> Result<Vec<Profile>> {
     Ok(out)
 }
 
+/// The provider's answer to one message, whole.
+///
+/// The chat log keeps a slice of it; this is the rest, kept beside the
+/// conversation and swept away once a couple of hundred newer ones exist.
+#[tauri::command]
+pub fn read_raw(state: State<'_, AppState>, entry_id: String) -> Result<Option<String>> {
+    state.paths.read_raw(&entry_id)
+}
+
 /// Store the order the operator dragged the profiles into.
 ///
 /// The list is the new order, front to back; anything missing from it keeps

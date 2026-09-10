@@ -287,6 +287,30 @@ pub struct LlmClient {
 /// growing by a megabyte a message.
 pub const RAW_LIMIT: usize = 80_000;
 
+/// As much of a payload as is worth holding in memory and keeping on disk.
+///
+/// The log gets `RAW_LIMIT` of it — a slice a person can open in a dialog —
+/// and the whole of it, up to this, is written beside the conversation so
+/// "the raw answer" can actually show the raw answer.
+pub const RAW_KEEP: usize = 2_000_000;
+
+/// Cut a payload to the largest size worth carrying around.
+pub fn keep_raw(text: &str) -> String {
+    if text.len() <= RAW_KEEP {
+        return text.to_string();
+    }
+    let mut cut = RAW_KEEP;
+    while cut > 0 && !text.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    format!(
+        "{}
+[[capped:{}]]",
+        &text[..cut],
+        text.len() - cut
+    )
+}
+
 /// Cut a payload to something a person can open in a dialog.
 pub fn cap_raw(text: &str) -> String {
     if text.len() <= RAW_LIMIT {
@@ -296,7 +320,10 @@ pub fn cap_raw(text: &str) -> String {
     while cut > 0 && !text.is_char_boundary(cut) {
         cut -= 1;
     }
-    format!("{}\n… ({} more characters)", &text[..cut], text.len() - cut)
+    // A marker rather than a sentence: the interface says it in whichever
+    // language it is running in, so the app's own words are not the one
+    // English line an operator cannot place inside an English payload.
+    format!("{}\n[[capped:{}]]", &text[..cut], text.len() - cut)
 }
 
 /// True when a failure looks like "this endpoint does not stream" rather than

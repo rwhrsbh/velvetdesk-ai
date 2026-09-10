@@ -117,6 +117,7 @@ pub fn run() {
             commands::save_profile,
             commands::delete_profile,
             commands::list_men,
+            commands::read_raw,
             commands::reorder_profiles,
             commands::reorder_men,
             commands::get_man,

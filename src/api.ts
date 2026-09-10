@@ -75,6 +75,7 @@ export const api = {
   saveProfile: (profile: Profile) => invoke<Profile>("save_profile", { profile }),
   deleteProfile: (modelId: string) => invoke<void>("delete_profile", { modelId }),
 
+  readRaw: (entry_id: string) => invoke<string | null>("read_raw", { entryId: entry_id }),
   reorderProfiles: (ids: string[]) => invoke<Profile[]>("reorder_profiles", { ids }),
   reorderMen: (model_id: string, ids: string[]) =>
     invoke<Man[]>("reorder_men", { modelId: model_id, ids }),
