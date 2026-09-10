@@ -137,6 +137,7 @@ impl Harness {
             emit,
             // Nothing to approve in a test run: everything is applied outright.
             queue: &|_| {},
+            cancel: agent::never_cancelled(),
         }
     }
 }

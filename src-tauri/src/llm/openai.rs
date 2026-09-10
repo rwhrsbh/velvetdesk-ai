@@ -109,6 +109,12 @@ pub async fn call_streaming(
     let mut stream = response.bytes_stream();
 
     while let Some(chunk) = stream.next().await {
+        // Stop means stop: what has arrived is kept, the rest is dropped, and
+        // the connection goes with it.
+        if request.cancelled() {
+            finish_reason = "CANCELLED".to_string();
+            break;
+        }
         let chunk = chunk.map_err(|e| CallError::Transport(e.to_string()))?;
         buffer.push_str(&String::from_utf8_lossy(&chunk));
 
@@ -162,6 +168,14 @@ pub async fn call_streaming(
     }
 
     let tool_calls = assemble_tool_calls(partial);
+
+    // An empty turn is not an answer: a content filter, a stop with nothing
+    // written, a proxy that dropped it. The next model in the chain gets it.
+    if text.trim().is_empty() && tool_calls.is_empty() && !request.cancelled() {
+        return Err(CallError::Blocked {
+            reason: super::empty_turn_reason(None, &finish_reason),
+        });
+    }
 
     Ok(ChatResponse {
         text: text.trim().to_string(),
@@ -343,6 +357,18 @@ fn apply_thinking(body: &mut Value, provider: &ProviderConfig, thinking: &Thinki
                 body["thinking_budget"] = json!(budget);
             }
         }
+        // NVIDIA's hosted endpoints take the switch inside the template
+        // arguments, where the model itself reads it.
+        "nvidia" => match thinking.level() {
+            Some("none") | Some("off") => {
+                body["chat_template_kwargs"] = json!({ "thinking": false });
+            }
+            Some(level) => {
+                body["chat_template_kwargs"] =
+                    json!({ "thinking": true, "reasoning_effort": level });
+            }
+            None => {}
+        },
         // Plain OpenAI (and Groq, Azure, most local servers): a single level.
         // A budget has no equivalent here, so it is left out rather than
         // guessed at.
@@ -411,6 +437,17 @@ fn parse_response(value: &Value) -> Result<ChatResponse, CallError> {
     }
 
     let usage = read_usage(value.get("usage"));
+    let finish_reason = choice
+        .get("finish_reason")
+        .and_then(|f| f.as_str())
+        .unwrap_or_default()
+        .to_string();
+
+    if text.trim().is_empty() && tool_calls.is_empty() {
+        return Err(CallError::Blocked {
+            reason: super::empty_turn_reason(None, &finish_reason),
+        });
+    }
 
     // Servers that expose the model's reasoning put it beside the content.
     let thoughts = message
@@ -429,11 +466,7 @@ fn parse_response(value: &Value) -> Result<ChatResponse, CallError> {
         thoughts,
         tool_calls,
         usage,
-        finish_reason: choice
-            .get("finish_reason")
-            .and_then(|f| f.as_str())
-            .unwrap_or_default()
-            .to_string(),
+        finish_reason,
         key_index: 0,
         attempts: 0,
     })
@@ -442,6 +475,19 @@ fn parse_response(value: &Value) -> Result<ChatResponse, CallError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A gateway that filters the request answers with an empty message. It
+    /// counts as a refusal, so the next model in the chain gets a turn.
+    #[test]
+    fn an_empty_choice_is_a_refusal() {
+        let payload = serde_json::json!({
+            "choices": [{ "message": { "content": "" }, "finish_reason": "content_filter" }]
+        });
+        match parse_response(&payload) {
+            Err(CallError::Blocked { reason }) => assert_eq!(reason, "content_filter"),
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+    }
     use crate::config::ProviderKind;
     use crate::llm::LlmMessage;
 

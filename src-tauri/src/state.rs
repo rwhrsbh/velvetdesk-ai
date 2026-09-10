@@ -1,5 +1,6 @@
 use parking_lot::RwLock;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use crate::agent::tools::PendingAction;
@@ -16,6 +17,12 @@ pub struct AppState {
     pools: RwLock<HashMap<String, Arc<KeyPool>>>,
     pub pending: RwLock<Vec<PendingAction>>,
     pub llm: LlmClient,
+    /// The stop switch of every run in flight, by run id.
+    ///
+    /// A run is a long thing — several calls to the provider and a tool or two
+    /// between them — and the operator watching it write the wrong letter
+    /// should not have to sit through the rest of it.
+    cancels: RwLock<HashMap<String, Arc<AtomicBool>>>,
 }
 
 impl AppState {
@@ -36,7 +43,31 @@ impl AppState {
             pools: RwLock::new(pools),
             pending: RwLock::new(vec![]),
             llm: LlmClient::new(),
+            cancels: RwLock::new(HashMap::new()),
         })
+    }
+
+    /// The stop switch for a run, made on the spot if the run is new.
+    ///
+    /// Stop can arrive before the run has registered itself — the operator
+    /// presses it the instant they see the spinner — so a flag asked for by
+    /// either side is the same flag.
+    pub fn cancel_flag(&self, run_id: &str) -> Arc<AtomicBool> {
+        let mut cancels = self.cancels.write();
+        cancels
+            .entry(run_id.to_string())
+            .or_insert_with(|| Arc::new(AtomicBool::new(false)))
+            .clone()
+    }
+
+    /// Raise the stop switch of a run.
+    pub fn cancel_run(&self, run_id: &str) {
+        self.cancel_flag(run_id).store(true, Ordering::Relaxed);
+    }
+
+    /// Forget a finished run's switch.
+    pub fn drop_cancel(&self, run_id: &str) {
+        self.cancels.write().remove(run_id);
     }
 
     /// Settings snapshot with live key counts filled in.

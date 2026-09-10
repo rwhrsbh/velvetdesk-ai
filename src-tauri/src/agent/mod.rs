@@ -5,6 +5,7 @@ pub mod workspace_tools;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use crate::config::{AgentMode, ProviderConfig, SecurityLevel, Settings};
@@ -88,6 +89,17 @@ pub struct RunOutput {
     pub usage: Usage,
     pub key_index: usize,
     pub turns: usize,
+    /// Where this turn ended up in the log: the operator's message and the
+    /// answer, under the ids they were written with.
+    ///
+    /// The interface builds its own bubbles while a run is in flight, and
+    /// without these it would go on showing them under ids the log has never
+    /// heard of — which is how deleting a message left it on screen until the
+    /// chat was reopened.
+    #[serde(default)]
+    pub user_entry_id: String,
+    #[serde(default)]
+    pub entry_id: String,
 }
 
 pub struct AgentDeps<'a> {
@@ -104,6 +116,15 @@ pub struct AgentDeps<'a> {
     /// still waiting for it. This hands it over at once — to the queue behind
     /// the panel, and to the chat that asked for it.
     pub queue: &'a (dyn Fn(&PendingAction) + Send + Sync),
+    /// Raised when the operator presses stop. Checked between turns and
+    /// between tool calls, and handed to the provider so a long answer stops
+    /// being written the moment it is no longer wanted.
+    pub cancel: Arc<AtomicBool>,
+}
+
+/// A run nobody can stop: everything the app starts on its own behalf.
+pub fn never_cancelled() -> Arc<AtomicBool> {
+    Arc::new(AtomicBool::new(false))
 }
 
 pub async fn run(deps: &AgentDeps<'_>, input: RunInput) -> Result<RunOutput> {
@@ -1044,6 +1065,7 @@ async fn run_auto(
     mut request: ChatRequest,
 ) -> Result<RunOutput> {
     request.tools = all_tool_defs();
+    request.cancel = Some(deps.cancel.clone());
 
     let mut steps: Vec<RunStep> = vec![];
     let mut pending: Vec<PendingAction> = vec![];
@@ -1068,8 +1090,16 @@ async fn run_auto(
     // spending another turn — and another few thousand tokens — on it.
     let mut fetched: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
 
+    // Set when the operator stopped the run: whatever was written by then is
+    // kept — a half-written letter is still worth reading — and nothing more
+    // is spent on it.
+    let mut stopped = false;
     let max_turns = deps.settings.max_tool_turns.max(1);
     for turn in 0..max_turns {
+        if deps.cancel.load(Ordering::Relaxed) {
+            stopped = true;
+            break;
+        }
         turns = turn + 1;
         // On the last turn the tools are taken away: the model has had its
         // chance to look things up and now has to answer. Without this a run
@@ -1077,10 +1107,21 @@ async fn run_auto(
         if turn + 1 == max_turns {
             request.tools.clear();
         }
-        let response = deps
+        let response = match deps
             .llm
             .chat(deps.provider, deps.pool.clone(), &request, deps.emit)
-            .await?;
+            .await
+        {
+            Ok(response) => response,
+            Err(err) => {
+                // Stop is not a failure: the operator asked for it.
+                if deps.cancel.load(Ordering::Relaxed) {
+                    stopped = true;
+                    break;
+                }
+                return Err(err);
+            }
+        };
 
         usage.prompt_tokens += response.usage.prompt_tokens;
         usage.completion_tokens += response.usage.completion_tokens;
@@ -1149,6 +1190,10 @@ async fn run_auto(
         }
 
         for call in &response.tool_calls {
+            if deps.cancel.load(Ordering::Relaxed) {
+                stopped = true;
+                break;
+            }
             // A repeated read is answered from the cache. Writes are never
             // cached: asking twice to store something is a real second write.
             let signature = format!("{}:{}", call.name, call.args);
@@ -1261,12 +1306,15 @@ async fn run_auto(
                 .messages
                 .push(LlmMessage::tool_result(call, result_json.to_string()));
         }
+        if stopped {
+            break;
+        }
     }
 
     // The turns ran out while the model was still calling tools. One more
     // call, with nothing left to reach for, turns what it gathered into the
     // answer the operator asked for — the run used to end in silence here.
-    if !answered && !steps.is_empty() {
+    if !answered && !steps.is_empty() && !stopped {
         request.tools.clear();
         // A model that started writing and then reached for a tool has half a
         // letter in the conversation already. Told to answer from scratch it
@@ -1303,7 +1351,22 @@ async fn run_auto(
         }
     }
 
-    if reply.trim().is_empty() {
+    if stopped {
+        // Whatever was written stays; a run with nothing to show says so.
+        if reply.trim().is_empty() {
+            reply_key = "chat.stopped".to_string();
+            reply = "Остановлено оператором.".into();
+        } else {
+            steps.push(RunStep {
+                kind: "warn".into(),
+                tool: None,
+                summary: "Остановлено оператором".into(),
+                key: "step.stopped".into(),
+                params: json!({}),
+                detail: Value::Null,
+            });
+        }
+    } else if reply.trim().is_empty() {
         reply_key = "chat.noReplyText".to_string();
         reply = "Инструменты отработали, но модель не вернула текст ответа.".into();
     } else if cut_short {
@@ -1447,10 +1510,15 @@ fn finish(
     key_index: usize,
     turns: usize,
 ) -> Result<RunOutput> {
+    let mut user_entry_id = String::new();
+    let mut entry_id = String::new();
     if !input.temporary {
         let man = input.man_id.as_deref();
-        let _ = scope.append_agent_entry(man, AgentEntry::new("user", input.message.clone()));
+        let asked = AgentEntry::new("user", input.message.clone());
+        user_entry_id = asked.id.clone();
+        let _ = scope.append_agent_entry(man, asked);
         let mut entry = AgentEntry::new("assistant", reply.clone());
+        entry_id = entry.id.clone();
         entry.meta = json!({
             "mode": mode,
             "security": security,
@@ -1480,6 +1548,8 @@ fn finish(
         usage,
         key_index,
         turns,
+        user_entry_id,
+        entry_id,
     })
 }
 

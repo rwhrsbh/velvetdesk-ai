@@ -185,6 +185,9 @@ export interface RunOutput {
   usage: Usage;
   key_index: number;
   turns: number;
+  /** The ids the core wrote this turn down under. */
+  user_entry_id?: string;
+  entry_id?: string;
 }
 
 export interface SearchHit {
@@ -375,4 +378,8 @@ export interface MasterOutput {
   usage: Usage;
   key_index: number;
   turns: number;
+  reply_key?: string;
+  /** The ids the core wrote this turn down under. */
+  user_entry_id?: string;
+  entry_id?: string;
 }

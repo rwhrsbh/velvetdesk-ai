@@ -434,6 +434,7 @@ pub async fn digest_chat(
         llm: &state.llm,
         emit: &emit,
         queue: &queue,
+        cancel: agent::never_cancelled(),
     };
     agent::digest_preview(&deps, &model_id, &man_id, keep_last.unwrap_or(6)).await
 }
@@ -477,6 +478,7 @@ pub async fn learn_voice(
         llm: &state.llm,
         emit: &emit,
         queue: &queue,
+        cancel: agent::never_cancelled(),
     };
     agent::learn_voice(&deps, &model_id, samples.unwrap_or(10)).await
 }
@@ -544,6 +546,8 @@ pub async fn run_agent(
     let pool = state.pool(&provider.id);
     let emit = emitter(&app, input.run_id.clone());
     let queue = queueing(&app, &state, input.run_id.clone());
+    let run_id = input.run_id.clone().unwrap_or_default();
+    let cancel = state.cancel_flag(&run_id);
 
     let deps = AgentDeps {
         paths: &state.paths,
@@ -553,12 +557,27 @@ pub async fn run_agent(
         llm: &state.llm,
         emit: &emit,
         queue: &queue,
+        cancel,
     };
 
-    let output = agent::run(&deps, input).await?;
+    let output = agent::run(&deps, input).await;
+    state.drop_cancel(&run_id);
+    let output = output?;
     // The actions reached the queue as they were made; nothing to add here.
     storage::rebuild_index(&state.paths)?;
     Ok(output)
+}
+
+/// Stop a run in flight.
+///
+/// The switch is raised, not the thread killed: the run notices between turns
+/// and inside the stream it is reading, and ends with whatever it had written
+/// by then — a half-finished letter is still worth having, and the tools that
+/// already ran are still recorded.
+#[tauri::command]
+pub fn cancel_run(state: State<'_, AppState>, run_id: String) -> Result<()> {
+    state.cancel_run(&run_id);
+    Ok(())
 }
 
 /// What the correspondence currently costs, so the UI can show a gauge and
@@ -644,6 +663,7 @@ pub async fn compact_chat(
         llm: &state.llm,
         emit: &emit,
         queue: &queue,
+        cancel: agent::never_cancelled(),
     };
     agent::compact_chat(&deps, &model_id, man_id.as_deref()).await
 }
@@ -672,6 +692,7 @@ pub async fn compact_context(
         llm: &state.llm,
         emit: &emit,
         queue: &queue,
+        cancel: agent::never_cancelled(),
     };
 
     agent::compact_context(&deps, &scope, &man_id, keep_last.unwrap_or(6)).await?;
@@ -700,6 +721,7 @@ pub async fn write_letters(
         llm: &state.llm,
         emit: &emit,
         queue: &queue,
+        cancel: agent::never_cancelled(),
     };
     agent::write_letters(&deps, input).await
 }
@@ -715,6 +737,8 @@ pub async fn master_chat(
     let pool = state.pool(&provider.id);
     let emit = emitter(&app, input.run_id.clone());
     let queue = queueing(&app, &state, input.run_id.clone());
+    let run_id = input.run_id.clone().unwrap_or_default();
+    let cancel = state.cancel_flag(&run_id);
 
     let deps = AgentDeps {
         paths: &state.paths,
@@ -724,9 +748,12 @@ pub async fn master_chat(
         llm: &state.llm,
         emit: &emit,
         queue: &queue,
+        cancel,
     };
 
-    let output = agent::master::chat(&deps, input).await?;
+    let output = agent::master::chat(&deps, input).await;
+    state.drop_cancel(&run_id);
+    let output = output?;
     // The actions reached the queue as they were made; nothing to add here.
     Ok(output)
 }
@@ -751,6 +778,7 @@ pub async fn master_context_stats(
         llm: &state.llm,
         emit: &emit,
         queue: &queue,
+        cancel: agent::never_cancelled(),
     };
     let mut stats = agent::master::context_stats(&deps)?;
     if let Ok(request) = agent::master::next_request(&deps) {

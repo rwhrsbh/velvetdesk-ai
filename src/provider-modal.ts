@@ -19,6 +19,7 @@ import type {
 const catalogs = new Map<string, ModelCatalog>();
 
 const BASE_URL_PRESETS = [
+  "https://integrate.api.nvidia.com/v1",
   "https://api.groq.com/openai/v1",
   "https://openrouter.ai/api/v1",
   "https://api.openai.com/v1",
@@ -376,7 +377,7 @@ export async function openKeysModal(deps: ModalDeps) {
           <div class="field">
             <label>${t("keys.dialect")}</label>
             <select class="field-input" id="reasoningDialect" ${isGemini ? "disabled" : ""}>
-              ${["auto", "openai", "openrouter", "qwen"]
+              ${["auto", "openai", "openrouter", "qwen", "nvidia"]
                 .map(
                   (d) =>
                     `<option value="${d}" ${p.reasoning_dialect === d ? "selected" : ""}>${

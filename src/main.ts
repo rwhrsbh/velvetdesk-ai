@@ -302,6 +302,83 @@ async function deleteSelected() {
   });
 }
 
+/**
+ * Ask the same thing again, or ask it differently.
+ *
+ * Both start from the operator's message — pressing it on an answer rewinds to
+ * whatever was asked to produce it — and both drop that message and everything
+ * said after it, because that is what is being replaced. Retry sends it back
+ * unchanged; edit puts it in the composer, pictures and all, and waits.
+ */
+async function askAgain(id: string, edit: boolean) {
+  const target = currentTarget();
+  if (isRunning(target)) {
+    toast(t("toast.busyRetry"), "error");
+    return;
+  }
+  const at = store.entries.findIndex((entry) => entry.id === id);
+  if (at === -1) return;
+
+  let asked = at;
+  while (asked >= 0 && store.entries[asked].sender !== "user") asked--;
+  if (asked < 0) {
+    toast(t("toast.nothingToRetry"), "error");
+    return;
+  }
+
+  const entry = store.entries[asked];
+  const text = entry.text;
+  const images = (((entry.meta ?? {}) as { images?: Attachment[] }).images ?? []).map((image) => ({
+    ...image,
+  }));
+  const doomed = store.entries.slice(asked).map((item) => item.id);
+
+  try {
+    await dropEntries(doomed);
+  } catch (error) {
+    toast(errorText(error), "error");
+    return;
+  }
+
+  if (edit) {
+    const input = $("composerInput") as HTMLTextAreaElement;
+    input.value = text;
+    input.focus();
+    input.dispatchEvent(new Event("input"));
+    store.attachments = images;
+    renderAttachments();
+    markSending();
+    return;
+  }
+
+  store.attachments = [];
+  renderAttachments();
+  markSending();
+  await dispatchMessage(text, images, target);
+  await drainQueue(target);
+}
+
+/**
+ * Take messages out of the chat, on screen and on disk.
+ *
+ * The log answers with what it kept, which is also how the ids on screen stay
+ * the ids the log knows.
+ */
+async function dropEntries(ids: string[]) {
+  if (ids.length === 0) return;
+  if (store.master) {
+    const log = await api.deleteMasterEntries(ids);
+    store.entries = log.entries.slice(-120).map((item) => ({ ...item }));
+  } else if (store.temporary || !store.activeModelId) {
+    // A chat that is never written down has nothing to delete on disk.
+    store.entries = store.entries.filter((entry) => !ids.includes(entry.id));
+  } else {
+    const log = await api.deleteAgentEntries(store.activeModelId, store.activeManId, ids);
+    store.entries = log.entries.slice(-120).map((item) => ({ ...item }));
+  }
+  renderChat();
+}
+
 async function removeMessages(ids: string[], filed: string[]) {
   try {
     if (store.master) {
@@ -659,6 +736,7 @@ async function addAttachments(files: File[]) {
     }
   }
   renderAttachments();
+  markSending();
 }
 
 /**
@@ -716,6 +794,7 @@ function addRaw(name: string, mime: string, data: string) {
     data,
   });
   renderAttachments();
+  markSending();
 }
 
 /**
@@ -794,12 +873,14 @@ async function sendMessage() {
     clearComposer();
     renderQueue();
     renderAttachments();
+    markSending();
     return;
   }
 
   store.attachments = [];
   clearComposer();
   renderAttachments();
+  markSending();
   await dispatchMessage(typed, attached, target);
   await drainQueue(target);
 }
@@ -867,22 +948,25 @@ async function dispatchMessage(
 
     const thoughts = output.thoughts || ((run.live.meta as { thoughts?: string })?.thoughts ?? "");
     endRun(run);
+    // The core wrote both messages down under ids of its own. Adopting them
+    // is what lets deleting one actually delete it: the bubble on screen and
+    // the line in the log are the same message again.
+    if (output.user_entry_id) asked.id = output.user_entry_id;
     // A reply the app wrote itself arrives as a key, so it reads in the
     // interface language rather than the one the core was written in.
     const reply = output.reply_key ? t(output.reply_key) : output.reply;
-    deliver(
-      target,
-      makeEntry("assistant", reply, {
-        steps: output.steps as unknown as RunStep[],
-        usage: output.usage,
-        mode: output.mode,
-        model: output.model,
-        key_index: output.key_index,
-        turns: output.turns,
-        raw: output.raw,
-        thoughts,
-      }),
-    );
+    const answer = makeEntry("assistant", reply, {
+      steps: output.steps as unknown as RunStep[],
+      usage: output.usage,
+      mode: output.mode,
+      model: output.model,
+      key_index: output.key_index,
+      turns: output.turns,
+      raw: output.raw,
+      thoughts,
+    });
+    if (output.entry_id) answer.id = output.entry_id;
+    deliver(target, answer);
     store.thoughts = "";
 
     if (output.pending.length > 0) {
@@ -1327,6 +1411,11 @@ function bindPanels() {
         void copyText(meta.raw ?? "");
         toast(t("chat.copied"), "success");
       });
+      return;
+    }
+
+    if (btn.dataset.act === "retry" || btn.dataset.act === "edit") {
+      await askAgain(entry.id, btn.dataset.act === "edit");
       return;
     }
 
@@ -1821,15 +1910,15 @@ async function sendToMaster(
       images: attached.map(({ mime, data }) => ({ mime, data })),
     });
     endRun(run);
-    deliver(
-      target,
-      makeEntry("assistant", output.reply, {
-        steps: output.steps as unknown as RunStep[],
-        usage: output.usage,
-        key_index: output.key_index,
-        turns: output.turns,
-      }),
-    );
+    if (output.user_entry_id) asked.id = output.user_entry_id;
+    const answer = makeEntry("assistant", output.reply_key ? t(output.reply_key) : output.reply, {
+      steps: output.steps as unknown as RunStep[],
+      usage: output.usage,
+      key_index: output.key_index,
+      turns: output.turns,
+    });
+    if (output.entry_id) answer.id = output.entry_id;
+    deliver(target, answer);
     if (output.pending.length > 0) {
       toast(t("toast.pendingCount", { n: output.pending.length }), "info");
     }
@@ -1912,14 +2001,57 @@ async function writeLetters(brief: string, target: ChatTarget = currentTarget())
   }
 }
 
-/** The send button stays live while a run goes — it says so, and it queues. */
-function markSending(busy: boolean) {
-  $("btnSend").textContent = busy ? t("composer.queue") : t("composer.send");
+/**
+ * What the one button on the right does right now.
+ *
+ * Idle it sends. While a run goes it queues whatever is typed — and when
+ * nothing is typed there is nothing to queue, so it stops the run instead,
+ * which is the thing an operator watching the wrong answer being written
+ * actually wants.
+ */
+function markSending(_busy?: boolean) {
+  const button = $("btnSend");
+  const typed = ($("composerInput") as HTMLTextAreaElement).value.trim();
+  const holding = typed.length > 0 || store.attachments.length > 0;
+  const stopping = store.busy && !holding;
+  button.textContent = store.busy
+    ? t(holding ? "composer.queue" : "composer.stopRun")
+    : t("composer.send");
+  button.classList.toggle("btn-danger", stopping);
+  button.dataset.act = stopping ? "stop" : "send";
+}
+
+/**
+ * Ask the run in this chat to stop.
+ *
+ * Not a kill: the core notices between turns and inside the stream it is
+ * reading, so what has already been written — and everything the tools have
+ * already done — is kept.
+ */
+async function stopRun(target: ChatTarget = currentTarget()) {
+  const run = running.get(targetKey(target));
+  if (!run) return;
+  const live = run.live.meta as { note?: string } | null;
+  if (live) live.note = t("chat.stopping");
+  renderChat();
+  try {
+    await api.cancelRun(run.id);
+  } catch (error) {
+    toast(errorText(error), "error");
+  }
 }
 
 function bindComposer() {
   const input = $("composerInput") as HTMLTextAreaElement;
-  $("btnSend").addEventListener("click", () => void sendMessage());
+  $("btnSend").addEventListener("click", () => {
+    if ($("btnSend").dataset.act === "stop") {
+      void stopRun();
+      return;
+    }
+    void sendMessage();
+  });
+  // Typing turns "stop" back into "queue": there is something to queue again.
+  input.addEventListener("input", () => markSending());
 
   // Pictures: picked, pasted or dropped onto the composer.
   const attachInput = $("attachInput") as HTMLInputElement;
@@ -1935,6 +2067,7 @@ function bindComposer() {
     if (drop) {
       store.attachments = store.attachments.filter((item) => item.id !== drop.dataset.attach);
       renderAttachments();
+      markSending();
       return;
     }
     const image = target.closest<HTMLImageElement>(".thumb img");

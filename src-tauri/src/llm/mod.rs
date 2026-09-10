@@ -5,6 +5,7 @@ pub mod openai;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -124,6 +125,9 @@ pub struct ChatRequest {
     /// Stream the answer as it is written. Falls back to a single response if
     /// the endpoint does not support it.
     pub stream: bool,
+    /// Raised when the operator presses stop. The streaming loops watch it and
+    /// hand back what has been written so far instead of the whole answer.
+    pub cancel: Option<Arc<AtomicBool>>,
 }
 
 /// Reasoning controls, in the two shapes vendors offer: a level, or a number
@@ -151,6 +155,14 @@ impl Thinking {
 }
 
 impl ChatRequest {
+    /// True once the operator has asked for this run to stop.
+    pub fn cancelled(&self) -> bool {
+        self.cancel
+            .as_ref()
+            .map(|flag| flag.load(Ordering::Relaxed))
+            .unwrap_or(false)
+    }
+
     pub fn new(system: impl Into<String>) -> Self {
         ChatRequest {
             system: system.into(),
@@ -161,6 +173,7 @@ impl ChatRequest {
             force_json: false,
             thinking: Thinking::default(),
             stream: true,
+            cancel: None,
         }
     }
 }
@@ -204,9 +217,20 @@ pub struct ChatResponse {
 /// Provider-level failure with enough context for the rotation policy.
 #[derive(Debug)]
 pub enum CallError {
-    Status { code: u16, body: String },
+    Status {
+        code: u16,
+        body: String,
+    },
     Transport(String),
     Parse(String),
+    /// The model declined the request, or answered with nothing at all.
+    ///
+    /// Kept apart from the other failures because the cure is different: no
+    /// key rotation and no waiting will change the verdict, but the next model
+    /// in the chain may well answer.
+    Blocked {
+        reason: String,
+    },
 }
 
 impl CallError {
@@ -218,6 +242,7 @@ impl CallError {
             }
             CallError::Transport(e) => format!("transport: {e}"),
             CallError::Parse(e) => format!("parse: {e}"),
+            CallError::Blocked { reason } => format!("declined: {reason}"),
         }
     }
 
@@ -232,7 +257,23 @@ impl CallError {
             },
             CallError::Transport(_) => KeyVerdict::Transient,
             CallError::Parse(_) => KeyVerdict::Fatal,
+            CallError::Blocked { .. } => KeyVerdict::Blocked,
         }
+    }
+}
+
+/// The reason to report when a turn came back with no text and no tool call.
+///
+/// The provider's own word for it when there is one, and a plain "empty"
+/// when the answer was simply blank.
+pub fn empty_turn_reason(block_reason: Option<String>, finish_reason: &str) -> String {
+    if let Some(reason) = block_reason.filter(|r| !r.trim().is_empty()) {
+        return reason;
+    }
+    if finish_reason.trim().is_empty() {
+        "EMPTY".to_string()
+    } else {
+        finish_reason.trim().to_string()
     }
 }
 
@@ -293,8 +334,15 @@ impl LlmClient {
     ) -> Result<ChatResponse> {
         let models = provider.models();
         let mut last_error = AppError::Provider("no model was tried".into());
+        // A model that declined is not a broken key or a flat network: when
+        // every model in the chain declines, the operator is told that, and
+        // told what actually helps — a different model, or a shorter history.
+        let mut declined: Vec<String> = vec![];
 
         for (index, model) in models.iter().enumerate() {
+            if request.cancelled() {
+                break;
+            }
             let mut attempt_provider = provider.clone();
             attempt_provider.model = model.clone();
 
@@ -307,6 +355,9 @@ impl LlmClient {
                     return Ok(response);
                 }
                 Err(err) => {
+                    if let AppError::Blocked { reason } = &err {
+                        declined.push(format!("{model}: {reason}"));
+                    }
                     last_error = err;
                     let Some(next) = models.get(index + 1) else {
                         break;
@@ -320,6 +371,13 @@ impl LlmClient {
                     pool.clear_cooldowns();
                 }
             }
+        }
+
+        if declined.len() == models.len() && !declined.is_empty() {
+            return Err(AppError::message(
+                "error.allDeclined",
+                serde_json::json!({ "detail": declined.join("; ") }),
+            ));
         }
 
         Err(last_error)
@@ -342,8 +400,16 @@ impl LlmClient {
         }
         let max_attempts = (key_total * 2).clamp(2, 8);
         let mut last_error = String::from("unknown error");
+        // Refusals are counted separately: every key is still offered the
+        // request — the operator asked for that — but once they have all been
+        // declined there is nothing left to try on this model.
+        let mut declined: Option<String> = None;
+        let mut declines = 0usize;
 
         for attempt in 0..max_attempts {
+            if request.cancelled() {
+                return Err(AppError::message("chat.stopped", serde_json::json!({})));
+            }
             let lease = match pool.acquire() {
                 Some(lease) => lease,
                 None => {
@@ -399,6 +465,10 @@ impl LlmClient {
                 Err(err) => {
                     let verdict = err.verdict();
                     last_error = err.message();
+                    if let CallError::Blocked { reason } = &err {
+                        declined = Some(reason.clone());
+                        declines += 1;
+                    }
                     pool.report_failure(lease.index, verdict);
                     on_event(serde_json::json!({
                         "kind": "llm_retry",
@@ -407,6 +477,14 @@ impl LlmClient {
                         "verdict": format!("{:?}", verdict),
                         "message": last_error,
                     }));
+                    if let Some(reason) = declined.clone() {
+                        // Every key has now been offered it and every key was
+                        // refused: waiting changes nothing, the next model might.
+                        if declines >= key_total {
+                            return Err(AppError::Blocked { reason });
+                        }
+                        continue;
+                    }
                     if matches!(verdict, KeyVerdict::Fatal) && key_total == 1 {
                         return Err(AppError::Provider(last_error));
                     }
@@ -417,6 +495,9 @@ impl LlmClient {
             }
         }
 
+        if let Some(reason) = declined {
+            return Err(AppError::Blocked { reason });
+        }
         Err(AppError::Provider(format!(
             "all {key_total} key(s) failed after {max_attempts} attempts: {last_error}"
         )))

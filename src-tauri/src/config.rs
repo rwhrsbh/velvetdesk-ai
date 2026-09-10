@@ -124,6 +124,8 @@ impl ProviderConfig {
         let url = self.base_url.to_lowercase();
         if url.contains("openrouter") {
             "openrouter"
+        } else if url.contains("api.nvidia.com") {
+            "nvidia"
         } else if url.contains("dashscope") || url.contains("aliyun") || url.contains("qwen") {
             "qwen"
         } else {
@@ -306,6 +308,24 @@ impl Default for Settings {
                     key_count: 0,
                 },
                 ProviderConfig {
+                    id: "nvidia".into(),
+                    label: "NVIDIA NIM".into(),
+                    kind: ProviderKind::OpenaiCompatible,
+                    base_url: "https://integrate.api.nvidia.com/v1".into(),
+                    api_version: "v1".into(),
+                    model: "deepseek-ai/deepseek-v4-flash-0731".into(),
+                    extra_headers: vec![],
+                    temperature: 0.85,
+                    max_output_tokens: None,
+                    transcribe_model: String::new(),
+                    thinking_effort: String::new(),
+                    thinking_budget: None,
+                    model_chain: vec![],
+                    reasoning_dialect: default_dialect(),
+                    context_tokens: None,
+                    key_count: 0,
+                },
+                ProviderConfig {
                     id: "groq".into(),
                     label: "Groq / Whisper".into(),
                     kind: ProviderKind::OpenaiCompatible,
@@ -347,7 +367,17 @@ impl Default for Settings {
 
 impl Settings {
     pub fn load(paths: &Paths) -> Result<Settings> {
-        Ok(read_json::<Settings>(&paths.settings_file())?.unwrap_or_default())
+        let mut settings = read_json::<Settings>(&paths.settings_file())?.unwrap_or_default();
+        // A provider added in a later version would otherwise never appear for
+        // anyone who has used the app before: the settings file on disk holds
+        // the list it was written with. Ones the operator has edited are left
+        // exactly as they are — only what is missing is added.
+        for provider in Settings::default().providers {
+            if !settings.providers.iter().any(|p| p.id == provider.id) {
+                settings.providers.push(provider);
+            }
+        }
+        Ok(settings)
     }
 
     pub fn save(&self, paths: &Paths) -> Result<()> {
@@ -422,6 +452,23 @@ fn restrict_permissions(_path: &std::path::Path) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A provider added in a later version has to reach the people already
+    /// running the app: their settings file lists the providers it was written
+    /// with, and nothing would ever add the new one to it.
+    #[test]
+    fn a_new_provider_reaches_an_existing_install() {
+        let dir = std::env::temp_dir().join(format!("velvet-settings-{}", crate::models::new_id()));
+        let paths = crate::storage::Paths::new(dir).unwrap();
+
+        let mut old = Settings::default();
+        old.providers.retain(|p| p.id != "nvidia");
+        old.save(&paths).unwrap();
+
+        let loaded = Settings::load(&paths).unwrap();
+        assert!(loaded.providers.iter().any(|p| p.id == "nvidia"));
+        assert_eq!(loaded.providers.len(), Settings::default().providers.len());
+    }
 
     /// The chain is "this one, then these", with no repeats: a fallback that
     /// names the primary again would waste a whole round of keys on it.

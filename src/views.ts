@@ -400,12 +400,30 @@ export function renderChat() {
       if (typeof meta.turns === "number" && meta.turns > 1)
         extras.push(t("chat.turns", { n: meta.turns }));
 
+      // Ask again, or ask differently: the same pair of buttons every chat
+      // interface has, on the operator's own message and on the answer to it.
+      // Both rewind to that message — what came after it is being replaced.
+      const again = entry.transient
+        ? ""
+        : `<button data-act="retry" data-entry="${escapeHtml(entry.id)}" title="${escapeHtml(
+            t("chat.retryHint"),
+          )}">${t("chat.retry")}</button>` +
+          `<button data-act="edit" data-entry="${escapeHtml(entry.id)}" title="${escapeHtml(
+            t("chat.editHint"),
+          )}">${t("chat.edit")}</button>`;
+
+      const asked =
+        entry.sender === "user" && again
+          ? `<div class="msg-actions">${again}</div>`
+          : "";
+
       // Offering to file a draft that is already in the thread invites the
       // duplicate it would create.
       const filed = alreadyFiled(entry.text);
       const actions =
         entry.sender === "assistant" && !entry.transient
           ? `<div class="msg-actions">
+               ${again}
                <button data-act="copy" data-entry="${escapeHtml(entry.id)}">${t("chat.copy")}</button>
                ${
                  filed
@@ -451,7 +469,7 @@ export function renderChat() {
         `<div class="bubble">${recipient}${thinking}${shots}<span class="bubble-text">${
           entry.sender === "assistant" ? markdown(entry.text) : escapeHtml(entry.text)
         }</span>` +
-        `${steps}${working}${usageLine(meta.usage, extras)}${actions}</div></div>`
+        `${steps}${working}${usageLine(meta.usage, extras)}${actions}${asked}</div></div>`
       );
     })
     .join("");

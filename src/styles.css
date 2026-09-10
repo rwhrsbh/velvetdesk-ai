@@ -611,6 +611,19 @@ input[type="range"] {
   border-color: var(--text-faint);
 }
 
+/* Retry and edit sit on the operator's own messages, out of the way until the
+   pointer is on the one they belong to. */
+.msg.user .msg-actions {
+  justify-content: flex-end;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.msg.user:hover .msg-actions,
+.msg.user:focus-within .msg-actions {
+  opacity: 1;
+}
+
 /* Folders agents have been let into. */
 .folder-list {
   margin-bottom: 8px;

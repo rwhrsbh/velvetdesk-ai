@@ -369,6 +369,7 @@ pub async fn chat(deps: &AgentDeps<'_>, input: MasterInput) -> Result<MasterOutp
     request.max_output_tokens = deps.provider.max_output_tokens;
     request.thinking = super::thinking_for(deps.provider, input.thinking_effort.as_deref());
     request.tools = tool_defs();
+    request.cancel = Some(deps.cancel.clone());
 
     let log = deps.paths.master_log()?;
     for entry in log.entries.iter().rev().take(HISTORY_TURNS).rev() {
@@ -392,12 +393,29 @@ pub async fn chat(deps: &AgentDeps<'_>, input: MasterInput) -> Result<MasterOutp
     let mut reply = String::new();
     let mut turns = 0usize;
 
+    // Set when the operator pressed stop: what was written stays, the rest of
+    // the run is dropped.
+    let mut stopped = false;
     for turn in 0..deps.settings.max_tool_turns.max(1) {
+        if deps.cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            stopped = true;
+            break;
+        }
         turns = turn + 1;
-        let response = deps
+        let response = match deps
             .llm
             .chat(deps.provider, deps.pool.clone(), &request, deps.emit)
-            .await?;
+            .await
+        {
+            Ok(response) => response,
+            Err(err) => {
+                if deps.cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                    stopped = true;
+                    break;
+                }
+                return Err(err);
+            }
+        };
 
         usage.prompt_tokens += response.usage.prompt_tokens;
         usage.completion_tokens += response.usage.completion_tokens;
@@ -464,10 +482,23 @@ pub async fn chat(deps: &AgentDeps<'_>, input: MasterInput) -> Result<MasterOutp
         }
     }
 
+    // A run the operator stopped keeps whatever it had written; one that was
+    // stopped before it wrote anything says so instead of showing a blank.
+    let mut reply_key = String::new();
+    if stopped && reply.trim().is_empty() {
+        reply_key = "chat.stopped".to_string();
+        reply = "Остановлено оператором.".into();
+    }
+
+    let mut user_entry_id = String::new();
+    let mut entry_id = String::new();
     if !input.temporary {
         let mut log = deps.paths.master_log()?;
-        log.entries.push(AgentEntry::new("user", input.message));
+        let asked = AgentEntry::new("user", input.message);
+        user_entry_id = asked.id.clone();
+        log.entries.push(asked);
         let mut entry = AgentEntry::new("assistant", reply.clone());
+        entry_id = entry.id.clone();
         entry.meta = json!({ "steps": steps, "usage": usage, "pending": pending.len() });
         log.entries.push(entry);
         if log.entries.len() > 400 {
@@ -481,11 +512,14 @@ pub async fn chat(deps: &AgentDeps<'_>, input: MasterInput) -> Result<MasterOutp
 
     Ok(MasterOutput {
         reply,
+        reply_key,
         steps,
         pending,
         usage,
         key_index,
         turns,
+        user_entry_id,
+        entry_id,
     })
 }
 
@@ -509,11 +543,21 @@ pub struct MasterInput {
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct MasterOutput {
     pub reply: String,
+    /// Set when the reply is the app's own words, so the interface can say
+    /// them in its own language.
+    #[serde(default)]
+    pub reply_key: String,
     pub steps: Vec<RunStep>,
     pub pending: Vec<PendingAction>,
     pub usage: Usage,
     pub key_index: usize,
     pub turns: usize,
+    /// The ids the two messages were written under, so the interface stops
+    /// showing them under ids the log has never heard of.
+    #[serde(default)]
+    pub user_entry_id: String,
+    #[serde(default)]
+    pub entry_id: String,
 }
 
 #[cfg(test)]

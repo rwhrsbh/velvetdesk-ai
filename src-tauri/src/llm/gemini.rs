@@ -222,6 +222,9 @@ pub async fn call_streaming(
     let mut tool_calls: Vec<ToolCall> = vec![];
     let mut usage = Usage::default();
     let mut finish_reason = String::new();
+    // Set when the classifier stops the request before the model sees it: the
+    // payload carries no candidate at all, only the reason it was refused.
+    let mut block_reason: Option<String> = None;
     let mut buffer = String::new();
     // The events as they arrived, so an empty or surprising answer can be read
     // rather than guessed at.
@@ -229,6 +232,12 @@ pub async fn call_streaming(
     let mut stream = response.bytes_stream();
 
     while let Some(chunk) = stream.next().await {
+        // Stop means stop: what has arrived is kept, the rest is dropped, and
+        // the connection goes with it.
+        if request.cancelled() {
+            finish_reason = "CANCELLED".to_string();
+            break;
+        }
         let chunk = chunk.map_err(|e| CallError::Transport(e.to_string()))?;
         buffer.push_str(&String::from_utf8_lossy(&chunk));
 
@@ -239,6 +248,9 @@ pub async fn call_streaming(
             }
             if let Some(reason) = value["candidates"][0]["finishReason"].as_str() {
                 finish_reason = reason.to_string();
+            }
+            if let Some(reason) = value["promptFeedback"]["blockReason"].as_str() {
+                block_reason = Some(reason.to_string());
             }
             if let Some(meta) = value.get("usageMetadata") {
                 usage = read_usage(Some(meta));
@@ -299,6 +311,16 @@ pub async fn call_streaming(
                 finish_reason = reason.to_string();
             }
         }
+    }
+
+    // Nothing to show: the request was refused, or the turn stopped before a
+    // word of it was written. Either way this is not an answer, and the caller
+    // is told so rather than being handed an empty one — there may be another
+    // model in the chain that will answer it.
+    if text.trim().is_empty() && tool_calls.is_empty() && !request.cancelled() {
+        return Err(CallError::Blocked {
+            reason: super::empty_turn_reason(block_reason, &finish_reason),
+        });
     }
 
     Ok(ChatResponse {
@@ -702,12 +724,13 @@ fn parse_response(value: &Value) -> Result<ChatResponse, CallError> {
     let candidate = value
         .get("candidates")
         .and_then(|c| c.get(0))
-        .ok_or_else(|| {
-            let reason = value
-                .get("promptFeedback")
-                .map(|f| f.to_string())
-                .unwrap_or_else(|| "no candidates returned".into());
-            CallError::Parse(reason)
+        .ok_or_else(|| CallError::Blocked {
+            reason: super::empty_turn_reason(
+                value["promptFeedback"]["blockReason"]
+                    .as_str()
+                    .map(|r| r.to_string()),
+                "",
+            ),
         })?;
 
     let mut text = String::new();
@@ -753,6 +776,22 @@ fn parse_response(value: &Value) -> Result<ChatResponse, CallError> {
     }
 
     let usage = read_usage(value.get("usageMetadata"));
+    let finish_reason = candidate
+        .get("finishReason")
+        .and_then(|f| f.as_str())
+        .unwrap_or_default()
+        .to_string();
+
+    if text.trim().is_empty() && tool_calls.is_empty() {
+        return Err(CallError::Blocked {
+            reason: super::empty_turn_reason(
+                value["promptFeedback"]["blockReason"]
+                    .as_str()
+                    .map(|r| r.to_string()),
+                &finish_reason,
+            ),
+        });
+    }
 
     Ok(ChatResponse {
         text: text.trim().to_string(),
@@ -762,11 +801,7 @@ fn parse_response(value: &Value) -> Result<ChatResponse, CallError> {
         thoughts: thoughts.trim().to_string(),
         tool_calls,
         usage,
-        finish_reason: candidate
-            .get("finishReason")
-            .and_then(|f| f.as_str())
-            .unwrap_or_default()
-            .to_string(),
+        finish_reason,
         key_index: 0,
         attempts: 0,
     })
@@ -775,6 +810,34 @@ fn parse_response(value: &Value) -> Result<ChatResponse, CallError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A classifier that stops the request answers with no candidate at all.
+    /// Read as an empty answer it left the operator with a blank bubble; read
+    /// as a refusal it moves the run to the next model in the chain.
+    #[test]
+    fn a_refused_prompt_is_a_refusal_not_an_answer() {
+        let payload = serde_json::json!({
+            "promptFeedback": { "blockReason": "PROHIBITED_CONTENT" },
+            "usageMetadata": { "promptTokenCount": 6370 }
+        });
+        match parse_response(&payload) {
+            Err(CallError::Blocked { reason }) => assert_eq!(reason, "PROHIBITED_CONTENT"),
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+    }
+
+    /// A finished turn with nothing written in it is no more usable than a
+    /// refusal, and is handled the same way.
+    #[test]
+    fn an_empty_turn_is_refused_too() {
+        let payload = serde_json::json!({
+            "candidates": [{ "content": { "parts": [] }, "finishReason": "SAFETY" }]
+        });
+        match parse_response(&payload) {
+            Err(CallError::Blocked { reason }) => assert_eq!(reason, "SAFETY"),
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+    }
     use crate::config::ProviderKind;
     use crate::llm::{LlmMessage, ToolDef};
 

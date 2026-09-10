@@ -16,6 +16,9 @@ pub enum KeyVerdict {
     Transient,
     /// 4xx that no rotation can fix (bad request, unknown model).
     Fatal,
+    /// The model refused the request itself — a safety classifier, a blocklist,
+    /// or an answer that came back empty. The key is fine; the model is not.
+    Blocked,
 }
 
 impl KeyVerdict {
@@ -26,6 +29,9 @@ impl KeyVerdict {
             KeyVerdict::ServerError => Some(Duration::from_secs(15)),
             KeyVerdict::Transient => Some(Duration::from_secs(5)),
             KeyVerdict::Fatal => None,
+            // Nothing to wait out: whatever refused this will refuse it just as
+            // fast a second later.
+            KeyVerdict::Blocked => None,
         }
     }
 }

@@ -26,6 +26,10 @@ pub enum AppError {
     #[error("no usable api key: {0}")]
     NoKeys(String),
 
+    /// The model refused the request, or answered with nothing at all.
+    #[error("model declined: {reason}")]
+    Blocked { reason: String },
+
     #[error("{0}")]
     Other(String),
 
@@ -58,6 +62,7 @@ impl AppError {
             AppError::Scope(_) => "scope",
             AppError::Provider(_) => "provider",
             AppError::NoKeys(_) => "no_keys",
+            AppError::Blocked { .. } => "blocked",
             AppError::Other(_) => "other",
             AppError::Message { .. } => "message",
         }

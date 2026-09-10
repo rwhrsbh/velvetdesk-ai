@@ -183,6 +183,7 @@ export const api = {
     }),
   learnVoice: (model_id: string, samples?: number) =>
     invoke<Profile>("learn_voice", { modelId: model_id, samples }),
+  cancelRun: (run_id: string) => invoke<void>("cancel_run", { runId: run_id }),
   deleteChatMessages: (model_id: string, man_id: string, ids: string[]) =>
     invoke<ChatThread>("delete_chat_messages", { modelId: model_id, manId: man_id, ids }),
 
