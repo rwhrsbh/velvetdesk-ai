@@ -25,6 +25,7 @@ import { openManForm, openProfileForm } from "./forms";
 import { openDoctorModal, openPendingModal } from "./modals";
 import { loadModel, SilentClipError, transcribeLocally } from "./local-whisper";
 import { openKeysModal } from "./provider-modal";
+import { startTour } from "./tour";
 import {
   activeMan,
   activeProfile,
@@ -1343,6 +1344,8 @@ function bindTopbar() {
   $("btnDoctor").addEventListener("click", () => void openDoctorModal(deps));
   $("btnMaster").addEventListener("click", () => void toggleMasterChat());
   $("btnPending").addEventListener("click", () => void openPendingModal(deps));
+  $("btnGuide").addEventListener("click", () => openTour());
+  $("btnGuide").addEventListener("click", () => openTour());
   $("btnLang").addEventListener("click", () => applyLanguage(lang() === "ru" ? "en" : "ru", true));
 }
 
@@ -1360,6 +1363,9 @@ function retranslateEntries() {
 
 function applyLanguage(next: Lang, persist = false) {
   setLang(next);
+  // The document says which language it is in, so the webview hyphenates and
+  // spell-checks in that one rather than in the one the markup shipped with.
+  document.documentElement.lang = next;
   applyStatic();
   syncDressedSelects();
   retranslateEntries();
@@ -1368,16 +1374,79 @@ function applyLanguage(next: Lang, persist = false) {
   if (persist) void persistSettings({ ui_language: next });
 }
 
+/**
+ * Walk the operator through the window.
+ *
+ * Opened by itself the first time the app runs, and by the button in the top
+ * bar after that. Whichever way it ends, it is not opened again on its own.
+ */
+function openTour() {
+  startTour({
+    setLanguage: (next) => applyLanguage(next, true),
+    onDone: () => {
+      if (store.settings?.tour_done) return;
+      void persistSettings({ tour_done: true });
+    },
+  });
+}
+
+/**
+ * Drag a card up or down its rail, and keep it there.
+ *
+ * The rails are the operator's working order — who they are writing to today,
+ * which profile is the busy one — and an order the app chose for them is only
+ * a starting point. A drop writes the new order to disk, so it survives the
+ * next launch.
+ */
+function bindReordering(listId: string, attribute: "profile" | "man", save: (ids: string[]) => void) {
+  const list = $(listId);
+  let dragged: HTMLElement | null = null;
+
+  list.addEventListener("dragstart", (event) => {
+    const card = (event.target as HTMLElement).closest<HTMLElement>(`[data-${attribute}]`);
+    if (!card) return;
+    dragged = card;
+    card.classList.add("dragging");
+    // Firefox refuses to start a drag without something in the payload.
+    event.dataTransfer?.setData("text/plain", card.dataset[attribute] ?? "");
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+  });
+
+  list.addEventListener("dragover", (event) => {
+    if (!dragged) return;
+    event.preventDefault();
+    const over = (event.target as HTMLElement).closest<HTMLElement>(`[data-${attribute}]`);
+    if (!over || over === dragged) return;
+    const box = over.getBoundingClientRect();
+    // Past the middle of a card means "after it", which is what makes the
+    // list feel like it is being pushed apart rather than snapping around.
+    const after = event.clientY > box.top + box.height / 2;
+    list.insertBefore(dragged, after ? over.nextSibling : over);
+  });
+
+  const finish = () => {
+    if (!dragged) return;
+    dragged.classList.remove("dragging");
+    dragged = null;
+    const ids = Array.from(list.querySelectorAll<HTMLElement>(`[data-${attribute}]`))
+      .map((card) => card.dataset[attribute] ?? "")
+      .filter(Boolean);
+    save(ids);
+  };
+
+  list.addEventListener("drop", (event) => {
+    event.preventDefault();
+    finish();
+  });
+  list.addEventListener("dragend", finish);
+}
+
 function bindPanels() {
   $("profileList").addEventListener("click", (event) => {
     const target = event.target as HTMLElement;
-    if (target.dataset.act === "seed") {
+    if (target.dataset.act === "guide") {
       event.preventDefault();
-      void api
-        .seedDemo()
-        .then(refresh)
-        .then(() => toast(t("toast.demoCreated"), "success"))
-        .catch((error) => toast(errorText(error), "error"));
+      openTour();
       return;
     }
     const card = target.closest<HTMLElement>("[data-profile]");
@@ -1387,6 +1456,27 @@ function bindPanels() {
     } else {
       void selectProfile(card.dataset.profile);
     }
+  });
+
+  bindReordering("profileList", "profile", (ids) => {
+    void api
+      .reorderProfiles(ids)
+      .then((profiles) => {
+        store.profiles = profiles;
+        renderProfiles();
+      })
+      .catch((error) => toast(errorText(error), "error"));
+  });
+
+  bindReordering("menList", "man", (ids) => {
+    if (!store.activeModelId) return;
+    void api
+      .reorderMen(store.activeModelId, ids)
+      .then((men) => {
+        store.men = men;
+        renderMen();
+      })
+      .catch((error) => toast(errorText(error), "error"));
   });
 
   $("menList").addEventListener("click", (event) => {
@@ -1812,6 +1902,97 @@ async function refreshContextGauge() {
 }
 
 /**
+ * The commands the composer understands, in the order they are offered.
+ *
+ * One list: what the menu shows, what the search filters, and what /help
+ * prints are the same thing, so a command can never be offered and then not
+ * work — or work and never be mentioned.
+ */
+const COMMANDS = ["clear", "compact", "help"] as const;
+
+/** Which command the menu has under the pointer, when it is open. */
+let slashAt = 0;
+
+/** Whatever was typed after the slash, lowercased. */
+function slashQuery(): string | null {
+  const input = $("composerInput") as HTMLTextAreaElement;
+  const text = input.value;
+  if (!text.startsWith("/")) return null;
+  // The menu is for picking a command, not for arguments: once there is a
+  // space the operator has moved on.
+  const typed = text.slice(1);
+  if (/\s/.test(typed)) return null;
+  return typed.toLowerCase();
+}
+
+/** The commands that match what is typed so far. */
+function slashMatches(query: string): string[] {
+  return COMMANDS.filter((name) => name.startsWith(query));
+}
+
+/**
+ * Show the commands as they are typed.
+ *
+ * A slash on its own lists all of them; every letter after it narrows the
+ * list. Up and down move, Enter and Tab take the highlighted one, Escape puts
+ * the menu away without touching what was typed.
+ */
+function renderSlashMenu() {
+  const menu = $("slashMenu");
+  const query = slashQuery();
+  const matches = query === null ? [] : slashMatches(query);
+  if (matches.length === 0) {
+    menu.hidden = true;
+    menu.innerHTML = "";
+    return;
+  }
+  slashAt = Math.min(slashAt, matches.length - 1);
+  menu.hidden = false;
+  menu.innerHTML = matches
+    .map(
+      (name, index) =>
+        `<button class="slash-row${index === slashAt ? " active" : ""}" data-command="${name}">` +
+        `<span class="slash-name">/${name}</span>` +
+        `<span class="slash-hint">${escapeHtml(t(`cmd.${name}.hint`))}</span></button>`,
+    )
+    .join("");
+}
+
+/** Put a command in the composer, ready to run. */
+function pickSlash(name: string) {
+  const input = $("composerInput") as HTMLTextAreaElement;
+  input.value = `/${name}`;
+  $("slashMenu").hidden = true;
+  input.focus();
+  void sendMessage();
+}
+
+/** The keys that drive the menu, when it is open. Returns true if it took one. */
+function slashKey(event: KeyboardEvent): boolean {
+  const menu = $("slashMenu");
+  if (menu.hidden) return false;
+  const query = slashQuery();
+  const matches = query === null ? [] : slashMatches(query);
+  if (matches.length === 0) return false;
+
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    const step = event.key === "ArrowDown" ? 1 : matches.length - 1;
+    slashAt = (slashAt + step) % matches.length;
+    renderSlashMenu();
+    return true;
+  }
+  if (event.key === "Enter" || event.key === "Tab") {
+    pickSlash(matches[slashAt]);
+    return true;
+  }
+  if (event.key === "Escape") {
+    menu.hidden = true;
+    return true;
+  }
+  return false;
+}
+
+/**
  * Commands typed into the composer.
  *
  * They act on what the model reads, never on what it has remembered: a dossier,
@@ -1820,7 +2001,7 @@ async function refreshContextGauge() {
 async function runSlashCommand(raw: string): Promise<boolean> {
   const [name] = raw.trim().slice(1).split(/\s+/);
   const command = name.toLowerCase();
-  if (!["clear", "compact", "help"].includes(command)) return false;
+  if (!COMMANDS.some((known) => known === command)) return false;
 
   if (command === "help") {
     pushEntry(systemNote("cmd.help"));
@@ -2103,8 +2284,26 @@ function bindComposer() {
     }
     void sendMessage();
   });
-  // Typing turns "stop" back into "queue": there is something to queue again.
-  input.addEventListener("input", () => markSending());
+  // Typing turns "stop" back into "queue": there is something to queue again,
+  // and a slash at the start offers the commands.
+  input.addEventListener("input", () => {
+    markSending();
+    slashAt = 0;
+    renderSlashMenu();
+  });
+  input.addEventListener("blur", () => {
+    // A click on the menu is a blur first; letting it land beats closing the
+    // menu out from under the pointer.
+    window.setTimeout(() => {
+      $("slashMenu").hidden = true;
+    }, 120);
+  });
+  $("slashMenu").addEventListener("mousedown", (event) => {
+    const row = (event.target as HTMLElement).closest<HTMLElement>("[data-command]");
+    if (!row) return;
+    event.preventDefault();
+    pickSlash(row.dataset.command ?? "");
+  });
 
   // Pictures: picked, pasted or dropped onto the composer.
   const attachInput = $("attachInput") as HTMLInputElement;
@@ -2187,6 +2386,11 @@ function bindComposer() {
   micButton().addEventListener("click", () => void toggleDictation());
 
   input.addEventListener("keydown", (event) => {
+    // The command menu, when it is open, owns the arrows, Enter, Tab and Escape.
+    if (slashKey(event)) {
+      event.preventDefault();
+      return;
+    }
     if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
       event.preventDefault();
       void sendMessage();
@@ -2493,6 +2697,13 @@ async function boot() {
     // A quiet look at the release page a moment after the window is usable.
     if (data.settings.update_check) {
       window.setTimeout(() => void offerUpdate(false), 4000);
+    }
+
+    // The first run opens the guide by itself: an empty window explains
+    // nothing on its own, and the language it should explain itself in is the
+    // guide's own first question.
+    if (!data.settings.tour_done) {
+      window.setTimeout(() => openTour(), 400);
     }
 
     if (data.profiles.length === 0) {

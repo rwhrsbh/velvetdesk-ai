@@ -251,6 +251,8 @@ export interface Settings {
   global_style_rules: string;
   telemetry_disabled: boolean;
   ui_language: "ru" | "en";
+  /** Set once the guided tour has been seen or skipped. */
+  tour_done?: boolean;
   speech_provider: string | null;
   speech_engine: "provider" | "local";
   local_speech_model: string;

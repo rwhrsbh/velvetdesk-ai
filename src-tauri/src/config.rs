@@ -209,6 +209,11 @@ pub struct Settings {
     /// UI language: "ru" or "en".
     #[serde(default = "default_language")]
     pub ui_language: String,
+    /// Set once the operator has been through the guided tour, or skipped it.
+    /// A fresh install opens it by itself; the button in the top bar opens it
+    /// again whenever it is wanted.
+    #[serde(default)]
+    pub tour_done: bool,
     /// Provider used for voice dictation. None means "same as the chat one",
     /// which lets an operator chat through a text-only endpoint and still
     /// dictate through Gemini, Groq or a local Whisper server.
@@ -362,6 +367,7 @@ impl Default for Settings {
             global_style_rules: String::new(),
             telemetry_disabled: true,
             ui_language: default_language(),
+            tour_done: false,
             speech_provider: None,
             speech_engine: default_speech_engine(),
             local_speech_model: String::new(),

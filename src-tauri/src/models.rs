@@ -108,6 +108,11 @@ pub struct Profile {
     pub languages: Vec<String>,
     #[serde(default)]
     pub facts: Vec<Fact>,
+    /// Where the operator dragged this card in the rail. Equal values fall
+    /// back to the name, so a workspace that has never been rearranged looks
+    /// exactly as it always did.
+    #[serde(default)]
+    pub sort_order: i32,
     #[serde(default = "now")]
     pub created_at: DateTime<Utc>,
     #[serde(default = "now")]
@@ -131,6 +136,7 @@ impl Profile {
             banned_phrases: vec![],
             languages: vec!["en".into()],
             facts: vec![],
+            sort_order: 0,
             created_at: now(),
             updated_at: now(),
             schema_version: SCHEMA_VERSION,
@@ -223,6 +229,9 @@ pub struct Man {
     pub facts: Vec<Fact>,
     #[serde(default)]
     pub notes: Vec<Note>,
+    /// Where the operator dragged this card in the rail; see `Profile`.
+    #[serde(default)]
+    pub sort_order: i32,
     #[serde(default)]
     pub last_contact: Option<DateTime<Utc>>,
     #[serde(default = "now")]
@@ -253,6 +262,7 @@ impl Man {
             gifts: vec![],
             facts: vec![],
             notes: vec![],
+            sort_order: 0,
             last_contact: None,
             created_at: now(),
             updated_at: now(),

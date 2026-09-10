@@ -75,6 +75,9 @@ export const api = {
   saveProfile: (profile: Profile) => invoke<Profile>("save_profile", { profile }),
   deleteProfile: (modelId: string) => invoke<void>("delete_profile", { modelId }),
 
+  reorderProfiles: (ids: string[]) => invoke<Profile[]>("reorder_profiles", { ids }),
+  reorderMen: (model_id: string, ids: string[]) =>
+    invoke<Man[]>("reorder_men", { modelId: model_id, ids }),
   listMen: (modelId: string) => invoke<Man[]>("list_men", { modelId }),
   getMan: (modelId: string, manId: string) => invoke<Man>("get_man", { modelId, manId }),
   saveMan: (man: Man) => invoke<Man>("save_man", { man }),
@@ -195,7 +198,6 @@ export const api = {
   fetchImage: (url: string) =>
     invoke<{ name: string; mime: string; data: string }>("fetch_image", { url }),
 
-  seedDemo: () => invoke<Profile[]>("seed_demo"),
 };
 
 export function onAgentEvent(handler: (payload: Record<string, unknown>) => void) {

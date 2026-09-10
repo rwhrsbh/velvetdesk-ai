@@ -695,7 +695,10 @@ pub fn plan_mutation(scope: &Scope, tool: &str, args: &Value) -> Result<Mutation
             man.next_action = arg_str(args, "next_action").unwrap_or_default();
             man.triggers = arg_vec(args, "triggers");
             man.boundaries = arg_vec(args, "boundaries");
-            man.status = arg_str(args, "status").unwrap_or_else(|| "Новый контакт".into());
+            // No status rather than one in a language the operator may not be
+            // working in: the rail simply shows nothing until there is
+            // something to say.
+            man.status = arg_str(args, "status").unwrap_or_default();
             man.sentiment = arg_str(args, "sentiment").unwrap_or_default();
             // Facts and notes are folded into the same action on purpose: a new
             // dossier plus everything known about him is one approval, and

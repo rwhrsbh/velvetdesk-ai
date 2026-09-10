@@ -476,17 +476,20 @@ pub async fn chat(deps: &AgentDeps<'_>, input: MasterInput) -> Result<MasterOutp
                     };
                     (outcome.result, step)
                 }
-                Err(err) => (
-                    json!({ "error": err.to_string() }),
-                    RunStep {
-                        kind: "tool_error".into(),
-                        tool: Some(call.name.clone()),
-                        summary: err.to_string(),
-                        key: String::new(),
-                        params: Value::Null,
-                        detail: call.args.clone(),
-                    },
-                ),
+                Err(err) => {
+                    let (key, params) = err.phrasing();
+                    (
+                        json!({ "error": err.to_string() }),
+                        RunStep {
+                            kind: "tool_error".into(),
+                            tool: Some(call.name.clone()),
+                            summary: err.to_string(),
+                            key,
+                            params,
+                            detail: call.args.clone(),
+                        },
+                    )
+                }
             };
             (deps.emit)(json!({ "kind": "step", "step": step }));
             steps.push(step);

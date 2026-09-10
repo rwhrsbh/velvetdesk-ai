@@ -69,6 +69,20 @@ impl AppError {
     }
 }
 
+/// How a failure reads in a step: its dictionary key and the values that fill
+/// it, or nothing at all when the failure has no phrasing of its own.
+///
+/// A step that carried only `to_string()` showed the operator the key itself —
+/// "error.notAFolder" — because that is what a named error prints.
+impl AppError {
+    pub fn phrasing(&self) -> (String, serde_json::Value) {
+        match self {
+            AppError::Message { key, params } => (key.clone(), params.clone()),
+            _ => (String::new(), serde_json::Value::Null),
+        }
+    }
+}
+
 impl From<reqwest::Error> for AppError {
     fn from(value: reqwest::Error) -> Self {
         AppError::Http(value.to_string())

@@ -117,6 +117,8 @@ pub fn run() {
             commands::save_profile,
             commands::delete_profile,
             commands::list_men,
+            commands::reorder_profiles,
+            commands::reorder_men,
             commands::get_man,
             commands::save_man,
             commands::create_man,
@@ -171,7 +173,6 @@ pub fn run() {
             commands::delete_local_model,
             commands::local_models_base_url,
             commands::test_provider,
-            commands::seed_demo,
         ])
         .run(tauri::generate_context!())
         .expect("error while running VelvetDesk");

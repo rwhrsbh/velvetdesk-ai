@@ -75,7 +75,7 @@ export function renderProfiles() {
         p.site || t("common.noSite"),
         t("profile.contacts", { n: men, word: contactWord(men) }),
       ];
-      return `<div class="row-card ${p.id === store.activeModelId ? "active" : ""}" data-profile="${escapeHtml(p.id)}">
+      return `<div class="row-card ${p.id === store.activeModelId ? "active" : ""}" draggable="true" data-profile="${escapeHtml(p.id)}">
         <div class="row-main">
           ${avatarHtml(p.name, p.avatar)}
           <div class="row-text">
@@ -134,7 +134,7 @@ export function renderMen() {
       const sub = [m.location, `ID ${m.id}`, m.age ? t("man.years", { n: m.age }) : ""]
         .filter(Boolean)
         .join(" · ");
-      return `<div class="row-card ${m.id === store.activeManId ? "active" : ""}" data-man="${escapeHtml(m.id)}">
+      return `<div class="row-card ${m.id === store.activeManId ? "active" : ""}" draggable="true" data-man="${escapeHtml(m.id)}">
         <div class="row-main">
           ${avatarHtml(m.name, m.avatar)}
           <div class="row-text">

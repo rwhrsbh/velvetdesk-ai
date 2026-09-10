@@ -87,8 +87,52 @@ fn read_profiles(state: &State<'_, AppState>) -> Result<Vec<Profile>> {
             out.push(profile);
         }
     }
-    out.sort_by_key(|p| p.name.to_lowercase());
+    // Whatever order the operator dragged the rail into, then by name for
+    // everything they have not moved.
+    out.sort_by(|a, b| {
+        a.sort_order
+            .cmp(&b.sort_order)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
     Ok(out)
+}
+
+/// Store the order the operator dragged the profiles into.
+///
+/// The list is the new order, front to back; anything missing from it keeps
+/// its place at the end. Nothing else about the card is touched — this is a
+/// rearrangement, not an edit, so `updated_at` stays where it was.
+#[tauri::command]
+pub fn reorder_profiles(state: State<'_, AppState>, ids: Vec<String>) -> Result<Vec<Profile>> {
+    for (index, id) in ids.iter().enumerate() {
+        let scope = state.paths.scope(id)?;
+        let Ok(mut profile) = scope.read_profile() else {
+            continue;
+        };
+        profile.sort_order = index as i32;
+        scope.write_profile(&profile)?;
+    }
+    storage::rebuild_index(&state.paths)?;
+    read_profiles(&state)
+}
+
+/// The same for the dossiers of one profile.
+#[tauri::command]
+pub fn reorder_men(
+    state: State<'_, AppState>,
+    model_id: String,
+    ids: Vec<String>,
+) -> Result<Vec<Man>> {
+    let scope = state.paths.scope(&model_id)?;
+    for (index, id) in ids.iter().enumerate() {
+        let Ok(mut man) = scope.read_man(id) else {
+            continue;
+        };
+        man.sort_order = index as i32;
+        scope.write_man(&man)?;
+    }
+    storage::rebuild_index(&state.paths)?;
+    scope.read_all_men()
 }
 
 // ---------------------------------------------------------------------------
@@ -1255,52 +1299,6 @@ pub async fn test_provider(app: AppHandle, state: State<'_, AppState>) -> Result
         "attempts": response.attempts,
         "usage": response.usage,
     }))
-}
-
-/// Populate an empty workspace with one demo profile so the UI is never blank.
-#[tauri::command]
-pub fn seed_demo(state: State<'_, AppState>) -> Result<Vec<Profile>> {
-    if !state.paths.list_model_ids()?.is_empty() {
-        return read_profiles(&state);
-    }
-    let scope = state.paths.scope("2428653")?;
-    let mut profile = Profile::new("2428653".into(), "Marina Kazachok".into());
-    profile.age = Some(42);
-    profile.site = "RomanceCompass".into();
-    profile.bio = "Зрелая, тёплая, ценит уважение и ухаживания. Пятеро детей, Оснабрюк.".into();
-    profile.tone_rules = vec![
-        "тёплый, спокойный тон без восторженных восклицаний".into(),
-        "короткие абзацы, живые детали быта".into(),
-    ];
-    profile.banned_phrases = vec!["I hope this message finds you well".into()];
-    profile.languages = vec!["de".into(), "en".into(), "ru".into()];
-    scope.write_profile(&profile)?;
-
-    let mut man = Man::new("2428653".into(), "1219749".into(), "Hartwig Buesing".into());
-    man.age = Some(65);
-    man.location = "Bückeburg, Germany".into();
-    man.stage = "warming".into();
-    man.status = "Осторожен, предложил встречу у Schlosstor".into();
-    man.tags = vec!["Pension".into(), "No Games".into(), "Hikes".into()];
-    man.facts = vec![
-        Fact {
-            id: new_id(),
-            key: "health".into(),
-            value: "эпилепсия, избегает алкоголя".into(),
-            source: "seed".into(),
-            created_at: chrono::Utc::now(),
-        },
-        Fact {
-            id: new_id(),
-            key: "hobby".into(),
-            value: "походы в Швеции".into(),
-            source: "seed".into(),
-            created_at: chrono::Utc::now(),
-        },
-    ];
-    scope.write_man(&man)?;
-    storage::rebuild_index(&state.paths)?;
-    read_profiles(&state)
 }
 
 #[cfg(test)]

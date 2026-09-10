@@ -1360,14 +1360,17 @@ async fn run_auto(
                 }
                 Err(err) => {
                     let message = err.to_string();
+                    // A named error carries its wording as a key, and printing
+                    // it raw showed the operator the key instead of the words.
+                    let (key, params) = err.phrasing();
                     (
                         json!({ "ok": false, "error": message }),
                         RunStep {
                             kind: "tool_error".into(),
                             tool: Some(call.name.clone()),
                             summary: message,
-                            key: String::new(),
-                            params: Value::Null,
+                            key,
+                            params,
                             detail: json!({ "args": call.args }),
                         },
                     )

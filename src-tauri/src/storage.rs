@@ -276,7 +276,14 @@ impl Scope {
                 out.push(man);
             }
         }
-        out.sort_by_key(|m| std::cmp::Reverse(m.updated_at));
+        // The rail is the operator's own arrangement first and the app's
+        // guess second: cards they have never moved sit at 0 and keep falling
+        // in the order they were last touched.
+        out.sort_by(|a, b| {
+            a.sort_order
+                .cmp(&b.sort_order)
+                .then_with(|| b.updated_at.cmp(&a.updated_at))
+        });
         Ok(out)
     }
 
@@ -469,6 +476,30 @@ fn floor_char_boundary(s: &str, mut idx: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
+    /// The rail follows the operator's own arrangement, and falls back to the
+    /// app's guess for cards they have never touched.
+    #[test]
+    fn dragged_cards_keep_their_place() {
+        use super::*;
+        let dir = std::env::temp_dir().join(format!("velvet-order-{}", crate::models::new_id()));
+        let paths = Paths::new(dir).unwrap();
+        let scope = paths.scope("2428653").unwrap();
+
+        for (id, name, order) in [("1", "Anton", 2), ("2", "Boris", 0), ("3", "Cyril", 1)] {
+            let mut man = crate::models::Man::new("2428653".into(), id.into(), name.into());
+            man.sort_order = order;
+            scope.write_man(&man).unwrap();
+        }
+
+        let names: Vec<String> = scope
+            .read_all_men()
+            .unwrap()
+            .into_iter()
+            .map(|man| man.name)
+            .collect();
+        assert_eq!(names, vec!["Boris", "Cyril", "Anton"]);
+    }
+
     /// The letters are copied aside before anything rewrites them.
     #[test]
     fn a_chat_can_be_put_aside_before_it_is_rewritten() {
