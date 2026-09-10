@@ -924,10 +924,10 @@ input[type="range"] {
   line-height: 1.5;
 }
 
-.raw-payload {
-  max-height: 340px;
-  font-size: 11px;
-  line-height: 1.5;
+/* Taken off the leash: the whole payload, however long, inside a dialog that
+   scrolls with it. */
+.raw-payload.expanded {
+  max-height: none;
 }
 
 /* A draft already in the thread says so where its button used to be. */

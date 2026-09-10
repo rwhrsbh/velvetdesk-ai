@@ -1537,18 +1537,28 @@ function bindPanels() {
 
     if (btn.dataset.act === "raw") {
       const meta = (entry.meta ?? {}) as { raw?: string };
+      const raw = meta.raw ?? "";
       const card = openModal(
         `<h3>${t("chat.rawTitle")}</h3>` +
           `<div class="modal-sub">${t("chat.rawSub")}</div>` +
-          `<div class="code-block raw-payload">${escapeHtml(meta.raw ?? "")}</div>` +
+          `<div class="code-block raw-payload">${escapeHtml(raw)}</div>` +
           `<div class="modal-actions">` +
+          `<button class="btn btn-secondary" data-act="expand-raw">${t("chat.rawExpand")}</button>` +
           `<button class="btn btn-secondary" data-act="copy-raw">${t("ctx.copy")}</button>` +
           `<button class="btn btn-primary" data-act="close">${t("common.close")}</button></div>`,
       );
       card.querySelector('[data-act="close"]')?.addEventListener("click", closeModal);
       card.querySelector('[data-act="copy-raw"]')?.addEventListener("click", () => {
-        void copyText(meta.raw ?? "");
+        void copyText(raw);
         toast(t("chat.copied"), "success");
+      });
+      // The payload opens at a readable height; a long chain of turns is worth
+      // seeing whole, so the button takes the ceiling off it.
+      const block = card.querySelector<HTMLElement>(".raw-payload");
+      const expand = card.querySelector<HTMLButtonElement>('[data-act="expand-raw"]');
+      expand?.addEventListener("click", () => {
+        const open = block?.classList.toggle("expanded");
+        expand.textContent = t(open ? "chat.rawCollapse" : "chat.rawExpand");
       });
       return;
     }

@@ -283,8 +283,9 @@ pub struct LlmClient {
 }
 
 /// Payloads are kept for inspection, not for storage: enough to see what came
-/// back, not enough to bloat a chat log.
-pub const RAW_LIMIT: usize = 24_000;
+/// back — a whole chain of turns, thinking included — without a chat log
+/// growing by a megabyte a message.
+pub const RAW_LIMIT: usize = 80_000;
 
 /// Cut a payload to something a person can open in a dialog.
 pub fn cap_raw(text: &str) -> String {
