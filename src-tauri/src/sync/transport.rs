@@ -73,15 +73,13 @@ pub async fn run_round(paths: &Paths, pairing: &Pairing, license: &str) -> Resul
 
     let mut report = Report::default();
     let mine = digest(paths)?;
-    sink.send(WsMessage::Binary(
-        seal(
-            &secret,
-            &Msg::Hello {
-                device_id: pairing.device_id.clone(),
-                digest: mine.clone(),
-            },
-        )?,
-    ))
+    sink.send(WsMessage::Binary(seal(
+        &secret,
+        &Msg::Hello {
+            device_id: pairing.device_id.clone(),
+            digest: mine.clone(),
+        },
+    )?))
     .await
     .map_err(|err| AppError::Http(format!("sync: {err}")))?;
 
@@ -128,33 +126,38 @@ pub async fn run_round(paths: &Paths, pairing: &Pairing, license: &str) -> Resul
                 met_peer = true;
                 let keys = wanted(&mine, &digest);
                 report.pulled = 0;
-                sink.send(WsMessage::Binary(
-                    seal(&secret, &Msg::Want { keys })?,
-                ))
-                .await
-                .map_err(|err| AppError::Http(format!("sync: {err}")))?;
+                sink.send(WsMessage::Binary(seal(&secret, &Msg::Want { keys })?))
+                    .await
+                    .map_err(|err| AppError::Http(format!("sync: {err}")))?;
             }
             Msg::Want { keys } => {
                 met_peer = true;
+                let mut sent: Vec<String> = vec![];
                 for key in keys {
                     let Ok(body) = read_item(paths, &key) else {
                         continue;
                     };
-                    sink.send(WsMessage::Binary(
-                        seal(&secret, &Msg::Item { key, body })?,
-                    ))
+                    sink.send(WsMessage::Binary(seal(
+                        &secret,
+                        &Msg::Item {
+                            key: key.clone(),
+                            body,
+                        },
+                    )?))
                     .await
                     .map_err(|err| AppError::Http(format!("sync: {err}")))?;
+                    sent.push(key);
                     report.pushed += 1;
                 }
-                sink.send(WsMessage::Binary(
-                    seal(
-                        &secret,
-                        &Msg::Done {
-                            report: report.clone(),
-                        },
-                    )?,
-                ))
+                // The peer now holds what we hold for these records. Saying so
+                // is what keeps its next edit an update rather than a conflict.
+                super::note_agreed(paths, &sent)?;
+                sink.send(WsMessage::Binary(seal(
+                    &secret,
+                    &Msg::Done {
+                        report: report.clone(),
+                    },
+                )?))
                 .await
                 .map_err(|err| AppError::Http(format!("sync: {err}")))?;
                 we_are_done = true;

@@ -158,6 +158,43 @@ pub fn read_item(paths: &Paths, key: &str) -> Result<Value> {
     }
 }
 
+/// What this device last agreed on with its peer, by record key.
+///
+/// Without it a conflict cannot be told from an ordinary update. Two devices
+/// both at revision 5: one edits twice and sends revision 7, the other edits
+/// once and sits at 6. Revision 7 beats 6 either way — but whether anything
+/// of ours is being overwritten depends entirely on whether 6 was our own
+/// edit or the copy we were handed last time. This file is what remembers
+/// that.
+pub type Base = BTreeMap<String, Version>;
+
+fn base_file(paths: &Paths) -> std::path::PathBuf {
+    paths.root.join("sync-base.json")
+}
+
+pub fn read_base(paths: &Paths) -> Base {
+    read_json::<Base>(&base_file(paths))
+        .ok()
+        .flatten()
+        .unwrap_or_default()
+}
+
+fn write_base(paths: &Paths, base: &Base) -> Result<()> {
+    write_json(&base_file(paths), base)
+}
+
+/// Mark records as agreed: the peer now holds what we hold.
+pub fn note_agreed(paths: &Paths, keys: &[String]) -> Result<()> {
+    let mut base = read_base(paths);
+    let mine = digest(paths)?;
+    for key in keys {
+        if let Some(version) = mine.get(key) {
+            base.insert(key.clone(), *version);
+        }
+    }
+    write_base(paths, &base)
+}
+
 /// What happened to one record when it arrived.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Applied {
@@ -179,6 +216,7 @@ pub fn apply_item(paths: &Paths, key: &str, body: &Value) -> Result<Applied> {
     let (kind, model_id, man_id) = parse_key(key)
         .ok_or_else(|| AppError::Invalid(format!("sync: cannot read the key {key}")))?;
     let scope = paths.scope(model_id)?;
+    let agreed = read_base(paths).get(key).copied();
 
     match (kind, man_id) {
         ("profile", _) => {
@@ -193,6 +231,7 @@ pub fn apply_item(paths: &Paths, key: &str, body: &Value) -> Result<Applied> {
                     rev: p.rev,
                     updated_at: p.updated_at,
                 }),
+                agreed,
                 theirs,
             );
             if verdict == Applied::Kept {
@@ -204,6 +243,9 @@ pub fn apply_item(paths: &Paths, key: &str, body: &Value) -> Result<Applied> {
                 }
             }
             scope.write_profile_verbatim(&incoming)?;
+            let mut base = read_base(paths);
+            base.insert(key.to_string(), theirs);
+            write_base(paths, &base)?;
             Ok(verdict)
         }
         ("man", Some(man_id)) => {
@@ -223,6 +265,7 @@ pub fn apply_item(paths: &Paths, key: &str, body: &Value) -> Result<Applied> {
                     rev: m.rev,
                     updated_at: m.updated_at,
                 }),
+                agreed,
                 theirs,
             );
             if verdict == Applied::Kept {
@@ -234,6 +277,9 @@ pub fn apply_item(paths: &Paths, key: &str, body: &Value) -> Result<Applied> {
                 }
             }
             scope.write_man_verbatim(&incoming)?;
+            let mut base = read_base(paths);
+            base.insert(key.to_string(), theirs);
+            write_base(paths, &base)?;
             Ok(verdict)
         }
         ("chat", Some(man_id)) => {
@@ -258,6 +304,7 @@ pub fn apply_item(paths: &Paths, key: &str, body: &Value) -> Result<Applied> {
                     rev: c.rev,
                     updated_at: c.updated_at,
                 }),
+                agreed,
                 theirs,
             );
             if verdict == Applied::Kept {
@@ -269,6 +316,9 @@ pub fn apply_item(paths: &Paths, key: &str, body: &Value) -> Result<Applied> {
                 }
             }
             scope.write_chat_verbatim(&incoming)?;
+            let mut base = read_base(paths);
+            base.insert(key.to_string(), theirs);
+            write_base(paths, &base)?;
             Ok(verdict)
         }
         _ => Err(AppError::Invalid(format!(
@@ -279,17 +329,20 @@ pub fn apply_item(paths: &Paths, key: &str, body: &Value) -> Result<Applied> {
 
 /// Whether the incoming record wins, and whether taking it costs anything.
 ///
-/// A record that is simply new here is written without ceremony. One that
-/// replaces an edit made here — a revision of our own, not just the copy we
-/// were given — is a conflict, and the loser is kept.
-fn verdict(local: Option<Version>, incoming: Version) -> Applied {
+/// A record that is new here is written without ceremony. One that replaces
+/// something we edited since the last time the two devices agreed is a
+/// conflict, and the loser is kept. A record that only replaces the copy we
+/// were handed last time is not a conflict at all — it is the update it looks
+/// like.
+fn verdict(local: Option<Version>, agreed: Option<Version>, incoming: Version) -> Applied {
     match local {
         None => Applied::Written,
         Some(ours) if incoming.beats(&ours) => {
-            if ours.rev > 0 {
-                Applied::Conflicted
-            } else {
+            let untouched_since_agreed = agreed.is_some_and(|base| ours.rev <= base.rev);
+            if ours.rev == 0 || untouched_since_agreed {
                 Applied::Written
+            } else {
+                Applied::Conflicted
             }
         }
         Some(_) => Applied::Kept,
@@ -414,46 +467,65 @@ mod tests {
         assert_eq!(keys, ["man:m1/a", "man:m1/c"]);
     }
 
-    /// A record we have never seen arrives quietly. One that overwrites our
-    /// own edit is a conflict, and the interface says so.
+    /// A record we have never seen arrives quietly. One that overwrites an
+    /// edit made here since the two devices last agreed is a conflict.
     #[test]
     fn taking_a_record_over_our_own_edit_is_a_conflict() {
         let incoming = Version {
             rev: 4,
             updated_at: at(100),
         };
-        assert_eq!(verdict(None, incoming), Applied::Written);
+        let ours = |rev| {
+            Some(Version {
+                rev,
+                updated_at: at(50),
+            })
+        };
+
+        assert_eq!(verdict(None, None, incoming), Applied::Written);
         assert_eq!(
-            verdict(
-                Some(Version {
-                    rev: 2,
-                    updated_at: at(50)
-                }),
-                incoming
-            ),
-            Applied::Conflicted
+            verdict(ours(2), None, incoming),
+            Applied::Conflicted,
+            "two edits here, and nothing says the peer ever saw them"
         );
         assert_eq!(
-            verdict(
-                Some(Version {
-                    rev: 0,
-                    updated_at: at(50)
-                }),
-                incoming
-            ),
+            verdict(ours(0), None, incoming),
             Applied::Written,
             "a copy we were given and never touched is not an edit of ours"
         );
-        assert_eq!(
-            verdict(
-                Some(Version {
-                    rev: 9,
-                    updated_at: at(50)
-                }),
-                incoming
-            ),
-            Applied::Kept
-        );
+        assert_eq!(verdict(ours(9), None, incoming), Applied::Kept);
+    }
+
+    /// The case that made this necessary: a record handed to us last round,
+    /// updated on the other device, and arriving again. Ours is at a higher
+    /// revision than zero — but it is their revision, not our edit, so
+    /// nothing of ours is at stake and nothing is stashed.
+    #[test]
+    fn an_update_to_a_copy_we_were_given_is_not_a_conflict() {
+        let agreed = Some(Version {
+            rev: 1,
+            updated_at: at(10),
+        });
+        let ours = Some(Version {
+            rev: 1,
+            updated_at: at(10),
+        });
+        let incoming = Version {
+            rev: 2,
+            updated_at: at(20),
+        };
+        assert_eq!(verdict(ours, agreed, incoming), Applied::Written);
+
+        // One edit of our own on top of it, and it is a conflict again.
+        let edited = Some(Version {
+            rev: 2,
+            updated_at: at(15),
+        });
+        let theirs = Version {
+            rev: 3,
+            updated_at: at(20),
+        };
+        assert_eq!(verdict(edited, agreed, theirs), Applied::Conflicted);
     }
 
     #[test]
