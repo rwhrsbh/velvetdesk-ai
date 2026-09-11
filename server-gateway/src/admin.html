@@ -1,0 +1,648 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VelvetDesk — шлюз</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #0f1115;
+        --card: #171a21;
+        --line: #262b36;
+        --text: #e7e9ee;
+        --dim: #9aa2b1;
+        --accent: #c87ad6;
+        --ok: #6fcf97;
+        --bad: #eb5757;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      header {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        padding: 14px 20px;
+        border-bottom: 1px solid var(--line);
+        position: sticky;
+        top: 0;
+        background: var(--bg);
+        z-index: 5;
+        flex-wrap: wrap;
+      }
+      h1 { font-size: 16px; margin: 0 16px 0 0; font-weight: 600; }
+      nav { display: flex; gap: 4px; flex-wrap: wrap; }
+      nav button {
+        background: none;
+        border: 1px solid transparent;
+        color: var(--dim);
+        padding: 6px 12px;
+        border-radius: 8px;
+        cursor: pointer;
+        font: inherit;
+      }
+      nav button.on { color: var(--text); border-color: var(--line); background: var(--card); }
+      main { padding: 20px; max-width: 1100px; }
+      section { display: none; }
+      section.on { display: block; }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 16px;
+        margin-bottom: 16px;
+      }
+      .card h2 { font-size: 14px; margin: 0 0 12px; font-weight: 600; }
+      .muted { color: var(--dim); }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+      th { color: var(--dim); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+      input, select {
+        background: #0c0e13;
+        border: 1px solid var(--line);
+        color: var(--text);
+        border-radius: 8px;
+        padding: 7px 9px;
+        font: inherit;
+        min-width: 0;
+        width: 100%;
+      }
+      button.act {
+        background: var(--accent);
+        border: 0;
+        color: #16121a;
+        border-radius: 8px;
+        padding: 7px 14px;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button.ghost {
+        background: none;
+        border: 1px solid var(--line);
+        color: var(--text);
+        border-radius: 8px;
+        padding: 6px 10px;
+        font: inherit;
+        cursor: pointer;
+      }
+      button.danger { color: var(--bad); }
+      .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      .grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+      .pill { border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; font-size: 12px; color: var(--dim); }
+      .pill.on { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+      .pill.off { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
+      code { background: #0c0e13; padding: 2px 6px; border-radius: 6px; word-break: break-all; }
+      #toast {
+        position: fixed; right: 16px; bottom: 16px; background: var(--card);
+        border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; display: none;
+      }
+      @media (max-width: 640px) { main { padding: 12px; } td, th { padding: 6px 4px; } }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>VelvetDesk — шлюз</h1>
+      <nav>
+        <button data-tab="upstreams" class="on">Провайдеры</button>
+        <button data-tab="models">Модели</button>
+        <button data-tab="tiers">Тарифы</button>
+        <button data-tab="licenses">Лицензии</button>
+        <button data-tab="stats">Расход</button>
+      </nav>
+      <div class="row" style="margin-left:auto">
+        <input id="token" type="password" placeholder="admin-токен" style="width:220px" />
+        <button class="ghost" id="save-token">Войти</button>
+      </div>
+    </header>
+
+    <main>
+      <section id="upstreams" class="on">
+        <div class="card">
+          <h2>Провайдеры и ключи</h2>
+          <div id="upstream-list" class="muted">Загружаю…</div>
+        </div>
+        <div class="card">
+          <h2>Добавить провайдера</h2>
+          <div class="grid">
+            <input id="up-id" placeholder="id (gemini)" />
+            <input id="up-label" placeholder="название" />
+            <select id="up-kind">
+              <option value="gemini">gemini</option>
+              <option value="openai_compatible">openai_compatible</option>
+            </select>
+            <input id="up-url" placeholder="https://…" />
+            <input id="up-version" placeholder="v1beta" />
+            <select id="up-dialect">
+              <option value="auto">auto</option>
+              <option value="openai">openai</option>
+              <option value="openrouter">openrouter</option>
+              <option value="qwen">qwen</option>
+              <option value="nvidia">nvidia</option>
+            </select>
+          </div>
+          <div class="row" style="margin-top:10px">
+            <button class="act" id="up-add">Сохранить</button>
+            <span class="muted">Существующий id перезаписывается.</span>
+          </div>
+        </div>
+      </section>
+
+      <section id="models">
+        <div class="card">
+          <h2>Модели</h2>
+          <p class="muted">
+            Порядок — это порядок падения: запрос идёт с той, что назвал клиент, и дальше
+            вниз по списку. Цены за миллион токенов в долларах; пустая цена кеша означает,
+            что кеш считается по полной.
+          </p>
+          <div id="model-list" class="muted">Загружаю…</div>
+        </div>
+        <div class="card">
+          <h2>Добавить модель</h2>
+          <div class="grid">
+            <input id="m-name" placeholder="имя для клиента" />
+            <select id="m-upstream"></select>
+            <input id="m-upstream-name" placeholder="имя у провайдера" />
+            <input id="m-in" placeholder="цена входа" inputmode="decimal" />
+            <input id="m-cached" placeholder="цена кеша" inputmode="decimal" />
+            <input id="m-out" placeholder="цена выхода" inputmode="decimal" />
+            <input id="m-ctx" placeholder="контекст, токенов" inputmode="numeric" />
+            <input id="m-pos" placeholder="порядок" inputmode="numeric" />
+          </div>
+          <div class="row" style="margin-top:10px"><button class="act" id="m-add">Сохранить</button></div>
+        </div>
+      </section>
+
+      <section id="tiers">
+        <div class="card">
+          <h2>Тарифы</h2>
+          <p class="muted">Кредит — это себестоимость: <span id="credit-usd"></span> за кредит.</p>
+          <div id="tier-list" class="muted">Загружаю…</div>
+        </div>
+        <div class="card">
+          <h2>Добавить тариф</h2>
+          <div class="grid">
+            <input id="t-name" placeholder="business" />
+            <input id="t-5h" placeholder="кредитов за 5 ч" inputmode="decimal" />
+            <input id="t-week" placeholder="кредитов за неделю" inputmode="decimal" />
+            <input id="t-peers" placeholder="устройств" inputmode="numeric" />
+          </div>
+          <div class="row" style="margin-top:10px"><button class="act" id="t-add">Сохранить</button></div>
+        </div>
+      </section>
+
+      <section id="licenses">
+        <div class="card">
+          <h2>Выдать лицензию</h2>
+          <div class="grid">
+            <input id="l-id" placeholder="VD-PRO-0001" />
+            <input id="l-tier" value="business" placeholder="business" />
+            <input id="l-days" placeholder="дней (0 — без срока)" inputmode="numeric" />
+            <input id="l-peers" placeholder="устройств (0 — из тарифа)" inputmode="numeric" />
+            <input id="l-note" placeholder="кому" />
+          </div>
+          <div class="row" style="margin-top:10px"><button class="act" id="l-add">Выдать</button></div>
+          <div id="l-out" style="margin-top:12px"></div>
+        </div>
+        <div class="card">
+          <h2>Выданные</h2>
+          <div id="license-list" class="muted">Загружаю…</div>
+        </div>
+      </section>
+
+      <section id="stats">
+        <div class="card">
+          <h2>Расход</h2>
+          <div class="row">
+            <select id="s-hours" style="width:160px">
+              <option value="24">сутки</option>
+              <option value="168">неделя</option>
+              <option value="720">месяц</option>
+            </select>
+            <button class="ghost" id="s-load">Обновить</button>
+          </div>
+          <div id="stats-out" style="margin-top:12px" class="muted">—</div>
+        </div>
+      </section>
+    </main>
+
+    <div id="toast"></div>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      let token = sessionStorage.getItem("vd-admin") || "";
+      $("token").value = token;
+
+      function toast(text, bad) {
+        const el = $("toast");
+        el.textContent = text;
+        el.style.display = "block";
+        el.style.borderColor = bad ? "var(--bad)" : "var(--line)";
+        clearTimeout(el._t);
+        el._t = setTimeout(() => (el.style.display = "none"), 3200);
+      }
+
+      async function call(path, options = {}) {
+        const response = await fetch(path, {
+          ...options,
+          headers: {
+            "content-type": "application/json",
+            "x-vd-admin": token,
+            ...(options.headers || {}),
+          },
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body?.error?.message || response.statusText);
+        return body;
+      }
+
+      const num = (value) => {
+        const parsed = Number(String(value).replace(",", "."));
+        return Number.isFinite(parsed) ? parsed : 0;
+      };
+      const maybe = (value) => (String(value).trim() === "" ? null : num(value));
+      const esc = (text) =>
+        String(text ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+      // ------------------------------------------------------------- tabs
+      document.querySelectorAll("nav button").forEach((button) => {
+        button.addEventListener("click", () => {
+          document.querySelectorAll("nav button").forEach((b) => b.classList.remove("on"));
+          document.querySelectorAll("section").forEach((s) => s.classList.remove("on"));
+          button.classList.add("on");
+          $(button.dataset.tab).classList.add("on");
+          load();
+        });
+      });
+
+      $("save-token").addEventListener("click", () => {
+        token = $("token").value.trim();
+        sessionStorage.setItem("vd-admin", token);
+        load();
+      });
+
+      // -------------------------------------------------------- upstreams
+      async function drawUpstreams() {
+        const data = await call("/admin/overview");
+        $("credit-usd").textContent = "$" + data.credit_usd;
+        const rows = await Promise.all(
+          data.upstreams.map(async (up) => {
+            const keys = await call(`/admin/upstreams/${encodeURIComponent(up.id)}/keys`);
+            const keyRows = keys
+              .map(
+                (key) => `<tr><td><code>${esc(key.masked)}</code></td>
+                  <td class="muted">${new Date(key.added_at * 1000).toLocaleDateString()}</td>
+                  <td style="text-align:right"><button class="ghost danger" data-del-key="${key.id}">удалить</button></td></tr>`,
+              )
+              .join("");
+            return `<div class="card" style="background:#0c0e13">
+              <div class="row">
+                <strong>${esc(up.label || up.id)}</strong>
+                <span class="pill">${esc(up.kind)}</span>
+                <span class="pill ${up.enabled ? "on" : "off"}">${up.enabled ? "включён" : "выключен"}</span>
+                <span class="muted">${esc(up.base_url)}</span>
+                <span style="margin-left:auto" class="row">
+                  <button class="ghost" data-toggle-up="${esc(up.id)}">${up.enabled ? "выключить" : "включить"}</button>
+                  <button class="ghost danger" data-del-up="${esc(up.id)}">удалить</button>
+                </span>
+              </div>
+              <table style="margin-top:8px"><thead><tr><th>ключ</th><th>добавлен</th><th></th></tr></thead>
+                <tbody>${keyRows || '<tr><td colspan="3" class="muted">ключей нет</td></tr>'}</tbody></table>
+              <div class="row" style="margin-top:8px">
+                <input placeholder="вставьте ключ или несколько через запятую" data-key-for="${esc(up.id)}" />
+                <button class="act" data-add-key="${esc(up.id)}">Добавить</button>
+              </div>
+            </div>`;
+          }),
+        );
+        $("upstream-list").innerHTML = rows.join("") || '<span class="muted">пока пусто</span>';
+
+        const select = $("m-upstream");
+        select.innerHTML = data.upstreams
+          .map((up) => `<option value="${esc(up.id)}">${esc(up.label || up.id)}</option>`)
+          .join("");
+
+        document.querySelectorAll("[data-add-key]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            const id = button.dataset.addKey;
+            const input = document.querySelector(`[data-key-for="${CSS.escape(id)}"]`);
+            if (!input.value.trim()) return;
+            try {
+              const result = await call(`/admin/upstreams/${encodeURIComponent(id)}/keys`, {
+                method: "POST",
+                body: JSON.stringify({ key: input.value }),
+              });
+              input.value = "";
+              toast(`Добавлено ключей: ${result.added}`);
+              drawUpstreams();
+            } catch (error) {
+              toast(error.message, true);
+            }
+          });
+        });
+
+        document.querySelectorAll("[data-del-key]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            try {
+              await call(`/admin/keys/${button.dataset.delKey}`, { method: "DELETE" });
+              drawUpstreams();
+            } catch (error) {
+              toast(error.message, true);
+            }
+          });
+        });
+
+        document.querySelectorAll("[data-toggle-up]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            const up = data.upstreams.find((item) => item.id === button.dataset.toggleUp);
+            try {
+              await call("/admin/upstreams", {
+                method: "POST",
+                body: JSON.stringify({ ...up, enabled: !up.enabled }),
+              });
+              drawUpstreams();
+            } catch (error) {
+              toast(error.message, true);
+            }
+          });
+        });
+
+        document.querySelectorAll("[data-del-up]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            if (!confirm(`Удалить ${button.dataset.delUp} вместе с его ключами и моделями?`)) return;
+            try {
+              await call(`/admin/upstreams/${encodeURIComponent(button.dataset.delUp)}`, { method: "DELETE" });
+              drawUpstreams();
+            } catch (error) {
+              toast(error.message, true);
+            }
+          });
+        });
+      }
+
+      $("up-add").addEventListener("click", async () => {
+        try {
+          await call("/admin/upstreams", {
+            method: "POST",
+            body: JSON.stringify({
+              id: $("up-id").value.trim(),
+              label: $("up-label").value.trim(),
+              kind: $("up-kind").value,
+              base_url: $("up-url").value.trim(),
+              api_version: $("up-version").value.trim() || "v1beta",
+              reasoning_dialect: $("up-dialect").value,
+              extra_headers: [],
+              enabled: true,
+              position: 0,
+            }),
+          });
+          toast("Сохранено");
+          drawUpstreams();
+        } catch (error) {
+          toast(error.message, true);
+        }
+      });
+
+      // ----------------------------------------------------------- models
+      async function drawModels() {
+        const models = await call("/admin/models");
+        $("model-list").innerHTML = `<table><thead><tr>
+            <th>модель</th><th>провайдер</th><th>имя у провайдера</th>
+            <th>вход</th><th>кеш</th><th>выход</th><th>порядок</th><th></th></tr></thead><tbody>
+          ${models
+            .map(
+              (model) => `<tr>
+                <td><code>${esc(model.name)}</code></td>
+                <td class="muted">${esc(model.upstream_id)}</td>
+                <td class="muted">${esc(model.upstream_name || model.name)}</td>
+                <td>${model.price_in}</td>
+                <td>${model.price_cached ?? "—"}</td>
+                <td>${model.price_out}</td>
+                <td>${model.position}</td>
+                <td style="text-align:right" class="row" style="justify-content:flex-end">
+                  <button class="ghost" data-toggle-model="${esc(model.name)}">${model.enabled ? "выключить" : "включить"}</button>
+                  <button class="ghost danger" data-del-model="${esc(model.name)}">удалить</button>
+                </td></tr>`,
+            )
+            .join("")}
+        </tbody></table>`;
+
+        document.querySelectorAll("[data-toggle-model]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            const model = models.find((item) => item.name === button.dataset.toggleModel);
+            try {
+              await call("/admin/models", {
+                method: "POST",
+                body: JSON.stringify({ ...model, enabled: !model.enabled }),
+              });
+              drawModels();
+            } catch (error) {
+              toast(error.message, true);
+            }
+          });
+        });
+
+        document.querySelectorAll("[data-del-model]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            try {
+              await call(`/admin/models/${encodeURIComponent(button.dataset.delModel)}`, { method: "DELETE" });
+              drawModels();
+            } catch (error) {
+              toast(error.message, true);
+            }
+          });
+        });
+      }
+
+      $("m-add").addEventListener("click", async () => {
+        try {
+          await call("/admin/models", {
+            method: "POST",
+            body: JSON.stringify({
+              name: $("m-name").value.trim(),
+              upstream_id: $("m-upstream").value,
+              upstream_name: $("m-upstream-name").value.trim(),
+              price_in: num($("m-in").value),
+              price_cached: maybe($("m-cached").value),
+              price_out: num($("m-out").value),
+              context_tokens: maybe($("m-ctx").value),
+              enabled: true,
+              position: num($("m-pos").value),
+            }),
+          });
+          toast("Сохранено");
+          drawModels();
+        } catch (error) {
+          toast(error.message, true);
+        }
+      });
+
+      // ------------------------------------------------------------ tiers
+      async function drawTiers() {
+        const tiers = await call("/admin/tiers");
+        const names = Object.keys(tiers).sort();
+        $("tier-list").innerHTML = `<table><thead><tr>
+            <th>тариф</th><th>за 5 часов</th><th>за неделю</th><th>устройств</th><th></th></tr></thead><tbody>
+          ${names
+            .map(
+              (name) => `<tr><td><code>${esc(name)}</code></td>
+                <td>${tiers[name].credits_5h}</td>
+                <td>${tiers[name].credits_week}</td>
+                <td>${tiers[name].max_peers}</td>
+                <td style="text-align:right"><button class="ghost danger" data-del-tier="${esc(name)}">удалить</button></td></tr>`,
+            )
+            .join("")}
+        </tbody></table>`;
+        document.querySelectorAll("[data-del-tier]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            try {
+              await call(`/admin/tiers/${encodeURIComponent(button.dataset.delTier)}`, { method: "DELETE" });
+              drawTiers();
+            } catch (error) {
+              toast(error.message, true);
+            }
+          });
+        });
+      }
+
+      $("t-add").addEventListener("click", async () => {
+        try {
+          await call("/admin/tiers", {
+            method: "POST",
+            body: JSON.stringify({
+              name: $("t-name").value.trim(),
+              credits_5h: num($("t-5h").value),
+              credits_week: num($("t-week").value),
+              max_peers: num($("t-peers").value) || 2,
+            }),
+          });
+          toast("Сохранено");
+          drawTiers();
+        } catch (error) {
+          toast(error.message, true);
+        }
+      });
+
+      // --------------------------------------------------------- licences
+      async function drawLicenses() {
+        const rows = await call("/admin/licenses");
+        $("license-list").innerHTML = `<table><thead><tr>
+            <th>лицензия</th><th>тариф</th><th>до</th><th>устройств</th><th>кому</th><th></th></tr></thead><tbody>
+          ${rows
+            .map(
+              (row) => `<tr>
+                <td><code>${esc(row.license_id)}</code> ${row.revoked ? '<span class="pill off">отозвана</span>' : ""}</td>
+                <td>${esc(row.tier)}</td>
+                <td class="muted">${row.expires_at ? new Date(row.expires_at * 1000).toLocaleDateString() : "без срока"}</td>
+                <td>${row.max_peers}</td>
+                <td class="muted">${esc(row.note)}</td>
+                <td style="text-align:right">
+                  <button class="ghost ${row.revoked ? "" : "danger"}" data-revoke="${esc(row.license_id)}" data-on="${row.revoked}">
+                    ${row.revoked ? "вернуть" : "отозвать"}
+                  </button>
+                </td></tr>`,
+            )
+            .join("")}
+        </tbody></table>`;
+
+        document.querySelectorAll("[data-revoke]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            const path = button.dataset.on === "true" ? "/admin/unrevoke" : "/admin/revoke";
+            try {
+              await call(path, {
+                method: "POST",
+                body: JSON.stringify({ license_id: button.dataset.revoke, reason: "admin" }),
+              });
+              drawLicenses();
+            } catch (error) {
+              toast(error.message, true);
+            }
+          });
+        });
+      }
+
+      $("l-add").addEventListener("click", async () => {
+        try {
+          const result = await call("/admin/licenses", {
+            method: "POST",
+            body: JSON.stringify({
+              license_id: $("l-id").value.trim(),
+              tier: $("l-tier").value.trim(),
+              days: num($("l-days").value),
+              max_peers: num($("l-peers").value),
+              note: $("l-note").value.trim(),
+            }),
+          });
+          // Shown once: the gateway does not keep the licence, only the fact
+          // that it was issued.
+          $("l-out").innerHTML = `<div class="card" style="background:#0c0e13">
+            <div class="muted">Отдайте это оператору — второй раз оно не покажется:</div>
+            <div style="margin-top:6px"><code>${esc(result.license)}</code></div>
+            <div class="row" style="margin-top:8px"><button class="ghost" id="l-copy">Скопировать</button></div>
+          </div>`;
+          $("l-copy").addEventListener("click", () => {
+            navigator.clipboard.writeText(result.license).then(() => toast("В буфере"));
+          });
+          drawLicenses();
+        } catch (error) {
+          toast(error.message, true);
+        }
+      });
+
+      // ------------------------------------------------------------ stats
+      async function drawStats() {
+        const data = await call(`/admin/stats?hours=${$("s-hours").value}`);
+        const money = (credits) => "$" + (credits * data.credit_usd).toFixed(2);
+        $("stats-out").innerHTML = `
+          <div class="row" style="gap:20px;margin-bottom:12px">
+            <div><div class="muted">попаданий кеша</div><strong>${(data.cache_share * 100).toFixed(1)}%</strong></div>
+            <div><div class="muted">окно</div><strong>${data.hours} ч</strong></div>
+          </div>
+          <table><thead><tr><th>лицензия</th><th>кредитов</th><th>себестоимость</th><th>запросов</th></tr></thead><tbody>
+            ${data.by_license
+              .map(
+                (row) => `<tr><td><code>${esc(row.license_id)}</code></td>
+                  <td>${row.credits.toFixed(1)}</td><td>${money(row.credits)}</td><td>${row.calls}</td></tr>`,
+              )
+              .join("") || '<tr><td colspan="4" class="muted">тихо</td></tr>'}
+          </tbody></table>
+          <table style="margin-top:16px"><thead><tr><th>модель</th><th>кредитов</th><th>себестоимость</th><th>кеш</th></tr></thead><tbody>
+            ${data.by_model
+              .map(
+                (row) => `<tr><td><code>${esc(row.model)}</code></td>
+                  <td>${row.credits.toFixed(1)}</td><td>${money(row.credits)}</td>
+                  <td>${(row.cache_share * 100).toFixed(1)}%</td></tr>`,
+              )
+              .join("") || '<tr><td colspan="4" class="muted">тихо</td></tr>'}
+          </tbody></table>`;
+      }
+      $("s-load").addEventListener("click", () => drawStats().catch((error) => toast(error.message, true)));
+
+      // ------------------------------------------------------------- load
+      async function load() {
+        if (!token) {
+          toast("Введите admin-токен", true);
+          return;
+        }
+        const tab = document.querySelector("nav button.on").dataset.tab;
+        try {
+          if (tab === "upstreams") await drawUpstreams();
+          if (tab === "models") await drawModels();
+          if (tab === "tiers") await drawTiers();
+          if (tab === "licenses") await drawLicenses();
+          if (tab === "stats") await drawStats();
+        } catch (error) {
+          toast(error.message, true);
+        }
+      }
+
+      load();
+    </script>
+  </body>
+</html>

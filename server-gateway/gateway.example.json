@@ -6,7 +6,7 @@
   "tiers": {
     "solo": { "credits_5h": 300, "credits_week": 4000, "max_peers": 1 },
     "pro": { "credits_5h": 1200, "credits_week": 20000, "max_peers": 2 },
-    "agency": { "credits_5h": 6000, "credits_week": 120000, "max_peers": 10 }
+    "business": { "credits_5h": 6000, "credits_week": 120000, "max_peers": 10 }
   },
   "upstreams": [
     {
@@ -40,7 +40,8 @@
       "api_version": "v1beta",
       "keys_env": ["GEMINI_KEYS"],
       "models": [
-        { "name": "gemini-2.5-flash", "price_in": 0.3, "price_out": 2.5 }
+        { "name": "gemini-2.5-flash", "price_in": 0.3, "price_out": 2.5 },
+        { "name": "gemini-2.0-flash", "price_in": 0.1, "price_out": 0.4 }
       ]
     }
   ]

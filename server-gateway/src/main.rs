@@ -4,9 +4,11 @@
 //! `mint` writes one. Both of those touch the private half, so both are meant
 //! to be run on the operator's own box and nowhere else.
 
+mod admin;
 mod config;
 mod db;
 mod quota;
+mod registry;
 mod routes;
 mod state;
 mod translate;
@@ -69,7 +71,7 @@ async fn serve() -> std::io::Result<()> {
         log::warn!("no license_public_key is configured: every request will be refused");
     }
 
-    let state = AppState::new(cfg, db);
+    let state = AppState::new(cfg, db).map_err(std::io::Error::other)?;
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     log::info!("listening on {bind}");
     axum::serve(listener, routes::router(state)).await

@@ -17,7 +17,7 @@ use tokio::sync::broadcast;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::config::Tier;
-use crate::quota::{allowance, charge, Allowance};
+use crate::quota::{allowance, charge, Allowance, Bill};
 use crate::state::AppState;
 use crate::translate;
 use vd_license::{verify, License, LicenseError};
@@ -34,8 +34,7 @@ pub fn router(state: AppState) -> Router {
         // Two paired devices meeting. The gateway moves sealed bytes between
         // them and reads none of it.
         .route("/sync/ws", get(sync_ws))
-        .route("/admin/revoke", post(revoke))
-        .route("/admin/stats", get(stats))
+        .merge(crate::admin::router())
         .with_state(state)
 }
 
@@ -139,7 +138,7 @@ fn authenticate(
     if state.db.is_revoked(&license.license_id)? {
         return Err(ApiError::Forbidden(LicenseError::Revoked.to_string()));
     }
-    let tier = state.cfg.tier(&license.tier);
+    let tier = state.registry.read().tier(&license.tier);
     Ok(Caller { license, tier })
 }
 
@@ -160,6 +159,48 @@ fn credit_headers(state: &Allowance) -> HeaderMap {
         headers.insert(HeaderName::from_static("x-vd-window-reset"), value);
     }
     headers
+}
+
+/// Bill one answer, looking the price up in the registry as it stands now.
+fn charge_one(
+    state: &AppState,
+    license_id: &str,
+    tier: Tier,
+    model: &str,
+    response: &vd_llm::ChatResponse,
+) -> rusqlite::Result<Allowance> {
+    let priced = state
+        .registry
+        .read()
+        .find_model(model)
+        .map(|(_, row)| row.clone());
+    charge(
+        &state.db,
+        &Bill {
+            license_id,
+            tier,
+            model,
+            priced: priced.as_ref(),
+            usage: &response.usage,
+            credit_usd: state.cfg.credit_usd,
+            now: now(),
+        },
+    )
+}
+
+fn charge_for(
+    state: &AppState,
+    caller: &Caller,
+    model: &str,
+    response: &vd_llm::ChatResponse,
+) -> rusqlite::Result<Allowance> {
+    charge_one(
+        state,
+        &caller.license.license_id,
+        caller.tier,
+        model,
+        response,
+    )
 }
 
 // ------------------------------------------------------------------- routes
@@ -225,15 +266,7 @@ async fn chat_completions(
             .call(&wanted, &chat, &|_| {})
             .await
             .map_err(|err| ApiError::Upstream(err.to_string()))?;
-        let after = charge(
-            &state.db,
-            &state.cfg,
-            &caller.license.license_id,
-            caller.tier,
-            &model,
-            &response.usage,
-            now(),
-        )?;
+        let after = charge_for(&state, &caller, &model, &response)?;
         let body = translate::oai_completion(&id, created, &model, &response);
         return Ok((credit_headers(&after), Json(body)).into_response());
     }
@@ -262,16 +295,7 @@ async fn chat_completions(
 
         match task.call(&wanted, &chat, &on_event).await {
             Ok((model, response)) => {
-                let after = charge(
-                    &task.db,
-                    &task.cfg,
-                    &license_id,
-                    tier,
-                    &model,
-                    &response.usage,
-                    now(),
-                );
-                if let Err(err) = &after {
+                if let Err(err) = charge_one(&task, &license_id, tier, &model, &response) {
                     log::error!("could not record usage: {err}");
                 }
                 let last = translate::oai_final_chunk(&id, created, &model, &response);
@@ -317,15 +341,7 @@ async fn gemini_generate(
             .call(&wanted, &chat, &|_| {})
             .await
             .map_err(|err| ApiError::Upstream(err.to_string()))?;
-        let after = charge(
-            &state.db,
-            &state.cfg,
-            &caller.license.license_id,
-            caller.tier,
-            &model,
-            &response.usage,
-            now(),
-        )?;
+        let after = charge_for(&state, &caller, &model, &response)?;
         let body = translate::gemini_response(&model, &response);
         return Ok((credit_headers(&after), Json(body)).into_response());
     }
@@ -348,15 +364,7 @@ async fn gemini_generate(
 
         match task.call(&wanted, &chat, &on_event).await {
             Ok((model, response)) => {
-                if let Err(err) = charge(
-                    &task.db,
-                    &task.cfg,
-                    &license_id,
-                    tier,
-                    &model,
-                    &response.usage,
-                    now(),
-                ) {
+                if let Err(err) = charge_one(&task, &license_id, tier, &model, &response) {
                     log::error!("could not record usage: {err}");
                 }
                 // The closing message carries what the answer cost, which is
@@ -462,62 +470,6 @@ async fn relay(socket: WebSocket, state: AppState, room: String) {
 }
 
 static NEXT_PEER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-
-// -------------------------------------------------------------------- admin
-
-fn admin(state: &AppState, headers: &HeaderMap) -> Result<(), ApiError> {
-    if state.admin_token.is_empty() {
-        return Err(ApiError::Forbidden(
-            "the admin endpoints are closed: VD_ADMIN_TOKEN is not set".into(),
-        ));
-    }
-    let sent = headers
-        .get("x-vd-admin")
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or_default();
-    if sent != state.admin_token {
-        return Err(ApiError::Unauthorized("admin token does not match".into()));
-    }
-    Ok(())
-}
-
-async fn revoke(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(body): Json<Value>,
-) -> Result<Json<Value>, ApiError> {
-    admin(&state, &headers)?;
-    let license_id = body
-        .get("license_id")
-        .and_then(Value::as_str)
-        .ok_or_else(|| ApiError::BadRequest("license_id is required".into()))?;
-    let reason = body
-        .get("reason")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    state.db.revoke(license_id, reason, now())?;
-    Ok(Json(json!({ "revoked": license_id })))
-}
-
-async fn stats(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Query(query): Query<HashMap<String, String>>,
-) -> Result<Json<Value>, ApiError> {
-    admin(&state, &headers)?;
-    let hours: i64 = query
-        .get("hours")
-        .and_then(|h| h.parse().ok())
-        .unwrap_or(24)
-        .clamp(1, 24 * 90);
-    let since = now() - hours * 3600;
-    Ok(Json(json!({
-        "hours": hours,
-        // The number that says whether the prompt is built stable-first, or
-        // whether the cache is being paid for and thrown away.
-        "cache_share": state.db.cache_share_since(since)?,
-    })))
-}
 
 #[cfg(test)]
 mod tests {

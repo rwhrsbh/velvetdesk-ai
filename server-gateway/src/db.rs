@@ -6,12 +6,17 @@
 //! the same question — what has this licence spent in the last five hours,
 //! and in the last week.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
 use rusqlite::{Connection, OptionalExtension};
 
+use vd_llm::provider::ProviderKind;
 use vd_llm::Usage;
+
+use crate::config::Tier;
+use crate::registry::{KeyRow, LicenseRow, ModelRow, UpstreamRow};
 
 #[derive(Clone)]
 pub struct Db {
@@ -65,6 +70,57 @@ impl Db {
                  license_id TEXT PRIMARY KEY,
                  at INTEGER NOT NULL,
                  reason TEXT NOT NULL DEFAULT ''
+             );
+
+             -- What the gateway may spend money on. These live in the
+             -- database rather than the config file so the admin page can
+             -- change them without a deploy: a key that stopped working at
+             -- two in the morning is replaced from a browser.
+             CREATE TABLE IF NOT EXISTS upstream (
+                 id TEXT PRIMARY KEY,
+                 label TEXT NOT NULL DEFAULT '',
+                 kind TEXT NOT NULL,
+                 base_url TEXT NOT NULL,
+                 api_version TEXT NOT NULL DEFAULT 'v1beta',
+                 reasoning_dialect TEXT NOT NULL DEFAULT 'auto',
+                 extra_headers TEXT NOT NULL DEFAULT '[]',
+                 enabled INTEGER NOT NULL DEFAULT 1,
+                 position INTEGER NOT NULL DEFAULT 0
+             );
+             CREATE TABLE IF NOT EXISTS upstream_key (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 upstream_id TEXT NOT NULL,
+                 api_key TEXT NOT NULL,
+                 added_at INTEGER NOT NULL,
+                 UNIQUE(upstream_id, api_key)
+             );
+             CREATE TABLE IF NOT EXISTS model (
+                 name TEXT PRIMARY KEY,
+                 upstream_id TEXT NOT NULL,
+                 upstream_name TEXT NOT NULL DEFAULT '',
+                 price_in REAL NOT NULL DEFAULT 0,
+                 price_cached REAL,
+                 price_out REAL NOT NULL DEFAULT 0,
+                 context_tokens INTEGER,
+                 enabled INTEGER NOT NULL DEFAULT 1,
+                 position INTEGER NOT NULL DEFAULT 0
+             );
+             CREATE TABLE IF NOT EXISTS tier (
+                 name TEXT PRIMARY KEY,
+                 credits_5h REAL NOT NULL,
+                 credits_week REAL NOT NULL,
+                 max_peers INTEGER NOT NULL DEFAULT 2
+             );
+             -- Licences the gateway has issued. The licence itself proves what
+             -- it says; this is the ledger, so an operator can be found and
+             -- their key revoked without asking them for it.
+             CREATE TABLE IF NOT EXISTS license (
+                 license_id TEXT PRIMARY KEY,
+                 tier TEXT NOT NULL,
+                 expires_at INTEGER NOT NULL DEFAULT 0,
+                 max_peers INTEGER NOT NULL DEFAULT 2,
+                 issued_at INTEGER NOT NULL,
+                 note TEXT NOT NULL DEFAULT ''
              );",
         )
     }
@@ -143,6 +199,325 @@ impl Db {
             rusqlite::params![license_id, now, reason],
         )?;
         Ok(())
+    }
+    // ------------------------------------------------------------ upstreams
+
+    pub fn list_upstreams(&self) -> rusqlite::Result<Vec<UpstreamRow>> {
+        let conn = self.conn.lock();
+        let mut statement = conn.prepare(
+            "SELECT id, label, kind, base_url, api_version, reasoning_dialect,
+                    extra_headers, enabled, position
+             FROM upstream ORDER BY position, id",
+        )?;
+        let rows = statement
+            .query_map([], |row| {
+                let kind: String = row.get(2)?;
+                let headers: String = row.get(6)?;
+                Ok(UpstreamRow {
+                    id: row.get(0)?,
+                    label: row.get(1)?,
+                    kind: if kind == "gemini" {
+                        ProviderKind::Gemini
+                    } else {
+                        ProviderKind::OpenaiCompatible
+                    },
+                    base_url: row.get(3)?,
+                    api_version: row.get(4)?,
+                    reasoning_dialect: row.get(5)?,
+                    extra_headers: serde_json::from_str(&headers).unwrap_or_default(),
+                    enabled: row.get::<_, i64>(7)? != 0,
+                    position: row.get(8)?,
+                    key_count: 0,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    pub fn save_upstream(&self, upstream: &UpstreamRow) -> rusqlite::Result<()> {
+        let kind = match upstream.kind {
+            ProviderKind::Gemini => "gemini",
+            ProviderKind::OpenaiCompatible => "openai_compatible",
+        };
+        self.conn.lock().execute(
+            "INSERT INTO upstream (id, label, kind, base_url, api_version, reasoning_dialect,
+                                   extra_headers, enabled, position)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             ON CONFLICT(id) DO UPDATE SET
+                 label = excluded.label,
+                 kind = excluded.kind,
+                 base_url = excluded.base_url,
+                 api_version = excluded.api_version,
+                 reasoning_dialect = excluded.reasoning_dialect,
+                 extra_headers = excluded.extra_headers,
+                 enabled = excluded.enabled,
+                 position = excluded.position",
+            rusqlite::params![
+                upstream.id,
+                upstream.label,
+                kind,
+                upstream.base_url,
+                upstream.api_version,
+                upstream.reasoning_dialect,
+                serde_json::to_string(&upstream.extra_headers).unwrap_or_else(|_| "[]".into()),
+                upstream.enabled as i64,
+                upstream.position,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Remove an upstream, its keys and its models together: a model pointing
+    /// at an upstream that no longer exists is a request that fails at the
+    /// worst possible moment.
+    pub fn delete_upstream(&self, id: &str) -> rusqlite::Result<()> {
+        let conn = self.conn.lock();
+        conn.execute("DELETE FROM model WHERE upstream_id = ?1", [id])?;
+        conn.execute("DELETE FROM upstream_key WHERE upstream_id = ?1", [id])?;
+        conn.execute("DELETE FROM upstream WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    // ----------------------------------------------------------------- keys
+
+    /// The keys themselves, for the pool. They go no further than this.
+    pub fn upstream_keys(&self, upstream_id: &str) -> rusqlite::Result<Vec<String>> {
+        let conn = self.conn.lock();
+        let mut statement =
+            conn.prepare("SELECT api_key FROM upstream_key WHERE upstream_id = ?1 ORDER BY id")?;
+        let rows = statement
+            .query_map([upstream_id], |row| row.get(0))?
+            .collect::<rusqlite::Result<Vec<String>>>()?;
+        Ok(rows)
+    }
+
+    /// The keys as the admin page sees them: masked, with the id needed to
+    /// delete one.
+    pub fn list_keys(&self, upstream_id: &str) -> rusqlite::Result<Vec<KeyRow>> {
+        let conn = self.conn.lock();
+        let mut statement = conn.prepare(
+            "SELECT id, api_key, added_at FROM upstream_key WHERE upstream_id = ?1 ORDER BY id",
+        )?;
+        let rows = statement
+            .query_map([upstream_id], |row| {
+                let key: String = row.get(1)?;
+                Ok(KeyRow {
+                    id: row.get(0)?,
+                    masked: vd_llm::mask_key(&key),
+                    added_at: row.get(2)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Add a key. The same key twice is not an error and not a second key.
+    pub fn add_key(&self, upstream_id: &str, key: &str, now: i64) -> rusqlite::Result<()> {
+        self.conn.lock().execute(
+            "INSERT OR IGNORE INTO upstream_key (upstream_id, api_key, added_at)
+             VALUES (?1, ?2, ?3)",
+            rusqlite::params![upstream_id, key.trim(), now],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_key(&self, id: i64) -> rusqlite::Result<()> {
+        self.conn
+            .lock()
+            .execute("DELETE FROM upstream_key WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    // --------------------------------------------------------------- models
+
+    pub fn list_models(&self) -> rusqlite::Result<Vec<ModelRow>> {
+        let conn = self.conn.lock();
+        let mut statement = conn.prepare(
+            "SELECT name, upstream_id, upstream_name, price_in, price_cached, price_out,
+                    context_tokens, enabled, position
+             FROM model ORDER BY position, name",
+        )?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok(ModelRow {
+                    name: row.get(0)?,
+                    upstream_id: row.get(1)?,
+                    upstream_name: row.get(2)?,
+                    price_in: row.get(3)?,
+                    price_cached: row.get(4)?,
+                    price_out: row.get(5)?,
+                    context_tokens: row.get::<_, Option<i64>>(6)?.map(|n| n as u32),
+                    enabled: row.get::<_, i64>(7)? != 0,
+                    position: row.get(8)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    pub fn save_model(&self, model: &ModelRow) -> rusqlite::Result<()> {
+        self.conn.lock().execute(
+            "INSERT INTO model (name, upstream_id, upstream_name, price_in, price_cached,
+                                price_out, context_tokens, enabled, position)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             ON CONFLICT(name) DO UPDATE SET
+                 upstream_id = excluded.upstream_id,
+                 upstream_name = excluded.upstream_name,
+                 price_in = excluded.price_in,
+                 price_cached = excluded.price_cached,
+                 price_out = excluded.price_out,
+                 context_tokens = excluded.context_tokens,
+                 enabled = excluded.enabled,
+                 position = excluded.position",
+            rusqlite::params![
+                model.name,
+                model.upstream_id,
+                model.upstream_name,
+                model.price_in,
+                model.price_cached,
+                model.price_out,
+                model.context_tokens.map(|n| n as i64),
+                model.enabled as i64,
+                model.position,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_model(&self, name: &str) -> rusqlite::Result<()> {
+        self.conn
+            .lock()
+            .execute("DELETE FROM model WHERE name = ?1", [name])?;
+        Ok(())
+    }
+
+    // ---------------------------------------------------------------- tiers
+
+    pub fn list_tiers(&self) -> rusqlite::Result<HashMap<String, Tier>> {
+        let conn = self.conn.lock();
+        let mut statement =
+            conn.prepare("SELECT name, credits_5h, credits_week, max_peers FROM tier")?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    Tier {
+                        credits_5h: row.get(1)?,
+                        credits_week: row.get(2)?,
+                        max_peers: row.get::<_, i64>(3)? as u32,
+                    },
+                ))
+            })?
+            .collect::<rusqlite::Result<HashMap<_, _>>>()?;
+        Ok(rows)
+    }
+
+    pub fn save_tier(&self, name: &str, tier: &Tier) -> rusqlite::Result<()> {
+        self.conn.lock().execute(
+            "INSERT INTO tier (name, credits_5h, credits_week, max_peers)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(name) DO UPDATE SET
+                 credits_5h = excluded.credits_5h,
+                 credits_week = excluded.credits_week,
+                 max_peers = excluded.max_peers",
+            rusqlite::params![name, tier.credits_5h, tier.credits_week, tier.max_peers],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_tier(&self, name: &str) -> rusqlite::Result<()> {
+        self.conn
+            .lock()
+            .execute("DELETE FROM tier WHERE name = ?1", [name])?;
+        Ok(())
+    }
+
+    // ------------------------------------------------------------- licences
+
+    /// Write down a licence that was issued. The licence proves itself; this
+    /// is so an operator can be found later without asking them for it.
+    pub fn record_license(
+        &self,
+        license_id: &str,
+        tier: &str,
+        expires_at: i64,
+        max_peers: u32,
+        note: &str,
+        now: i64,
+    ) -> rusqlite::Result<()> {
+        self.conn.lock().execute(
+            "INSERT INTO license (license_id, tier, expires_at, max_peers, issued_at, note)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(license_id) DO UPDATE SET
+                 tier = excluded.tier,
+                 expires_at = excluded.expires_at,
+                 max_peers = excluded.max_peers,
+                 note = excluded.note",
+            rusqlite::params![license_id, tier, expires_at, max_peers, now, note],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_licenses(&self) -> rusqlite::Result<Vec<LicenseRow>> {
+        let conn = self.conn.lock();
+        let mut statement = conn.prepare(
+            "SELECT l.license_id, l.tier, l.expires_at, l.max_peers, l.issued_at, l.note,
+                    (SELECT COUNT(*) FROM revoked r WHERE r.license_id = l.license_id)
+             FROM license l ORDER BY l.issued_at DESC",
+        )?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok(LicenseRow {
+                    license_id: row.get(0)?,
+                    tier: row.get(1)?,
+                    expires_at: row.get(2)?,
+                    max_peers: row.get::<_, i64>(3)? as u32,
+                    issued_at: row.get(4)?,
+                    note: row.get(5)?,
+                    revoked: row.get::<_, i64>(6)? > 0,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    pub fn unrevoke(&self, license_id: &str) -> rusqlite::Result<()> {
+        self.conn
+            .lock()
+            .execute("DELETE FROM revoked WHERE license_id = ?1", [license_id])?;
+        Ok(())
+    }
+
+    // ------------------------------------------------------------ reporting
+
+    /// What each licence has spent since a moment, busiest first.
+    pub fn usage_by_license(&self, since: i64) -> rusqlite::Result<Vec<(String, f64, i64)>> {
+        let conn = self.conn.lock();
+        let mut statement = conn.prepare(
+            "SELECT license_id, COALESCE(SUM(credits), 0), COUNT(*)
+             FROM usage WHERE ts >= ?1 GROUP BY license_id ORDER BY 2 DESC LIMIT 200",
+        )?;
+        let rows = statement
+            .query_map([since], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// What each model has cost since a moment, and how much of its prompt
+    /// came out of a cache.
+    pub fn usage_by_model(&self, since: i64) -> rusqlite::Result<Vec<(String, f64, i64, i64)>> {
+        let conn = self.conn.lock();
+        let mut statement = conn.prepare(
+            "SELECT model, COALESCE(SUM(credits), 0), COALESCE(SUM(prompt_tokens), 0),
+                    COALESCE(SUM(cached_tokens), 0)
+             FROM usage WHERE ts >= ?1 GROUP BY model ORDER BY 2 DESC LIMIT 200",
+        )?;
+        let rows = statement
+            .query_map([since], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
     }
 }
 

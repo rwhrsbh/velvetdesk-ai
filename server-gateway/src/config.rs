@@ -1,16 +1,17 @@
-//! What the gateway is told before it starts: where to listen, which
-//! upstreams it may spend money on, what a model costs and what a tier is
-//! allowed to spend.
+//! What the gateway is told before it starts: where to listen, where the
+//! database is, and the public key licences are checked against.
 //!
-//! One JSON file, read at boot. Keys may sit in it (the file is the
-//! operator's, `chmod 600`) or be named as environment variables, which is
-//! what a deploy with secrets outside the repository wants.
+//! The upstream and model sections of this file seed an empty database on the
+//! first run and are never read again — after that the admin page edits the
+//! database, because a key that stopped working at two in the morning should
+//! not need a deploy. Keys may sit in the file (the operator's own, `chmod
+//! 600`) or be named as environment variables.
 
 use std::collections::HashMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
-use vd_llm::provider::{default_api_version, default_dialect, ProviderConfig, ProviderKind};
+use vd_llm::provider::{default_api_version, default_dialect, ProviderKind};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct GatewayConfig {
@@ -117,16 +118,6 @@ fn default_peers() -> u32 {
     2
 }
 
-impl Model {
-    pub fn cached_price(&self) -> f64 {
-        self.price_cached.unwrap_or(self.price_in)
-    }
-
-    pub fn upstream_name(&self) -> &str {
-        self.upstream_name.as_deref().unwrap_or(&self.name)
-    }
-}
-
 impl Upstream {
     /// Keys from the file and from the environment, in that order, with the
     /// empty ones dropped.
@@ -142,34 +133,6 @@ impl Upstream {
         keys.retain(|k| !k.is_empty());
         keys
     }
-
-    /// The provider shape `vd-llm` calls with, for one model of this upstream.
-    pub fn provider(&self, model: &Model) -> ProviderConfig {
-        ProviderConfig {
-            id: self.id.clone(),
-            label: if self.label.is_empty() {
-                self.id.clone()
-            } else {
-                self.label.clone()
-            },
-            kind: self.kind,
-            base_url: self.base_url.clone(),
-            api_version: self.api_version.clone(),
-            model: model.upstream_name().to_string(),
-            extra_headers: self.extra_headers.clone(),
-            temperature: 0.85,
-            max_output_tokens: None,
-            transcribe_model: String::new(),
-            thinking_effort: String::new(),
-            thinking_budget: None,
-            reasoning_dialect: self.reasoning_dialect.clone(),
-            // Fallback is chosen by the gateway across upstreams, not inside
-            // one: a key that ran out here may still have a model there.
-            model_chain: vec![],
-            context_tokens: model.context_tokens,
-            key_count: self.resolved_keys().len(),
-        }
-    }
 }
 
 impl GatewayConfig {
@@ -177,108 +140,14 @@ impl GatewayConfig {
         let text = std::fs::read_to_string(path)?;
         serde_json::from_str(&text).map_err(std::io::Error::other)
     }
-
-    /// Which upstream serves this model name, and the model's entry.
-    pub fn find_model(&self, name: &str) -> Option<(&Upstream, &Model)> {
-        for upstream in &self.upstreams {
-            if let Some(model) = upstream.models.iter().find(|m| m.name == name) {
-                return Some((upstream, model));
-            }
-        }
-        None
-    }
-
-    /// The chain a request walks when the model it named is unavailable — or
-    /// when it named nothing at all: every model of every upstream, in
-    /// configured order, starting at the one asked for.
-    pub fn chain_from(&self, name: &str) -> Vec<(&Upstream, &Model)> {
-        let mut all: Vec<(&Upstream, &Model)> = vec![];
-        for upstream in &self.upstreams {
-            for model in &upstream.models {
-                all.push((upstream, model));
-            }
-        }
-        let Some(start) = all.iter().position(|(_, m)| m.name == name) else {
-            return all;
-        };
-        all.rotate_left(start);
-        all
-    }
-
-    pub fn tier(&self, name: &str) -> Tier {
-        self.tiers.get(name).copied().unwrap_or_default()
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn cfg() -> GatewayConfig {
-        serde_json::from_value(serde_json::json!({
-            "upstreams": [
-                {
-                    "id": "openrouter",
-                    "kind": "openai_compatible",
-                    "base_url": "https://openrouter.ai/api/v1",
-                    "keys": ["k1"],
-                    "models": [
-                        { "name": "deepseek-chat", "price_in": 0.28, "price_cached": 0.028, "price_out": 0.42 },
-                        { "name": "qwen-max", "price_in": 1.6, "price_out": 6.4 }
-                    ]
-                },
-                {
-                    "id": "gemini",
-                    "kind": "gemini",
-                    "base_url": "https://generativelanguage.googleapis.com",
-                    "keys": ["g1", "g2"],
-                    "models": [{ "name": "gemini-2.5-flash", "price_in": 0.3, "price_out": 2.5 }]
-                }
-            ]
-        }))
-        .unwrap()
-    }
-
-    #[test]
-    fn a_model_is_found_with_its_upstream() {
-        let cfg = cfg();
-        let (upstream, model) = cfg.find_model("gemini-2.5-flash").unwrap();
-        assert_eq!(upstream.id, "gemini");
-        assert_eq!(model.price_out, 2.5);
-    }
-
-    /// A model with no cache price is not secretly cheap: the cached rate
-    /// falls back to the full one.
-    #[test]
-    fn an_uncached_model_prices_cache_hits_at_full_rate() {
-        let cfg = cfg();
-        let (_, model) = cfg.find_model("qwen-max").unwrap();
-        assert_eq!(model.cached_price(), 1.6);
-        let (_, cached) = cfg.find_model("deepseek-chat").unwrap();
-        assert_eq!(cached.cached_price(), 0.028);
-    }
-
-    /// The chain starts at what was asked for and wraps round, so a request
-    /// that names the last model still has somewhere to fall.
-    #[test]
-    fn the_chain_starts_where_it_was_asked_to() {
-        let cfg = cfg();
-        let chain: Vec<String> = cfg
-            .chain_from("gemini-2.5-flash")
-            .into_iter()
-            .map(|(_, m)| m.name.clone())
-            .collect();
-        assert_eq!(chain, ["gemini-2.5-flash", "deepseek-chat", "qwen-max"]);
-    }
-
-    /// An unknown name is not an error: it falls to the configured order, the
-    /// same as a request that named nothing.
-    #[test]
-    fn an_unknown_model_falls_back_to_the_whole_list() {
-        let cfg = cfg();
-        assert_eq!(cfg.chain_from("gpt-9").len(), 3);
-    }
-
+    /// One variable may hold a whole pool, because a host that gives you a
+    /// single secret slot should not cost you one.
     #[test]
     fn keys_come_from_the_file_and_the_environment() {
         std::env::set_var("VD_TEST_KEYS", "a, b ,,c");
@@ -292,5 +161,15 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(upstream.resolved_keys(), ["file-key", "a", "b", "c"]);
+    }
+
+    /// A seed file with no tiers is not a broken one: the defaults are
+    /// sensible and the admin page edits them afterwards.
+    #[test]
+    fn a_missing_tier_falls_back_to_the_default() {
+        let tier = Tier::default();
+        assert!(tier.credits_5h > 0.0);
+        assert!(tier.credits_week > tier.credits_5h);
+        assert_eq!(tier.max_peers, 2);
     }
 }

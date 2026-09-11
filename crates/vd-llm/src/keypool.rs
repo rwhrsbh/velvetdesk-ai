@@ -98,6 +98,21 @@ impl KeyPool {
         self.len() == 0
     }
 
+    /// Whether this pool already holds exactly these keys, in this order.
+    ///
+    /// A gateway that reloads its configuration rebuilds the pools; a pool
+    /// whose keys did not change is kept instead, because throwing it away
+    /// would also throw away which keys are cooling down and why.
+    pub fn keys_are(&self, keys: &[String]) -> bool {
+        let inner = self.inner.lock();
+        inner.keys.len() == keys.len()
+            && inner
+                .keys
+                .iter()
+                .zip(keys)
+                .all(|(state, key)| state.key == *key)
+    }
+
     /// Round-robin over keys that are not cooling down.
     pub fn acquire(&self) -> Option<KeyLease> {
         let mut inner = self.inner.lock();
@@ -196,6 +211,17 @@ impl KeyPool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Reloading configuration must not quietly forgive a key that is being
+    /// punished, so an unchanged pool has to be recognisable as unchanged.
+    #[test]
+    fn a_pool_knows_whether_its_keys_changed() {
+        let pool = KeyPool::new(vec!["a".into(), "b".into()]);
+        assert!(pool.keys_are(&["a".to_string(), "b".to_string()]));
+        assert!(!pool.keys_are(&["b".to_string(), "a".to_string()]));
+        assert!(!pool.keys_are(&["a".to_string()]));
+        assert!(!pool.keys_are(&[]));
+    }
 
     #[test]
     fn rotates_round_robin() {

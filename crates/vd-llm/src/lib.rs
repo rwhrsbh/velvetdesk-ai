@@ -299,6 +299,15 @@ pub struct LlmClient {
     pub http: reqwest::Client,
 }
 
+/// How long a cooldown may be before waiting it out stops making sense.
+///
+/// Sized to sit just above the rate-limit cooldown: a 429 clears in a minute
+/// and is worth waiting through, because the key will work again and the next
+/// model may be dearer or worse. A key parked for a quarter of an hour was
+/// refused outright, and no amount of waiting changes that — the operator is
+/// better served by the next model in the chain, at once.
+const WORTH_WAITING: Duration = Duration::from_secs(65);
+
 /// Payloads are kept for inspection, not for storage: enough to see what came
 /// back — a whole chain of turns, thinking included — without a chat log
 /// growing by a megabyte a message.
@@ -465,11 +474,21 @@ impl LlmClient {
                 Some(lease) => lease,
                 None => {
                     let wait = pool.shortest_cooldown().unwrap_or(Duration::from_secs(2));
+                    // A short cooldown is a rate limit clearing: worth waiting
+                    // out. A long one means the keys were refused outright, and
+                    // no amount of waiting here helps — the next model in the
+                    // chain, on another account, might answer at once.
+                    if wait > WORTH_WAITING {
+                        return Err(LlmError::Provider(format!(
+                            "every key for {} is parked: {last_error}",
+                            provider.id
+                        )));
+                    }
                     on_event(serde_json::json!({
                         "kind": "llm_wait",
                         "message": format!("all keys cooling down, waiting {}s", wait.as_secs().max(1)),
                     }));
-                    tokio::time::sleep(wait.min(Duration::from_secs(30))).await;
+                    tokio::time::sleep(wait).await;
                     continue;
                 }
             };
@@ -539,9 +558,15 @@ impl LlmClient {
                     if matches!(verdict, KeyVerdict::Fatal) && key_total == 1 {
                         return Err(LlmError::Provider(last_error));
                     }
-                    // Exponential backoff 1s -> 2s -> 4s (capped at 8s).
-                    let backoff = 1u64 << attempt.min(3);
-                    tokio::time::sleep(Duration::from_secs(backoff.min(8))).await;
+                    // Backing off helps a provider that is busy. A key that was
+                    // rejected is not busy — it is wrong — so the next key gets
+                    // its turn immediately instead of after eight seconds of
+                    // nothing.
+                    if !matches!(verdict, KeyVerdict::QuotaOrAuth | KeyVerdict::Fatal) {
+                        // Exponential backoff 1s -> 2s -> 4s (capped at 8s).
+                        let backoff = 1u64 << attempt.min(3);
+                        tokio::time::sleep(Duration::from_secs(backoff.min(8))).await;
+                    }
                 }
             }
         }

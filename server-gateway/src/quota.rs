@@ -5,8 +5,9 @@
 //! money. The unit is the credit, which is a fixed amount of cost, so a tier's
 //! budget is a budget and the margin is arithmetic.
 
-use crate::config::{GatewayConfig, Model, Tier};
+use crate::config::Tier;
 use crate::db::Db;
+use crate::registry::ModelRow;
 use vd_llm::Usage;
 
 /// Five hours, in seconds — the smaller window, sized to a shift.
@@ -19,7 +20,7 @@ pub const WINDOW_WEEK: i64 = 7 * 24 * 60 * 60;
 /// Prompt tokens the provider served from its own cache are billed at the
 /// cached rate and the rest at the full one; a model with no cache prices
 /// both the same, so nothing is discounted that nobody discounted for us.
-pub fn credits(model: &Model, usage: &Usage, credit_usd: f64) -> f64 {
+pub fn credits(model: &ModelRow, usage: &Usage, credit_usd: f64) -> f64 {
     let cached = usage.cached_tokens.min(usage.prompt_tokens) as f64;
     let fresh = usage.prompt_tokens as f64 - cached;
     let out = usage.completion_tokens as f64;
@@ -85,43 +86,59 @@ pub fn allowance(db: &Db, license_id: &str, tier: Tier, now: i64) -> rusqlite::R
 }
 
 /// Record what an answer cost, and say what is left after it.
-pub fn charge(
-    db: &Db,
-    cfg: &GatewayConfig,
-    license_id: &str,
-    tier: Tier,
-    model_name: &str,
-    usage: &Usage,
-    now: i64,
-) -> rusqlite::Result<Allowance> {
-    let spent = cfg
-        .find_model(model_name)
-        .map(|(_, model)| credits(model, usage, cfg.credit_usd))
+///
+/// A model nobody has priced is recorded at zero rather than dropped: the
+/// answer was already produced and paid for upstream, and losing the row
+/// would hide it from every report afterwards.
+/// One answer, ready to be written down.
+pub struct Bill<'a> {
+    pub license_id: &'a str,
+    pub tier: Tier,
+    /// The name the answer was billed under — the model that actually
+    /// replied, not the one that was asked for.
+    pub model: &'a str,
+    /// The model's prices, when it has any. A model nobody has priced is
+    /// recorded at zero rather than dropped: the answer was produced and paid
+    /// for upstream, and losing the row would hide it from every report.
+    pub priced: Option<&'a ModelRow>,
+    pub usage: &'a Usage,
+    pub credit_usd: f64,
+    pub now: i64,
+}
+
+/// Record what an answer cost, and say what is left after it.
+pub fn charge(db: &Db, bill: &Bill<'_>) -> rusqlite::Result<Allowance> {
+    let spent = bill
+        .priced
+        .map(|model| credits(model, bill.usage, bill.credit_usd))
         .unwrap_or(0.0);
     db.record(
         &crate::db::Spend {
-            license_id: license_id.to_string(),
-            model: model_name.to_string(),
+            license_id: bill.license_id.to_string(),
+            model: bill.model.to_string(),
             credits: spent,
-            usage: usage.clone(),
+            usage: bill.usage.clone(),
         },
-        now,
+        bill.now,
     )?;
-    allowance(db, license_id, tier, now)
+    allowance(db, bill.license_id, bill.tier, bill.now)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn model() -> Model {
-        Model {
+    fn model() -> ModelRow {
+        ModelRow {
             name: "deepseek-chat".into(),
-            upstream_name: None,
+            upstream_id: "openrouter".into(),
+            upstream_name: String::new(),
             price_in: 0.28,
             price_cached: Some(0.028),
             price_out: 0.42,
             context_tokens: None,
+            enabled: true,
+            position: 0,
         }
     }
 
@@ -166,24 +183,6 @@ mod tests {
         assert!((credits - 420.0).abs() < 1e-6, "{credits}");
     }
 
-    fn cfg() -> GatewayConfig {
-        serde_json::from_value(serde_json::json!({
-            "credit_usd": 0.001,
-            "upstreams": [{
-                "id": "openrouter",
-                "kind": "openai_compatible",
-                "base_url": "https://openrouter.ai/api/v1",
-                "models": [{
-                    "name": "deepseek-chat",
-                    "price_in": 0.28,
-                    "price_cached": 0.028,
-                    "price_out": 0.42
-                }]
-            }]
-        }))
-        .unwrap()
-    }
-
     fn tier() -> Tier {
         Tier {
             credits_5h: 100.0,
@@ -198,12 +197,15 @@ mod tests {
         let now = 10_000_000;
         let after = charge(
             &db,
-            &cfg(),
-            "VD-PRO-1",
-            tier(),
-            "deepseek-chat",
-            &usage(100_000, 0, 0),
-            now,
+            &Bill {
+                license_id: "VD-PRO-1",
+                tier: tier(),
+                model: "deepseek-chat",
+                priced: Some(&model()),
+                usage: &usage(100_000, 0, 0),
+                credit_usd: 0.001,
+                now,
+            },
         )
         .unwrap();
         // 100k fresh tokens at $0.28/M = $0.028 = 28 credits.
@@ -221,12 +223,15 @@ mod tests {
         for _ in 0..4 {
             charge(
                 &db,
-                &cfg(),
-                "VD-PRO-1",
-                tier(),
-                "deepseek-chat",
-                &usage(100_000, 0, 0),
-                now,
+                &Bill {
+                    license_id: "VD-PRO-1",
+                    tier: tier(),
+                    model: "deepseek-chat",
+                    priced: Some(&model()),
+                    usage: &usage(100_000, 0, 0),
+                    credit_usd: 0.001,
+                    now,
+                },
             )
             .unwrap();
         }
@@ -248,12 +253,15 @@ mod tests {
         let db = Db::memory().unwrap();
         let after = charge(
             &db,
-            &cfg(),
-            "VD-PRO-1",
-            tier(),
-            "model-nobody-configured",
-            &usage(100_000, 0, 0),
-            10_000_000,
+            &Bill {
+                license_id: "VD-PRO-1",
+                tier: tier(),
+                model: "model-nobody-configured",
+                priced: None,
+                usage: &usage(100_000, 0, 0),
+                credit_usd: 0.001,
+                now: 10_000_000,
+            },
         )
         .unwrap();
         assert_eq!(after.left_5h, 100.0);

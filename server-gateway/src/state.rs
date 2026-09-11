@@ -1,19 +1,20 @@
-//! What every request needs: the config, the book, the key pools, and the
-//! walk down the chain of models until one of them answers.
+//! What every request needs: the config, the book, the live registry of what
+//! the gateway may spend on, and the walk down the chain of models until one
+//! of them answers.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use ed25519_dalek::VerifyingKey;
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 use serde_json::Value;
 use tokio::sync::broadcast;
 
-use vd_llm::keypool::KeyPool;
-use vd_llm::{ChatRequest, ChatResponse, LlmClient, LlmError};
+use vd_llm::{ChatRequest, ChatResponse, LlmClient, LlmError, ProviderConfig};
 
 use crate::config::GatewayConfig;
 use crate::db::Db;
+use crate::registry::{provider_for, Registry};
 use vd_license::public_key_from_base64;
 
 /// One room's loudspeaker: whatever any member says, the others hear, tagged
@@ -25,9 +26,12 @@ pub struct AppState {
     pub cfg: Arc<GatewayConfig>,
     pub db: Db,
     pub llm: LlmClient,
-    /// One pool per upstream, shared by every request that goes there, so a
-    /// key cooling down after a 429 is cooling down for everyone.
-    pub pools: Arc<HashMap<String, Arc<KeyPool>>>,
+    /// Upstreams, models, tiers and the key pools, as they stand right now.
+    ///
+    /// Behind a lock because the admin page edits them while requests are in
+    /// flight: a key added at two in the morning is in the pool for the next
+    /// request, and the call already running finishes on what it started with.
+    pub registry: Arc<RwLock<Registry>>,
     pub verifier: Option<VerifyingKey>,
     /// Token for the admin endpoints, from `VD_ADMIN_TOKEN`. Empty means the
     /// admin endpoints are closed rather than open.
@@ -39,27 +43,33 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(cfg: GatewayConfig, db: Db) -> AppState {
-        let pools = cfg
-            .upstreams
-            .iter()
-            .map(|upstream| {
-                (
-                    upstream.id.clone(),
-                    Arc::new(KeyPool::new(upstream.resolved_keys())),
-                )
-            })
-            .collect();
+    pub fn new(cfg: GatewayConfig, db: Db) -> rusqlite::Result<AppState> {
+        // The config file seeds an empty database and is then consulted only
+        // for what belongs to the box itself — the port, the database path,
+        // the public key licences are checked against.
+        Registry::seed_if_empty(&db, &cfg)?;
+        let registry = Registry::load(&db, None)?;
         let verifier = public_key_from_base64(&cfg.license_public_key);
-        AppState {
+        Ok(AppState {
             cfg: Arc::new(cfg),
             db,
             llm: LlmClient::new(),
-            pools: Arc::new(pools),
+            registry: Arc::new(RwLock::new(registry)),
             verifier,
             admin_token: std::env::var("VD_ADMIN_TOKEN").unwrap_or_default(),
             rooms: Arc::new(Mutex::new(HashMap::new())),
-        }
+        })
+    }
+
+    /// Read the registry again after an edit, keeping the pools whose keys did
+    /// not change — along with which of their keys are cooling down and why.
+    pub fn reload(&self) -> rusqlite::Result<()> {
+        let next = {
+            let current = self.registry.read();
+            Registry::load(&self.db, Some(&current))?
+        };
+        *self.registry.write() = next;
+        Ok(())
     }
 
     /// The room's channel, opened the moment the first device asks for it.
@@ -89,11 +99,7 @@ impl AppState {
 
     /// Every model the gateway will answer with, in configured order.
     pub fn model_names(&self) -> Vec<String> {
-        self.cfg
-            .upstreams
-            .iter()
-            .flat_map(|upstream| upstream.models.iter().map(|model| model.name.clone()))
-            .collect()
+        self.registry.read().model_names()
     }
 
     /// Send the request, walking down the chain from the model that was asked
@@ -112,39 +118,34 @@ impl AppState {
         request: &ChatRequest,
         on_event: &(dyn Fn(Value) + Send + Sync),
     ) -> Result<(String, ChatResponse), LlmError> {
-        let chain: Vec<(String, String)> = self
-            .cfg
-            .chain_from(model)
-            .into_iter()
-            .map(|(upstream, model)| (upstream.id.clone(), model.name.clone()))
-            .collect();
-        if chain.is_empty() {
-            return Err(LlmError::Provider("the gateway has no models".into()));
+        // The chain is copied out from under the lock: a round of calls takes
+        // minutes, and the admin page must not wait that long to save a key.
+        let attempts: Vec<(String, ProviderConfig)> = {
+            let registry = self.registry.read();
+            registry
+                .chain_from(model)
+                .into_iter()
+                .map(|(upstream, entry)| (entry.name.clone(), provider_for(upstream, entry)))
+                .collect()
+        };
+        if attempts.is_empty() {
+            return Err(LlmError::Provider(
+                "the gateway has no model switched on".into(),
+            ));
         }
 
         let mut last = LlmError::Provider("no model was tried".into());
-        for (upstream_id, model_name) in chain {
-            let Some((upstream, entry)) = self.cfg.find_model(&model_name) else {
-                continue;
-            };
-            if upstream.id != upstream_id {
-                continue;
-            }
-            let Some(pool) = self.pools.get(&upstream_id) else {
+        for (model_name, provider) in attempts {
+            let Some(pool) = self.registry.read().pool(&provider.id) else {
                 continue;
             };
             if pool.is_empty() {
-                // An upstream with no keys is a line in the config file, not
-                // a place to send anyone.
+                // An upstream with no keys is a line in a table, not a place
+                // to send anyone.
                 continue;
             }
 
-            let provider = upstream.provider(entry);
-            match self
-                .llm
-                .chat(&provider, pool.clone(), request, on_event)
-                .await
-            {
+            match self.llm.chat(&provider, pool, request, on_event).await {
                 Ok(mut response) => {
                     response.model = model_name.clone();
                     return Ok((model_name, response));

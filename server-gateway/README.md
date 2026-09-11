@@ -28,6 +28,21 @@ VD_GATEWAY_CONFIG=/etc/velvetdesk/gateway.json ./velvetdesk-gateway serve
 
 `0` вместо числа дней — лицензия без срока.
 
+## Админка
+
+`http://<адрес>/admin` — одна страница: провайдеры и их ключи, модели с ценами
+и порядком падения, тарифы, выдача и отзыв лицензий, расход по лицензиям и
+моделям. Вход по `VD_ADMIN_TOKEN` (заголовок `X-VD-Admin`), токен хранится
+только во вкладке браузера.
+
+Всё, что правится в админке, лежит в базе, а не в `gateway.json`: конфиг
+засевает пустую базу при первом запуске и дальше не читается. Добавленный ключ
+попадает в пул к следующему запросу — перезапуск не нужен. Ключи наружу не
+отдаются: список показывает маску вида `AIzaS...9fA` и id для удаления.
+
+Лицензия подписывается тем же приватным ключом, что и `mint`, и показывается
+один раз — шлюз хранит только факт выдачи.
+
 ## Эндпоинты
 
 | Метод | Путь | Что делает |
@@ -39,8 +54,14 @@ VD_GATEWAY_CONFIG=/etc/velvetdesk/gateway.json ./velvetdesk-gateway serve
 | POST | `/v1beta/models/<model>:generateContent` | нативный Gemini |
 | POST | `/v1beta/models/<model>:streamGenerateContent` | он же потоком |
 | GET | `/sync/ws?room=<id>` | релей синхронизации: перекладывает запечатанные кадры между устройствами одной пары |
-| POST | `/admin/revoke` | отозвать лицензию (`X-VD-Admin`) |
-| GET | `/admin/stats?hours=24` | доля попаданий кеша (`X-VD-Admin`) |
+| GET | `/admin` | страница управления (`X-VD-Admin` на запросах из неё) |
+| GET/POST | `/admin/upstreams`, `/admin/models`, `/admin/tiers` | список и сохранение |
+| DELETE | `/admin/upstreams/<id>`, `/admin/models/<name>`, `/admin/tiers/<name>` | удаление |
+| GET/POST | `/admin/upstreams/<id>/keys` | ключи провайдера: маски и добавление |
+| DELETE | `/admin/keys/<id>` | удалить ключ |
+| GET/POST | `/admin/licenses` | выданные лицензии и выдача новой |
+| POST | `/admin/revoke`, `/admin/unrevoke` | отозвать и вернуть |
+| GET | `/admin/stats?hours=24` | расход по лицензиям и моделям, доля кеша |
 
 Лицензия едет в `Authorization: Bearer VD.…`, в `x-goog-api-key` или в `?key=`.
 В ответе — `X-VD-Credits-Left` и `X-VD-Window-Reset`.
