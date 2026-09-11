@@ -51,7 +51,7 @@ jobs:
 
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: "."
 
       - name: Install Linux dependencies
         run: |
@@ -63,16 +63,13 @@ jobs:
       - run: npm run build
 
       - name: cargo fmt
-        working-directory: src-tauri
         run: cargo fmt --all -- --check
 
       - name: cargo clippy
-        working-directory: src-tauri
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: cargo test
-        working-directory: src-tauri
-        run: cargo test --all-features
+        run: cargo test --workspace --all-features
 
   desktop:
     name: ${{ matrix.label }}
@@ -108,7 +105,7 @@ jobs:
 
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: "."
           key: ${{ matrix.target }}
 
       - name: Install Linux dependencies
@@ -198,7 +195,7 @@ jobs:
 
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: "."
           key: android
 
       - run: npm ci

@@ -46,7 +46,7 @@ jobs:
 
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: "."
           key: release-${{ matrix.target }}
 
       - name: Install Linux dependencies
@@ -98,7 +98,7 @@ jobs:
 
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: "."
           key: release-android
 
       - run: npm ci
