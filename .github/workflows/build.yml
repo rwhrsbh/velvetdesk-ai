@@ -138,12 +138,18 @@ jobs:
           VERSION: ${{ needs.check.outputs.version }}
         run: |
           mkdir -p out
-          base="src-tauri/target/${TARGET}/release/bundle"
-          find "$base" -maxdepth 3 -type f \
-            \( -name "*.deb" -o -name "*.AppImage" -o -name "*.rpm" \
-               -o -name "*.dmg" -o -name "*.app.tar.gz" \
-               -o -name "*.msi" -o -name "*.exe" -o -name "*.sig" \) \
-            -exec cp {} out/ \; || true
+          # The crates live in one workspace now, so cargo — and with it the
+          # bundler — writes to the target directory at the repository root.
+          # The old path is still swept so an older build tree is not missed.
+          for base in "target/${TARGET}/release/bundle" \
+                      "src-tauri/target/${TARGET}/release/bundle"; do
+            [ -d "$base" ] || continue
+            find "$base" -maxdepth 3 -type f \
+              \( -name "*.deb" -o -name "*.AppImage" -o -name "*.rpm" \
+                 -o -name "*.dmg" -o -name "*.app.tar.gz" \
+                 -o -name "*.msi" -o -name "*.exe" -o -name "*.sig" \) \
+              -exec cp {} out/ \; || true
+          done
 
           # macOS names its updater bundle after the app alone, so both Mac
           # builds would arrive as the same file and one would bury the other —
@@ -158,11 +164,19 @@ jobs:
           done
           ls -la out
 
+          # A build that quietly produced nothing is worse than a red job: the
+          # release still goes out, with an installer missing and an updater
+          # manifest that offers the platform no upgrade at all.
+          if [ -z "$(ls -A out)" ]; then
+            echo "::error::no bundles for ${TARGET} — the bundler wrote somewhere else"
+            exit 1
+          fi
+
       - uses: actions/upload-artifact@v4
         with:
           name: velvetdesk-${{ matrix.label }}
           path: out/*
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 30
 
   android:

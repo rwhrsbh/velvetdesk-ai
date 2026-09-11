@@ -3,7 +3,7 @@
 Локальный мультиагентный копилот для операторов дейтинг-агентства. Tauri 2 + Rust,
 одна кодовая база на **Windows, macOS, Linux и Android**. Данные не покидают устройство.
 
-![build](https://img.shields.io/badge/build-github%20actions-blue) ![license](https://img.shields.io/badge/license-MIT-green)
+![build](https://img.shields.io/badge/build-github%20actions-blue) ![license](https://img.shields.io/badge/license-commercial-blue)
 
 ---
 
@@ -325,4 +325,6 @@ GitHub не принимает пустое значение секрета, п�
 
 ## Лицензия
 
-MIT.
+Коммерческая, проприетарная: см. [LICENSE](LICENSE). Исходники открыты
+для просмотра, но не для копирования, перепродажи и хостинга как сервиса.
+Запуск — по лицензии, выданной владельцем (по умолчанию тариф `business`).

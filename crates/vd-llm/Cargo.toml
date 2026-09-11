@@ -4,7 +4,7 @@ version = "0.2.0"
 description = "VelvetDesk — provider calls, key rotation and model fallback"
 edition.workspace = true
 rust-version.workspace = true
-license.workspace = true
+license-file.workspace = true
 
 [dependencies]
 serde.workspace = true

@@ -5,7 +5,7 @@ description = "VelvetDesk AI — cross-platform agency copilot"
 authors = ["VelvetDesk AI contributors"]
 edition.workspace = true
 rust-version.workspace = true
-license.workspace = true
+license-file.workspace = true
 
 [lib]
 name = "velvetdesk_lib"

@@ -68,6 +68,14 @@ const manifest = {
   platforms,
 };
 
+// An empty manifest is a published dead end: every installed copy asks for an
+// update, is told there is none for its platform, and stays where it is. Stop
+// the release instead of shipping one.
+if (Object.keys(platforms).length === 0) {
+  console.error(`[update-manifest] no signed bundles in ${dir}: ${files.join(", ") || "(empty)"}`);
+  process.exit(1);
+}
+
 const out = join(dir, "latest.json");
 writeFileSync(out, `${JSON.stringify(manifest, null, 2)}\n`);
-console.log(`[update-manifest] ${out}: ${Object.keys(platforms).join(", ") || "no signed bundles"}`);
+console.log(`[update-manifest] ${out}: ${Object.keys(platforms).join(", ")}`);

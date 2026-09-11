@@ -1,21 +1,38 @@
-MIT License
+VelvetDesk AI — Commercial License
+Copyright (c) 2026 VelvetDesk AI. All rights reserved.
 
-Copyright (c) 2026 VelvetDesk AI contributors
+This software and its source code are proprietary. They are not open source
+and are not placed in the public domain.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+1. Licence. Use of this software requires a valid licence issued by the
+   copyright holder. A licence grants the named licensee the right to install
+   and run the software for its own business, on the number of devices stated
+   in that licence, for as long as it is in force.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+2. Restrictions. Without prior written permission you may not copy,
+   redistribute, sublicense, sell, rent, host as a service, publish, or make
+   the software available to any third party; nor modify, adapt, translate,
+   decompile, disassemble, or otherwise derive its source code; nor remove or
+   alter any notice of ownership.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+3. Evaluation. Copies marked as trial or evaluation may be used only to
+   evaluate the software, and not in production, for the period stated.
+
+4. Ownership. All rights, title and interest in the software, including every
+   copy and derivative of it, remain with the copyright holder.
+
+5. Third-party components. Dependencies retain their own licences; nothing
+   here alters them.
+
+6. No warranty. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY
+   KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+   NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR
+   OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+   ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+   OTHER DEALINGS IN THE SOFTWARE.
+
+7. Termination. This licence ends automatically if its terms are breached;
+   on termination all use must stop and all copies be destroyed.
+
+Licensing enquiries: the repository owner.
