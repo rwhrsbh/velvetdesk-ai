@@ -1054,6 +1054,111 @@ pub struct CloudStatus {
 
 const CLOUD_PROVIDER: &str = "velvetdesk-cloud";
 
+/// Where sync stands on this device.
+#[derive(Debug, Clone, Serialize)]
+pub struct SyncState {
+    pub paired: bool,
+    pub device_id: String,
+    /// The invite to read out to the other device. Only this device's own.
+    pub invite: String,
+    pub relay: String,
+    pub auto: bool,
+    pub last: Option<crate::sync::Report>,
+}
+
+/// The relay to meet at: the cloud provider's address, minus its API path.
+fn relay_base(state: &AppState) -> String {
+    state
+        .settings
+        .read()
+        .provider(CLOUD_PROVIDER)
+        .map(|p| {
+            p.base_url
+                .trim_end_matches('/')
+                .trim_end_matches("/v1")
+                .to_string()
+        })
+        .unwrap_or_default()
+}
+
+fn license_key(state: &AppState) -> String {
+    state
+        .secrets
+        .read()
+        .for_provider(CLOUD_PROVIDER)
+        .first()
+        .cloned()
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+pub fn sync_state(state: State<'_, AppState>) -> Result<SyncState> {
+    let pairing = crate::sync::pair::Pairing::load(&state.paths)?;
+    let last = crate::sync::read_report(&state.paths)?;
+    Ok(match pairing {
+        Some(pairing) => SyncState {
+            paired: true,
+            device_id: pairing.device_id.clone(),
+            invite: pairing.invite(),
+            relay: pairing.relay.clone(),
+            auto: pairing.auto,
+            last,
+        },
+        None => SyncState {
+            paired: false,
+            device_id: String::new(),
+            invite: String::new(),
+            relay: relay_base(&state),
+            auto: false,
+            last,
+        },
+    })
+}
+
+/// Start a pairing here and hand back the invite for the other device.
+#[tauri::command]
+pub fn sync_create_invite(state: State<'_, AppState>) -> Result<SyncState> {
+    let relay = relay_base(&state);
+    if relay.is_empty() {
+        return Err(AppError::message("sync.noRelay", json!({})));
+    }
+    crate::sync::pair::create(&state.paths, &relay)?;
+    sync_state(state)
+}
+
+#[tauri::command]
+pub fn sync_join(state: State<'_, AppState>, invite: String) -> Result<SyncState> {
+    let relay = relay_base(&state);
+    crate::sync::pair::join(&state.paths, &invite, &relay)?;
+    sync_state(state)
+}
+
+/// Unpair this device. The other one keeps its own copy of everything; what
+/// stops is the traffic between them.
+#[tauri::command]
+pub fn sync_forget(state: State<'_, AppState>) -> Result<SyncState> {
+    crate::sync::pair::Pairing::forget(&state.paths)?;
+    sync_state(state)
+}
+
+#[tauri::command]
+pub fn sync_set_auto(state: State<'_, AppState>, auto: bool) -> Result<SyncState> {
+    if let Some(mut pairing) = crate::sync::pair::Pairing::load(&state.paths)? {
+        pairing.auto = auto;
+        pairing.save(&state.paths)?;
+    }
+    sync_state(state)
+}
+
+/// One round, now, because the operator pressed the button.
+#[tauri::command]
+pub async fn sync_now(state: State<'_, AppState>) -> Result<crate::sync::Report> {
+    let pairing = crate::sync::pair::Pairing::load(&state.paths)?
+        .ok_or_else(|| AppError::message("sync.notPaired", json!({})))?;
+    let license = license_key(&state);
+    crate::sync::transport::run_round(&state.paths, &pairing, &license).await
+}
+
 #[tauri::command]
 pub async fn cloud_status(state: State<'_, AppState>) -> Result<CloudStatus> {
     let settings = state.settings.read().clone();

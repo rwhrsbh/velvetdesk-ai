@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::convert::Infallible;
 
+use axum::extract::ws::{Message as WsMessage, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::response::sse::{Event, Sse};
@@ -12,6 +13,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures_util::StreamExt;
 use serde_json::{json, Value};
+use tokio::sync::broadcast;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::config::Tier;
@@ -29,6 +31,9 @@ pub fn router(state: AppState) -> Router {
         // Gemini puts the action after a colon, which is not a path segment,
         // so the whole tail is taken and split here.
         .route("/v1beta/models/{*tail}", post(gemini_generate))
+        // Two paired devices meeting. The gateway moves sealed bytes between
+        // them and reads none of it.
+        .route("/sync/ws", get(sync_ws))
         .route("/admin/revoke", post(revoke))
         .route("/admin/stats", get(stats))
         .with_state(state)
@@ -382,6 +387,81 @@ async fn gemini_generate(
     let stream = UnboundedReceiverStream::new(rx).map(Ok::<Event, Infallible>);
     Ok((credit_headers(&before), Sse::new(stream)).into_response())
 }
+
+// ---------------------------------------------------------------------- sync
+
+async fn sync_ws(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<HashMap<String, String>>,
+    upgrade: WebSocketUpgrade,
+) -> Result<Response, ApiError> {
+    let caller = authenticate(&state, &headers, &query)?;
+    let room = query
+        .get("room")
+        .filter(|room| !room.is_empty() && room.len() <= 64)
+        .cloned()
+        .ok_or_else(|| ApiError::BadRequest("a room is required".into()))?;
+
+    // The licence says how many devices may be paired, and the room is where
+    // that is actually enforced: a third laptop is turned away at the door
+    // rather than discovering later that nothing arrived.
+    let channel = state.room(&room);
+    let peers = channel.receiver_count();
+    let allowed = caller.license.max_peers.max(caller.tier.max_peers).max(1) as usize;
+    if peers >= allowed {
+        return Err(ApiError::Forbidden(format!(
+            "this licence pairs {allowed} device(s), and {peers} are already connected"
+        )));
+    }
+
+    Ok(upgrade.on_upgrade(move |socket| relay(socket, state, room)))
+}
+
+/// Forward frames between the members of one room.
+///
+/// Every connection gets a number so it does not receive its own frames back;
+/// beyond that the gateway does not look inside, because it cannot.
+async fn relay(socket: WebSocket, state: AppState, room: String) {
+    use futures_util::{SinkExt, StreamExt};
+
+    let channel = state.room(&room);
+    let mut inbox = channel.subscribe();
+    let me = NEXT_PEER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let (mut sink, mut stream) = socket.split();
+
+    loop {
+        tokio::select! {
+            incoming = stream.next() => match incoming {
+                Some(Ok(WsMessage::Binary(bytes))) => {
+                    // No receivers means nobody else is here yet; the sender
+                    // will try again on its next round.
+                    let _ = channel.send((me, bytes.to_vec()));
+                }
+                Some(Ok(WsMessage::Close(_))) | None => break,
+                Some(Ok(_)) => continue,
+                Some(Err(_)) => break,
+            },
+            relayed = inbox.recv() => match relayed {
+                Ok((from, bytes)) if from != me => {
+                    if sink.send(WsMessage::Binary(bytes.into())).await.is_err() {
+                        break;
+                    }
+                }
+                Ok(_) => continue,
+                // Lagged behind the burst: the round is spoiled, and the next
+                // one will start from a fresh digest anyway.
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => break,
+            },
+        }
+    }
+
+    drop(inbox);
+    state.drop_room_if_empty(&room);
+}
+
+static NEXT_PEER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 // -------------------------------------------------------------------- admin
 

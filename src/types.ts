@@ -266,6 +266,26 @@ export interface Settings {
   cloud_public_key: string;
 }
 
+/** What one round of sync moved. */
+export interface SyncReport {
+  pulled: number;
+  pushed: number;
+  conflicts: number;
+  rejected: number;
+  finished_at: string | null;
+}
+
+/** Whether this device is paired with another, and how the last round went. */
+export interface SyncState {
+  paired: boolean;
+  device_id: string;
+  /** The invite to read out to the other device. */
+  invite: string;
+  relay: string;
+  auto: boolean;
+  last: SyncReport | null;
+}
+
 /** Where the VelvetDesk Cloud subscription stands, licence and credits both. */
 export interface CloudStatus {
   valid: boolean;

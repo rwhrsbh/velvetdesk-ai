@@ -119,6 +119,13 @@ pub struct Profile {
     pub updated_at: DateTime<Utc>,
     #[serde(default = "schema_version")]
     pub schema_version: u32,
+    /// How many times this record has been edited on any device.
+    ///
+    /// Sync compares this before it compares clocks: two laptops disagree
+    /// about what time it is by minutes, and the edit that came later is the
+    /// one made after more edits, not the one whose machine runs fast.
+    #[serde(default)]
+    pub rev: u64,
 }
 
 impl Profile {
@@ -140,6 +147,7 @@ impl Profile {
             created_at: now(),
             updated_at: now(),
             schema_version: SCHEMA_VERSION,
+            rev: 0,
         }
     }
 
@@ -240,6 +248,13 @@ pub struct Man {
     pub updated_at: DateTime<Utc>,
     #[serde(default = "schema_version")]
     pub schema_version: u32,
+    /// How many times this record has been edited on any device.
+    ///
+    /// Sync compares this before it compares clocks: two laptops disagree
+    /// about what time it is by minutes, and the edit that came later is the
+    /// one made after more edits, not the one whose machine runs fast.
+    #[serde(default)]
+    pub rev: u64,
 }
 
 impl Man {
@@ -267,6 +282,7 @@ impl Man {
             created_at: now(),
             updated_at: now(),
             schema_version: SCHEMA_VERSION,
+            rev: 0,
         }
     }
 
@@ -368,6 +384,13 @@ pub struct ChatThread {
     pub updated_at: DateTime<Utc>,
     #[serde(default = "schema_version")]
     pub schema_version: u32,
+    /// How many times this record has been edited on any device.
+    ///
+    /// Sync compares this before it compares clocks: two laptops disagree
+    /// about what time it is by minutes, and the edit that came later is the
+    /// one made after more edits, not the one whose machine runs fast.
+    #[serde(default)]
+    pub rev: u64,
 }
 
 impl ChatThread {
@@ -402,6 +425,7 @@ impl ChatThread {
             context_from: 0,
             updated_at: now(),
             schema_version: SCHEMA_VERSION,
+            rev: 0,
         }
     }
 

@@ -1,5 +1,6 @@
 import { api, errorText, onModelEvent } from "./api";
 import type { ModalDeps } from "./deps";
+import { copyText } from "./context-menu";
 import { closeModal, escapeHtml, openModal, toast } from "./dom";
 import { t } from "./i18n";
 import { unloadModel } from "./local-whisper";
@@ -197,6 +198,22 @@ export async function openKeysModal(deps: ModalDeps) {
           settings.cloud_public_key ?? "",
         )}" placeholder="${t("keys.cloudPublicKeyPlaceholder")}" autocomplete="off" />
         <div class="meta" id="cloudStatus">${t("keys.cloudChecking")}</div>
+      </div>
+
+      <div class="field">
+        <label>${t("keys.sync")}
+          <span class="hint-inline">${t("keys.syncHint")}</span>
+        </label>
+        <div class="meta" id="syncStatus">${t("keys.syncChecking")}</div>
+        <div class="row-inline">
+          <button class="btn btn-secondary" id="btnSyncInvite">${t("keys.syncInvite")}</button>
+          <button class="btn btn-secondary" id="btnSyncNow">${t("keys.syncNow")}</button>
+          <button class="btn btn-secondary" id="btnSyncForget">${t("keys.syncForget")}</button>
+        </div>
+        <div class="row-inline">
+          <input class="field-input" id="syncInvite" placeholder="${t("keys.syncJoinPlaceholder")}" autocomplete="off" />
+          <button class="btn btn-primary" id="btnSyncJoin">${t("keys.syncJoin")}</button>
+        </div>
       </div>`
           : ""
       }
@@ -486,7 +503,89 @@ export async function openKeysModal(deps: ModalDeps) {
         line.textContent = errorText(error);
       }
     }
-    if (isCloud) void showCloudStatus();
+    /** Pairing and the last round, as a line under the licence. */
+    async function showSyncState() {
+      const line = card.querySelector<HTMLElement>("#syncStatus");
+      if (!line) return;
+      try {
+        const state = await api.syncState();
+        const parts: string[] = [];
+        parts.push(state.paired ? t("keys.syncPaired") : t("keys.syncUnpaired"));
+        if (state.last?.finished_at) {
+          parts.push(
+            t("keys.syncLast", {
+              date: new Date(state.last.finished_at).toLocaleString(),
+              inn: state.last.pulled,
+              out: state.last.pushed,
+            }),
+          );
+          if (state.last.conflicts > 0) {
+            // A conflict is not a failure, but it is the one thing worth
+            // going and looking at: the losing copy is in backups/.
+            parts.push(t("keys.syncConflicts", { n: state.last.conflicts }));
+          }
+        }
+        line.textContent = parts.join(" · ");
+      } catch (error) {
+        line.textContent = errorText(error);
+      }
+    }
+
+    card.querySelector("#btnSyncInvite")?.addEventListener("click", async () => {
+      try {
+        const state = await api.syncCreateInvite();
+        // The invite is the secret: it goes to the clipboard, not onto a
+        // screen someone else may be looking at.
+        await copyText(state.invite);
+        toast(t("keys.syncInviteCopied"), "success");
+        await showSyncState();
+      } catch (error) {
+        toast(errorText(error), "error");
+      }
+    });
+
+    card.querySelector("#btnSyncJoin")?.addEventListener("click", async () => {
+      const input = card.querySelector<HTMLInputElement>("#syncInvite");
+      const invite = input?.value.trim() ?? "";
+      if (!invite) return;
+      try {
+        await api.syncJoin(invite);
+        if (input) input.value = "";
+        toast(t("keys.syncJoined"), "success");
+        await showSyncState();
+      } catch (error) {
+        toast(errorText(error), "error");
+      }
+    });
+
+    card.querySelector("#btnSyncNow")?.addEventListener("click", async () => {
+      try {
+        const report = await api.syncNow();
+        toast(
+          t("keys.syncDone", { inn: report.pulled, out: report.pushed }),
+          report.conflicts > 0 ? "info" : "success",
+        );
+        await showSyncState();
+        await deps.refresh();
+      } catch (error) {
+        toast(errorText(error), "error");
+      }
+    });
+
+    card.querySelector("#btnSyncForget")?.addEventListener("click", async () => {
+      try {
+        await api.syncForget();
+        toast(t("keys.syncForgotten"), "success");
+        await showSyncState();
+      } catch (error) {
+        toast(errorText(error), "error");
+      }
+    });
+
+    if (isCloud) {
+      void showCloudStatus();
+      void showSyncState();
+    }
 
     card.querySelectorAll<HTMLButtonElement>("[data-provider]").forEach((btn) => {
       btn.addEventListener("click", async () => {

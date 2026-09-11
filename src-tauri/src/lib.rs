@@ -7,6 +7,7 @@ pub mod llm;
 pub mod models;
 pub mod state;
 pub mod storage;
+pub mod sync;
 pub mod whisper;
 pub mod workspace;
 
@@ -106,7 +107,41 @@ pub fn run() {
             // Warm the index so the first render is instant.
             let _ = storage::rebuild_index(&paths);
             let state = AppState::new(paths).map_err(|e| e.to_string())?;
+            let sync_paths = state.paths.clone();
             app.manage(state);
+
+            // A paired device catches up by itself every few minutes. Each
+            // round is a fresh comparison of what both sides hold, so one that
+            // fails costs nothing but the next interval.
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+                    let Ok(Some(pairing)) = sync::pair::Pairing::load(&sync_paths) else {
+                        continue;
+                    };
+                    if !pairing.auto {
+                        continue;
+                    }
+                    let license = config::Secrets::load(&sync_paths)
+                        .ok()
+                        .and_then(|secrets| {
+                            secrets.for_provider("velvetdesk-cloud").first().cloned()
+                        })
+                        .unwrap_or_default();
+                    match sync::transport::run_round(&sync_paths, &pairing, &license).await {
+                        Ok(report) if report.pulled + report.pushed > 0 => {
+                            log::info!(
+                                "sync: {} in, {} out, {} conflicts",
+                                report.pulled,
+                                report.pushed,
+                                report.conflicts
+                            );
+                        }
+                        Ok(_) => {}
+                        Err(err) => log::warn!("sync: {err}"),
+                    }
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -164,6 +199,12 @@ pub fn run() {
             commands::get_settings,
             commands::save_settings,
             commands::cloud_status,
+            commands::sync_state,
+            commands::sync_create_invite,
+            commands::sync_join,
+            commands::sync_forget,
+            commands::sync_set_auto,
+            commands::sync_now,
             commands::list_keys,
             commands::set_keys,
             commands::add_key,

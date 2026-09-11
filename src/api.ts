@@ -23,6 +23,8 @@ import type {
   SearchHit,
   DigestPreview,
   Settings,
+  SyncReport,
+  SyncState,
   UpdateInfo,
 } from "./types";
 
@@ -148,6 +150,14 @@ export const api = {
 
   /** Licence and credits for the cloud provider, checked locally then asked of the gateway. */
   cloudStatus: () => invoke<CloudStatus>("cloud_status"),
+
+  /** Device sync: pairing, and one round on demand. */
+  syncState: () => invoke<SyncState>("sync_state"),
+  syncCreateInvite: () => invoke<SyncState>("sync_create_invite"),
+  syncJoin: (invite: string) => invoke<SyncState>("sync_join", { invite }),
+  syncForget: () => invoke<SyncState>("sync_forget"),
+  syncSetAuto: (auto: boolean) => invoke<SyncState>("sync_set_auto", { auto }),
+  syncNow: () => invoke<SyncReport>("sync_now"),
   listKeys: (providerId: string) => invoke<KeyStatus[]>("list_keys", { providerId }),
   setKeys: (providerId: string, keys: string[]) =>
     invoke<KeyStatus[]>("set_keys", { providerId, keys }),

@@ -283,7 +283,16 @@ impl Scope {
             .ok_or_else(|| AppError::NotFound(format!("profile {}", self.model_id)))
     }
 
+    /// A local edit: the record goes to disk one revision further along.
+    ///
+    /// Anything arriving from another device is written with the `_verbatim`
+    /// twin instead — a record that came in is not an edit made here, and
+    /// bumping it would send it straight back as news.
     pub fn write_profile(&self, profile: &Profile) -> Result<()> {
+        self.write_profile_verbatim(&bump_profile(profile))
+    }
+
+    pub fn write_profile_verbatim(&self, profile: &Profile) -> Result<()> {
         write_json(&self.profile_file(), profile)
     }
 
@@ -313,6 +322,10 @@ impl Scope {
     }
 
     pub fn write_man(&self, man: &Man) -> Result<()> {
+        self.write_man_verbatim(&bump_man(man))
+    }
+
+    pub fn write_man_verbatim(&self, man: &Man) -> Result<()> {
         let path = self.man_file(&man.id)?;
         write_json(&path, man)
     }
@@ -356,6 +369,10 @@ impl Scope {
     }
 
     pub fn write_chat(&self, thread: &ChatThread) -> Result<()> {
+        self.write_chat_verbatim(&bump_chat(thread))
+    }
+
+    pub fn write_chat_verbatim(&self, thread: &ChatThread) -> Result<()> {
         let path = self.chat_file(&thread.man_id)?;
         write_json(&path, thread)
     }
@@ -393,6 +410,33 @@ impl Scope {
 }
 
 // ----- json helpers -------------------------------------------------------
+
+/// One more edit, stamped now.
+///
+/// The revision is what sync compares first, and the clock only breaks ties:
+/// two laptops disagree about the time by minutes, and the edit that came
+/// later is the one made after more edits, not the one whose machine runs
+/// fast.
+fn bump_profile(profile: &Profile) -> Profile {
+    let mut next = profile.clone();
+    next.rev = next.rev.saturating_add(1);
+    next.updated_at = chrono::Utc::now();
+    next
+}
+
+fn bump_man(man: &Man) -> Man {
+    let mut next = man.clone();
+    next.rev = next.rev.saturating_add(1);
+    next.updated_at = chrono::Utc::now();
+    next
+}
+
+fn bump_chat(thread: &ChatThread) -> ChatThread {
+    let mut next = thread.clone();
+    next.rev = next.rev.saturating_add(1);
+    next.updated_at = chrono::Utc::now();
+    next
+}
 
 pub fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<Option<T>> {
     if !path.exists() {

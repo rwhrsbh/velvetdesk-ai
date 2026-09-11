@@ -5,7 +5,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use ed25519_dalek::VerifyingKey;
+use parking_lot::Mutex;
 use serde_json::Value;
+use tokio::sync::broadcast;
 
 use vd_llm::keypool::KeyPool;
 use vd_llm::{ChatRequest, ChatResponse, LlmClient, LlmError};
@@ -13,6 +15,10 @@ use vd_llm::{ChatRequest, ChatResponse, LlmClient, LlmError};
 use crate::config::GatewayConfig;
 use crate::db::Db;
 use vd_license::public_key_from_base64;
+
+/// One room's loudspeaker: whatever any member says, the others hear, tagged
+/// with who said it so nobody hears themselves.
+pub type RoomChannel = broadcast::Sender<(u64, Vec<u8>)>;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -26,6 +32,10 @@ pub struct AppState {
     /// Token for the admin endpoints, from `VD_ADMIN_TOKEN`. Empty means the
     /// admin endpoints are closed rather than open.
     pub admin_token: String,
+    /// Rooms two paired devices meet in, by room name. The gateway forwards
+    /// sealed frames between them and can read none of it: the key that opens
+    /// a frame never leaves the devices that were paired.
+    pub rooms: Arc<Mutex<HashMap<String, RoomChannel>>>,
 }
 
 impl AppState {
@@ -48,6 +58,32 @@ impl AppState {
             pools: Arc::new(pools),
             verifier,
             admin_token: std::env::var("VD_ADMIN_TOKEN").unwrap_or_default(),
+            rooms: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// The room's channel, opened the moment the first device asks for it.
+    ///
+    /// Capacity is generous because a device catching up after a week sends a
+    /// burst of records, and a peer that reads a little slower than the other
+    /// writes should not be dropped mid-sync.
+    pub fn room(&self, name: &str) -> RoomChannel {
+        let mut rooms = self.rooms.lock();
+        rooms
+            .entry(name.to_string())
+            .or_insert_with(|| broadcast::channel(256).0)
+            .clone()
+    }
+
+    /// Forget a room nobody is left in, so a long-running gateway does not
+    /// collect one entry per pairing it has ever seen.
+    pub fn drop_room_if_empty(&self, name: &str) {
+        let mut rooms = self.rooms.lock();
+        if rooms
+            .get(name)
+            .is_some_and(|sender| sender.receiver_count() == 0)
+        {
+            rooms.remove(name);
         }
     }
 
