@@ -4,7 +4,7 @@
 use serde_json::{json, Value};
 
 use super::{CallError, ChatRequest, ChatResponse, Role, Thinking, ToolCall, Usage};
-use crate::config::ProviderConfig;
+use crate::provider::ProviderConfig;
 
 pub async fn call(
     http: &reqwest::Client,
@@ -399,7 +399,10 @@ fn request_thoughts(body: &mut Value, _provider: &ProviderConfig) {
     }
 }
 
-fn build_body(provider: &ProviderConfig, request: &ChatRequest) -> Value {
+/// The request as Gemini takes it. Public so the client can hold its own
+/// tool set against the sanitiser without the crate knowing what a tool of
+/// its own would be.
+pub fn build_body(provider: &ProviderConfig, request: &ChatRequest) -> Value {
     let mut contents: Vec<Value> = vec![];
 
     for msg in &request.messages {
@@ -706,6 +709,8 @@ fn read_usage(meta: Option<&Value>) -> Usage {
     };
     Usage {
         prompt_tokens: field("promptTokenCount"),
+        // Gemini counts what it took from a cached context separately.
+        cached_tokens: field("cachedContentTokenCount"),
         completion_tokens: field("candidatesTokenCount"),
         total_tokens: field("totalTokenCount"),
     }
@@ -838,8 +843,8 @@ mod tests {
             other => panic!("expected a refusal, got {other:?}"),
         }
     }
-    use crate::config::ProviderKind;
-    use crate::llm::{LlmMessage, ToolDef};
+    use crate::provider::ProviderKind;
+    use crate::{LlmMessage, ToolDef};
 
     fn provider() -> ProviderConfig {
         ProviderConfig {
@@ -916,29 +921,6 @@ mod tests {
         assert!(params["properties"]["default"].is_object());
     }
 
-    /// Every declared tool must survive sanitising with `required` still fully
-    /// covered by `properties` — otherwise the whole request is rejected.
-    #[test]
-    fn every_tool_stays_consistent_after_sanitising() {
-        let mut req = ChatRequest::new("");
-        req.tools = crate::agent::tools::tool_defs();
-        let body = build_body(&provider(), &req);
-        let declarations = body["tools"][0]["functionDeclarations"].as_array().unwrap();
-        assert_eq!(declarations.len(), req.tools.len());
-        for declaration in declarations {
-            let params = &declaration["parameters"];
-            let properties = params["properties"].as_object().unwrap();
-            for name in params["required"].as_array().unwrap_or(&vec![]) {
-                let name = name.as_str().unwrap();
-                assert!(
-                    properties.contains_key(name),
-                    "{}: required property `{name}` is not defined",
-                    declaration["name"]
-                );
-            }
-        }
-    }
-
     /// Gemini 3 signs each function call and rejects the follow-up turn unless
     /// the signature is echoed back: "Function call is missing a
     /// thought_signature in functionCall parts" (HTTP 400). Parse it, then put
@@ -1010,7 +992,7 @@ mod tests {
         let mut req = ChatRequest::new("");
         req.messages.push(LlmMessage::user_with_images(
             "who is this",
-            vec![crate::llm::ImagePart {
+            vec![crate::ImagePart {
                 mime: "image/png".into(),
                 data: "AAAB".into(),
             }],

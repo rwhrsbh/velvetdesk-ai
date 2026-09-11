@@ -1,7 +1,19 @@
+//! Talking to a model, with the keys and the fallbacks that go with it.
+//!
+//! Shared by the desktop client and the gateway: both send the same request
+//! to the same endpoints, rotate the same pool on the same verdicts, and walk
+//! down the same chain of models when one refuses. Nothing here knows about
+//! files, profiles or windows — it takes a provider, a pool and a request.
+
 pub mod catalog;
+pub mod error;
 pub mod gemini;
 pub mod keypool;
 pub mod openai;
+pub mod provider;
+
+pub use error::{LlmError, Result};
+pub use provider::{mask_key, ProviderConfig, ProviderKind};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -9,8 +21,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::config::{ProviderConfig, ProviderKind};
-use crate::error::{AppError, Result};
 use keypool::{KeyPool, KeyVerdict};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -186,6 +196,13 @@ pub struct Usage {
     pub completion_tokens: u32,
     #[serde(default)]
     pub total_tokens: u32,
+    /// Prompt tokens the provider served from its own cache, when it says so.
+    ///
+    /// Worth carrying because it is priced differently — an order of magnitude
+    /// below a fresh prompt token on most endpoints — so a bill that ignores
+    /// it is a bill that misreads its own cost.
+    #[serde(default)]
+    pub cached_tokens: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -362,12 +379,12 @@ impl LlmClient {
     ) -> Result<ChatResponse> {
         let models = provider.models();
         if models.is_empty() {
-            return Err(AppError::message(
+            return Err(LlmError::message(
                 "error.noModelPicked",
                 serde_json::json!({ "provider": provider.label.clone() }),
             ));
         }
-        let mut last_error = AppError::Provider("no model was tried".into());
+        let mut last_error = LlmError::Provider("no model was tried".into());
         // A model that declined is not a broken key or a flat network: when
         // every model in the chain declines, the operator is told that, and
         // told what actually helps — a different model, or a shorter history.
@@ -389,7 +406,7 @@ impl LlmClient {
                     return Ok(response);
                 }
                 Err(err) => {
-                    if let AppError::Blocked { reason } = &err {
+                    if let LlmError::Blocked { reason } = &err {
                         declined.push(format!("{model}: {reason}"));
                     }
                     last_error = err;
@@ -408,7 +425,7 @@ impl LlmClient {
         }
 
         if declined.len() == models.len() && !declined.is_empty() {
-            return Err(AppError::message(
+            return Err(LlmError::message(
                 "error.allDeclined",
                 serde_json::json!({ "detail": declined.join("; ") }),
             ));
@@ -427,7 +444,7 @@ impl LlmClient {
     ) -> Result<ChatResponse> {
         let key_total = pool.len();
         if key_total == 0 {
-            return Err(AppError::NoKeys(format!(
+            return Err(LlmError::NoKeys(format!(
                 "provider {} has no API keys configured",
                 provider.id
             )));
@@ -442,7 +459,7 @@ impl LlmClient {
 
         for attempt in 0..max_attempts {
             if request.cancelled() {
-                return Err(AppError::message("chat.stopped", serde_json::json!({})));
+                return Err(LlmError::message("chat.stopped", serde_json::json!({})));
             }
             let lease = match pool.acquire() {
                 Some(lease) => lease,
@@ -515,12 +532,12 @@ impl LlmClient {
                         // Every key has now been offered it and every key was
                         // refused: waiting changes nothing, the next model might.
                         if declines >= key_total {
-                            return Err(AppError::Blocked { reason });
+                            return Err(LlmError::Blocked { reason });
                         }
                         continue;
                     }
                     if matches!(verdict, KeyVerdict::Fatal) && key_total == 1 {
-                        return Err(AppError::Provider(last_error));
+                        return Err(LlmError::Provider(last_error));
                     }
                     // Exponential backoff 1s -> 2s -> 4s (capped at 8s).
                     let backoff = 1u64 << attempt.min(3);
@@ -530,9 +547,9 @@ impl LlmClient {
         }
 
         if let Some(reason) = declined {
-            return Err(AppError::Blocked { reason });
+            return Err(LlmError::Blocked { reason });
         }
-        Err(AppError::Provider(format!(
+        Err(LlmError::Provider(format!(
             "all {key_total} key(s) failed after {max_attempts} attempts: {last_error}"
         )))
     }

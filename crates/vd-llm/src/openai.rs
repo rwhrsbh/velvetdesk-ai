@@ -4,7 +4,7 @@
 use serde_json::{json, Value};
 
 use super::{CallError, ChatRequest, ChatResponse, LlmMessage, Role, Thinking, ToolCall, Usage};
-use crate::config::ProviderConfig;
+use crate::provider::ProviderConfig;
 
 pub async fn call(
     http: &reqwest::Client,
@@ -217,10 +217,18 @@ fn read_usage(meta: Option<&Value>) -> Usage {
             .and_then(|v| v.as_u64())
             .unwrap_or(0) as u32
     };
+    // Cached prompt tokens sit one level down, and only on endpoints that
+    // report them at all.
+    let cached = meta
+        .and_then(|m| m.get("prompt_tokens_details"))
+        .and_then(|d| d.get("cached_tokens"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as u32;
     Usage {
         prompt_tokens: field("prompt_tokens"),
         completion_tokens: field("completion_tokens"),
         total_tokens: field("total_tokens"),
+        cached_tokens: cached,
     }
 }
 
@@ -488,8 +496,8 @@ mod tests {
             other => panic!("expected a refusal, got {other:?}"),
         }
     }
-    use crate::config::ProviderKind;
-    use crate::llm::LlmMessage;
+    use crate::provider::ProviderKind;
+    use crate::LlmMessage;
 
     fn provider() -> ProviderConfig {
         ProviderConfig {
@@ -614,7 +622,7 @@ mod tests {
         let mut req = ChatRequest::new("");
         req.messages.push(LlmMessage::user_with_images(
             "who is this",
-            vec![crate::llm::ImagePart {
+            vec![crate::ImagePart {
                 mime: "image/jpeg".into(),
                 data: "QUJD".into(),
             }],

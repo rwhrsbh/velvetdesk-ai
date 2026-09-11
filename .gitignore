@@ -11,3 +11,9 @@ src-tauri/WixTools/
 secrets.json
 public/ort/
 public/vendor/
+target/
+
+# The gateway keeps its own secrets and its own book.
+license-signing.key
+gateway.json
+gateway.db*

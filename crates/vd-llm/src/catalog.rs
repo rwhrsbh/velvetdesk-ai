@@ -7,7 +7,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use super::CallError;
-use crate::config::{ProviderConfig, ProviderKind};
+use crate::provider::{ProviderConfig, ProviderKind};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ModelInfo {

@@ -1147,6 +1147,48 @@ fn truncate(text: &str, max: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// Every declared tool must survive Gemini's sanitiser with `required`
+    /// still fully covered by `properties` — otherwise the whole request is
+    /// rejected, and the tools are ours while the sanitiser is the crate's.
+    #[test]
+    fn every_tool_stays_consistent_after_sanitising() {
+        let provider = crate::config::ProviderConfig {
+            id: "gemini".into(),
+            label: "Gemini".into(),
+            kind: crate::config::ProviderKind::Gemini,
+            base_url: "https://generativelanguage.googleapis.com".into(),
+            api_version: "v1beta".into(),
+            model: "gemini-2.5-flash".into(),
+            extra_headers: vec![],
+            temperature: 0.7,
+            max_output_tokens: None,
+            transcribe_model: String::new(),
+            thinking_effort: String::new(),
+            thinking_budget: None,
+            reasoning_dialect: "auto".into(),
+            model_chain: vec![],
+            context_tokens: None,
+            key_count: 1,
+        };
+        let mut req = crate::llm::ChatRequest::new("");
+        req.tools = tool_defs();
+        let body = crate::llm::gemini::build_body(&provider, &req);
+        let declarations = body["tools"][0]["functionDeclarations"].as_array().unwrap();
+        assert_eq!(declarations.len(), req.tools.len());
+        for declaration in declarations {
+            let params = &declaration["parameters"];
+            let properties = params["properties"].as_object().unwrap();
+            for name in params["required"].as_array().unwrap_or(&vec![]) {
+                let name = name.as_str().unwrap();
+                assert!(
+                    properties.contains_key(name),
+                    "{}: required property `{name}` is not defined",
+                    declaration["name"]
+                );
+            }
+        }
+    }
+
     use super::*;
     use crate::storage::Paths;
 

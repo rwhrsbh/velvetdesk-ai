@@ -180,7 +180,7 @@ impl KeyPool {
             .enumerate()
             .map(|(index, k)| KeyStatus {
                 index,
-                masked: crate::config::mask_key(&k.key),
+                masked: crate::provider::mask_key(&k.key),
                 cooling_seconds: k
                     .cooldown_until
                     .map(|u| u.saturating_duration_since(now).as_secs())

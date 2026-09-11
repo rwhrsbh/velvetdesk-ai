@@ -83,6 +83,26 @@ impl AppError {
     }
 }
 
+/// A provider failure, widened to the error the rest of the app speaks.
+///
+/// Variant for variant, so a refusal is still a refusal by the time the
+/// interface reads it and picks its wording.
+impl From<vd_llm::LlmError> for AppError {
+    fn from(value: vd_llm::LlmError) -> Self {
+        use vd_llm::LlmError as E;
+        match value {
+            E::Json(e) => AppError::Json(e),
+            E::Http(e) => AppError::Http(e),
+            E::Invalid(e) => AppError::Invalid(e),
+            E::Provider(e) => AppError::Provider(e),
+            E::NoKeys(e) => AppError::NoKeys(e),
+            E::Blocked { reason } => AppError::Blocked { reason },
+            E::Other(e) => AppError::Other(e),
+            E::Message { key, params } => AppError::Message { key, params },
+        }
+    }
+}
+
 impl From<reqwest::Error> for AppError {
     fn from(value: reqwest::Error) -> Self {
         AppError::Http(value.to_string())

@@ -1,0 +1,47 @@
+{
+  "bind": "127.0.0.1:8787",
+  "db_path": "/var/lib/velvetdesk/gateway.db",
+  "license_public_key": "PUT THE KEYGEN OUTPUT HERE",
+  "credit_usd": 0.001,
+  "tiers": {
+    "solo": { "credits_5h": 300, "credits_week": 4000, "max_peers": 1 },
+    "pro": { "credits_5h": 1200, "credits_week": 20000, "max_peers": 2 },
+    "agency": { "credits_5h": 6000, "credits_week": 120000, "max_peers": 10 }
+  },
+  "upstreams": [
+    {
+      "id": "openrouter",
+      "label": "OpenRouter",
+      "kind": "openai_compatible",
+      "base_url": "https://openrouter.ai/api/v1",
+      "keys_env": ["OPENROUTER_KEY"],
+      "reasoning_dialect": "openrouter",
+      "models": [
+        {
+          "name": "deepseek-chat",
+          "upstream_name": "deepseek/deepseek-chat",
+          "price_in": 0.28,
+          "price_cached": 0.028,
+          "price_out": 0.42
+        },
+        {
+          "name": "qwen-max",
+          "upstream_name": "qwen/qwen-max",
+          "price_in": 1.6,
+          "price_out": 6.4
+        }
+      ]
+    },
+    {
+      "id": "gemini",
+      "label": "Gemini",
+      "kind": "gemini",
+      "base_url": "https://generativelanguage.googleapis.com",
+      "api_version": "v1beta",
+      "keys_env": ["GEMINI_KEYS"],
+      "models": [
+        { "name": "gemini-2.5-flash", "price_in": 0.3, "price_out": 2.5 }
+      ]
+    }
+  ]
+}

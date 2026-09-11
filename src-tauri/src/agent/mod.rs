@@ -1193,7 +1193,7 @@ async fn run_auto(
                     stopped = true;
                     break;
                 }
-                return Err(err);
+                return Err(err.into());
             }
         };
 

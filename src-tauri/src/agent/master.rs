@@ -423,7 +423,7 @@ pub async fn chat(deps: &AgentDeps<'_>, input: MasterInput) -> Result<MasterOutp
                     stopped = true;
                     break;
                 }
-                return Err(err);
+                return Err(err.into());
             }
         };
 
