@@ -158,8 +158,10 @@
           <h2>Модели</h2>
           <p class="muted">
             Порядок — это порядок падения: запрос идёт с той, что назвал клиент, и дальше
-            вниз по списку. Цены за миллион токенов в долларах; пустая цена кеша означает,
-            что кеш считается по полной.
+            вниз по списку, через всех провайдеров. При переходе на следующую модель
+            кулдауны ключей сбрасываются — квота считается по моделям, и ключ, упёршийся
+            в одну, на следующей ещё жив. Цены за миллион токенов в долларах; пустая цена
+            кеша означает, что кеш считается по полной.
           </p>
           <div id="model-list" class="muted">Загружаю…</div>
         </div>
@@ -295,11 +297,16 @@
           data.upstreams.map(async (up) => {
             const keys = await call(`/admin/upstreams/${encodeURIComponent(up.id)}/keys`);
             const keyRows = keys
-              .map(
-                (key) => `<tr><td><code>${esc(key.masked)}</code></td>
-                  <td class="muted">${new Date(key.added_at * 1000).toLocaleDateString()}</td>
-                  <td style="text-align:right"><button class="ghost danger" data-del-key="${key.id}">удалить</button></td></tr>`,
-              )
+              .map((key) => {
+                const state = key.cooling_seconds
+                  ? `<span class="pill off">остывает ${key.cooling_seconds}s</span>`
+                  : `<span class="pill on">в строю</span>`;
+                return `<tr><td><code>${esc(key.masked)}</code></td>
+                  <td>${state}</td>
+                  <td class="muted">${key.successes} / ${key.failures}</td>
+                  <td class="muted">${esc(key.last_error || "")}</td>
+                  <td style="text-align:right"><button class="ghost danger" data-del-key="${key.id}">удалить</button></td></tr>`;
+              })
               .join("");
             return `<div class="card" style="background:#0c0e13">
               <div class="row">
@@ -312,8 +319,10 @@
                   <button class="ghost danger" data-del-up="${esc(up.id)}">удалить</button>
                 </span>
               </div>
-              <table style="margin-top:8px"><thead><tr><th>ключ</th><th>добавлен</th><th></th></tr></thead>
-                <tbody>${keyRows || '<tr><td colspan="3" class="muted">ключей нет</td></tr>'}</tbody></table>
+              <table style="margin-top:8px"><thead><tr>
+                  <th>ключ</th><th>состояние</th><th>ок / сбоев</th><th>последняя ошибка</th><th></th>
+                </tr></thead>
+                <tbody>${keyRows || '<tr><td colspan="5" class="muted">ключей нет</td></tr>'}</tbody></table>
               <div class="row" style="margin-top:8px">
                 <input placeholder="вставьте ключ или несколько через запятую" data-key-for="${esc(up.id)}" />
                 <button class="act" data-add-key="${esc(up.id)}">Добавить</button>

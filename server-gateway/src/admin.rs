@@ -169,13 +169,42 @@ async fn delete_upstream(
     Ok(Json(json!({ "deleted": id })))
 }
 
+/// The keys of one upstream, with how each is faring.
+///
+/// The masks come from the database and the tallies from the live pool, in
+/// the same order — the pool is built from that list. Without this the page
+/// shows a row of identical-looking keys and no hint of which one the
+/// provider has been refusing all morning.
 async fn list_keys(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     admin(&state, &headers)?;
-    Ok(Json(json!(state.db.list_keys(&id)?)))
+    let rows = state.db.list_keys(&id)?;
+    let status = state
+        .registry
+        .read()
+        .pool(&id)
+        .map(|pool| pool.status())
+        .unwrap_or_default();
+    let merged: Vec<Value> = rows
+        .into_iter()
+        .enumerate()
+        .map(|(index, row)| {
+            let live = status.get(index);
+            json!({
+                "id": row.id,
+                "masked": row.masked,
+                "added_at": row.added_at,
+                "successes": live.map(|s| s.successes).unwrap_or(0),
+                "failures": live.map(|s| s.failures).unwrap_or(0),
+                "cooling_seconds": live.map(|s| s.cooling_seconds).unwrap_or(0),
+                "last_error": live.and_then(|s| s.last_error.clone()),
+            })
+        })
+        .collect();
+    Ok(Json(json!(merged)))
 }
 
 async fn add_key(

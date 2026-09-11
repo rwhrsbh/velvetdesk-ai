@@ -363,6 +363,55 @@ mod tests {
         assert_eq!(provider.model, "deepseek/deepseek-chat");
     }
 
+    /// Editing the registry must not quietly forgive a key the provider has
+    /// been refusing: a pool whose keys did not change is the same pool,
+    /// cooldowns and tallies included. A pool whose keys did change is new,
+    /// because a key nobody has tried has nothing held against it.
+    #[test]
+    fn reloading_keeps_the_punishment_of_an_unchanged_pool() {
+        use vd_llm::keypool::KeyVerdict;
+
+        let db = crate::db::Db::memory().unwrap();
+        db.save_upstream(&upstream("gemini", true)).unwrap();
+        db.add_key("gemini", "k1", 0).unwrap();
+
+        let first = Registry::load(&db, None).unwrap();
+        let pool = first.pool("gemini").unwrap();
+        pool.report_failure(0, KeyVerdict::QuotaOrAuth);
+        assert!(pool.acquire().is_none(), "the only key is parked");
+
+        let second = Registry::load(&db, Some(&first)).unwrap();
+        assert!(
+            second.pool("gemini").unwrap().acquire().is_none(),
+            "an edit elsewhere does not hand a refused key a clean slate"
+        );
+
+        db.add_key("gemini", "k2", 0).unwrap();
+        let third = Registry::load(&db, Some(&second)).unwrap();
+        assert!(
+            third.pool("gemini").unwrap().acquire().is_some(),
+            "a pool that gained a key is a new pool"
+        );
+    }
+
+    /// What the chain does between models: the same keys, forgiven, because
+    /// the quota that stopped them belonged to the model and not to them.
+    #[test]
+    fn forgiving_cooldowns_revives_the_pool() {
+        use vd_llm::keypool::KeyVerdict;
+
+        let db = crate::db::Db::memory().unwrap();
+        db.save_upstream(&upstream("gemini", true)).unwrap();
+        db.add_key("gemini", "k1", 0).unwrap();
+        let registry = Registry::load(&db, None).unwrap();
+        let pool = registry.pool("gemini").unwrap();
+
+        pool.report_failure(0, KeyVerdict::RateLimited);
+        assert!(pool.acquire().is_none());
+        pool.clear_cooldowns();
+        assert!(pool.acquire().is_some());
+    }
+
     /// A model with no cache price is not secretly cheap.
     #[test]
     fn cache_price_falls_back_to_the_full_one() {

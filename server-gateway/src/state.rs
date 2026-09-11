@@ -135,7 +135,7 @@ impl AppState {
         }
 
         let mut last = LlmError::Provider("no model was tried".into());
-        for (model_name, provider) in attempts {
+        for (index, (model_name, provider)) in attempts.into_iter().enumerate() {
             let Some(pool) = self.registry.read().pool(&provider.id) else {
                 continue;
             };
@@ -143,6 +143,14 @@ impl AppState {
                 // An upstream with no keys is a line in a table, not a place
                 // to send anyone.
                 continue;
+            }
+
+            // Quotas are per model, not per key. A key parked because one
+            // model refused it has a fresh quota on the next one, so moving
+            // down the chain forgives the cooldowns first — which is the whole
+            // reason a pool of free keys is worth having.
+            if index > 0 {
+                pool.clear_cooldowns();
             }
 
             match self.llm.chat(&provider, pool, request, on_event).await {
