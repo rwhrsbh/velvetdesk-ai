@@ -251,10 +251,40 @@ fn user_content(msg: &LlmMessage) -> Value {
     Value::Array(parts)
 }
 
+/// Whether this model wants to be told where its cache ends.
+///
+/// Most endpoints cache the stable head of a prompt by themselves — DeepSeek
+/// and Gemini do, and there is nothing to mark. Anthropic's models do not:
+/// without an explicit breakpoint they cache nothing at all, and the system
+/// prompt with a dossier in it is paid for again on every turn of the shift.
+fn wants_cache_breakpoint(provider: &ProviderConfig) -> bool {
+    let model = provider.model.to_lowercase();
+    provider.dialect() == "openrouter" && (model.contains("claude") || model.contains("anthropic"))
+}
+
+/// The system prompt, marked as the end of the part worth caching.
+///
+/// The breakpoint goes after the system prompt because that is where the
+/// stable half of a VelvetDesk request ends: rules, persona and dossier above
+/// it, the conversation below.
+fn system_content(request: &ChatRequest, breakpoint: bool) -> Value {
+    if !breakpoint {
+        return Value::String(request.system.clone());
+    }
+    json!([{
+        "type": "text",
+        "text": request.system,
+        "cache_control": { "type": "ephemeral" },
+    }])
+}
+
 fn build_body(provider: &ProviderConfig, request: &ChatRequest) -> Value {
     let mut messages: Vec<Value> = vec![];
     if !request.system.trim().is_empty() {
-        messages.push(json!({ "role": "system", "content": request.system }));
+        messages.push(json!({
+            "role": "system",
+            "content": system_content(request, wants_cache_breakpoint(provider)),
+        }));
     }
 
     for msg in &request.messages {
@@ -483,6 +513,41 @@ fn parse_response(value: &Value) -> Result<ChatResponse, CallError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Anthropic through OpenRouter caches nothing unless it is told where the
+    /// stable part ends, and the stable part is the system prompt: rules,
+    /// persona and dossier, repeated on every turn of a shift.
+    #[test]
+    fn anthropic_through_openrouter_gets_a_cache_breakpoint() {
+        let mut p = provider();
+        p.base_url = "https://openrouter.ai/api/v1".into();
+        p.model = "anthropic/claude-sonnet-4".into();
+        let mut request = ChatRequest::new("rules and a dossier");
+        request.messages.push(LlmMessage::user("hi"));
+        let body = build_body(&p, &request);
+        let system = &body["messages"][0]["content"][0];
+        assert_eq!(system["text"], "rules and a dossier");
+        assert_eq!(system["cache_control"]["type"], "ephemeral");
+    }
+
+    /// Everyone else caches the head of the prompt by themselves, and a shape
+    /// they did not ask for is a shape some of them reject.
+    #[test]
+    fn other_models_keep_the_plain_system_string() {
+        let mut p = provider();
+        p.base_url = "https://openrouter.ai/api/v1".into();
+        p.model = "deepseek/deepseek-chat".into();
+        let body = build_body(&p, &ChatRequest::new("rules"));
+        assert_eq!(body["messages"][0]["content"], "rules");
+
+        let mut direct = provider();
+        direct.model = "claude-sonnet-4".into();
+        let body = build_body(&direct, &ChatRequest::new("rules"));
+        assert_eq!(
+            body["messages"][0]["content"], "rules",
+            "a direct endpoint is not OpenRouter"
+        );
+    }
 
     /// A gateway that filters the request answers with an empty message. It
     /// counts as a refusal, so the next model in the chain gets a turn.

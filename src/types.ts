@@ -262,6 +262,23 @@ export interface Settings {
   update_check: boolean;
   /** A version already offered and turned down. */
   update_skipped: string;
+  /** Ed25519 public key, base64, a VelvetDesk Cloud licence is checked against. */
+  cloud_public_key: string;
+}
+
+/** Where the VelvetDesk Cloud subscription stands, licence and credits both. */
+export interface CloudStatus {
+  valid: boolean;
+  license_id: string;
+  tier: string;
+  expires_at: number;
+  max_peers: number;
+  /** A dictionary key naming what is wrong, empty when nothing is. */
+  problem: string;
+  /** Null when the gateway could not be reached. */
+  credits_left_5h: number | null;
+  credits_left_week: number | null;
+  reset_at: number | null;
 }
 
 /** How much of the context window the correspondence currently occupies. */

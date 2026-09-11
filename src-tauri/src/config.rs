@@ -65,6 +65,11 @@ pub struct Settings {
     /// "provider" (cloud) or "local" (downloaded Whisper, offline).
     #[serde(default = "default_speech_engine")]
     pub speech_engine: String,
+    /// Ed25519 public key, base64, that a VelvetDesk Cloud licence is checked
+    /// against. Empty until the operator pastes theirs, and an empty one means
+    /// the licence is taken on trust by the gateway alone.
+    #[serde(default)]
+    pub cloud_public_key: String,
     /// Id of the downloaded model used when the engine is local.
     #[serde(default)]
     pub local_speech_model: String,
@@ -183,6 +188,27 @@ impl Default for Settings {
                     key_count: 0,
                 },
                 ProviderConfig {
+                    id: "velvetdesk-cloud".into(),
+                    label: "VelvetDesk Cloud".into(),
+                    kind: ProviderKind::OpenaiCompatible,
+                    // The operator's own gateway. Nothing is sent anywhere by
+                    // default: without a licence key this provider is inert,
+                    // exactly like the others without their keys.
+                    base_url: "https://cloud.velvetdesk.ai/v1".into(),
+                    api_version: "v1".into(),
+                    model: "deepseek-chat".into(),
+                    extra_headers: vec![],
+                    temperature: 0.85,
+                    max_output_tokens: None,
+                    transcribe_model: String::new(),
+                    thinking_effort: String::new(),
+                    thinking_budget: None,
+                    model_chain: vec![],
+                    reasoning_dialect: default_dialect(),
+                    context_tokens: None,
+                    key_count: 0,
+                },
+                ProviderConfig {
                     id: "groq".into(),
                     label: "Groq / Whisper".into(),
                     kind: ProviderKind::OpenaiCompatible,
@@ -213,6 +239,7 @@ impl Default for Settings {
             tour_done: false,
             speech_provider: None,
             speech_engine: default_speech_engine(),
+            cloud_public_key: String::new(),
             local_speech_model: String::new(),
             trusted_roots: vec![],
             update_check: true,

@@ -12,7 +12,7 @@ use vd_llm::{ChatRequest, ChatResponse, LlmClient, LlmError};
 
 use crate::config::GatewayConfig;
 use crate::db::Db;
-use crate::license::public_key_from_base64;
+use vd_license::public_key_from_base64;
 
 #[derive(Clone)]
 pub struct AppState {

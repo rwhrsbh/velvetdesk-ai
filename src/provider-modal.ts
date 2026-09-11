@@ -144,6 +144,9 @@ export async function openKeysModal(deps: ModalDeps) {
     }
     const catalog = catalogs.get(p.id) ?? null;
     const isGemini = p.kind === "gemini";
+    // The cloud provider is billed rather than keyed: the "key" is a
+    // licence, and what matters about it is what is left on it.
+    const isCloud = p.id === "velvetdesk-cloud";
 
     const modelOptions = catalog ? modelRows(catalog.models, p.model, "") : "";
 
@@ -183,6 +186,20 @@ export async function openKeysModal(deps: ModalDeps) {
             .join("")}
         </div>
       </div>
+
+      ${
+        isCloud
+          ? `<div class="field">
+        <label>${t("keys.cloudPublicKey")}
+          <span class="hint-inline">${t("keys.cloudPublicKeyHint")}</span>
+        </label>
+        <input class="field-input" id="cloudPublicKey" value="${escapeHtml(
+          settings.cloud_public_key ?? "",
+        )}" placeholder="${t("keys.cloudPublicKeyPlaceholder")}" autocomplete="off" />
+        <div class="meta" id="cloudStatus">${t("keys.cloudChecking")}</div>
+      </div>`
+          : ""
+      }
 
       <div class="field">
         <label>${t("keys.step1", { n: keys.length })}</label>
@@ -418,6 +435,58 @@ export async function openKeysModal(deps: ModalDeps) {
         <button class="btn btn-primary" id="btnSaveProvider">${t("common.save")}</button>
       </div>
     `);
+
+    const publicKeyInput = card.querySelector<HTMLInputElement>("#cloudPublicKey");
+    publicKeyInput?.addEventListener("change", async () => {
+      settings.cloud_public_key = publicKeyInput.value.trim();
+      await persist({}, true);
+      await showCloudStatus();
+    });
+
+    /** Licence and credits, once the gateway has answered — or said nothing. */
+    async function showCloudStatus() {
+      const line = card.querySelector<HTMLElement>("#cloudStatus");
+      if (!line) return;
+      try {
+        const status = await api.cloudStatus();
+        const parts: string[] = [];
+        if (status.problem) {
+          // The backend names the problem; the wording of it lives here, in
+          // whichever language the app is running.
+          const wording: Record<string, string> = {
+            "license.missing": "keys.cloudMissing",
+            "license.expired": "keys.cloudExpired",
+            "license.invalid": "keys.cloudInvalid",
+            "license.noPublicKey": "keys.cloudNoPublicKey",
+            "license.refused": "keys.cloudRefused",
+          };
+          parts.push(t(wording[status.problem.split(":")[0]] ?? "keys.cloudInvalid"));
+        } else if (status.valid) {
+          parts.push(
+            t("keys.cloudValid", {
+              tier: status.tier,
+              date: status.expires_at
+                ? new Date(status.expires_at * 1000).toLocaleDateString()
+                : t("keys.cloudForever"),
+            }),
+          );
+        }
+        if (status.credits_left_5h !== null && status.credits_left_week !== null) {
+          parts.push(
+            t("keys.cloudCredits", {
+              n5: Math.max(0, Math.round(status.credits_left_5h)),
+              nw: Math.max(0, Math.round(status.credits_left_week)),
+            }),
+          );
+        } else if (!status.problem) {
+          parts.push(t("keys.cloudOffline"));
+        }
+        line.textContent = parts.join(" · ");
+      } catch (error) {
+        line.textContent = errorText(error);
+      }
+    }
+    if (isCloud) void showCloudStatus();
 
     card.querySelectorAll<HTMLButtonElement>("[data-provider]").forEach((btn) => {
       btn.addEventListener("click", async () => {

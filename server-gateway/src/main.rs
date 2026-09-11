@@ -6,7 +6,6 @@
 
 mod config;
 mod db;
-mod license;
 mod quota;
 mod routes;
 mod state;
@@ -20,8 +19,8 @@ use ed25519_dalek::SigningKey;
 
 use crate::config::GatewayConfig;
 use crate::db::Db;
-use crate::license::License;
 use crate::state::AppState;
+use vd_license::License;
 
 fn main() -> std::io::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
@@ -131,7 +130,7 @@ fn mint(args: &[String]) -> std::io::Result<()> {
         },
         max_peers,
     };
-    println!("{}", license::mint(&key, &license));
+    println!("{}", vd_license::mint(&key, &license));
     Ok(())
 }
 

@@ -4,7 +4,7 @@
 # calls themselves. The client sends them from a laptop, the gateway from a
 # VPS, and neither has its own copy to keep in step with the other.
 [workspace]
-members = ["crates/vd-llm", "server-gateway", "src-tauri"]
+members = ["crates/vd-license", "crates/vd-llm", "server-gateway", "src-tauri"]
 resolver = "2"
 
 [workspace.package]
@@ -14,6 +14,7 @@ license = "MIT"
 
 [workspace.dependencies]
 vd-llm = { path = "crates/vd-llm" }
+vd-license = { path = "crates/vd-license" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

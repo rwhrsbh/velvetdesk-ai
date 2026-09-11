@@ -1029,6 +1029,133 @@ pub fn save_settings(state: State<'_, AppState>, settings: Settings) -> Result<S
     Ok(state.settings_view())
 }
 
+/// Where the VelvetDesk Cloud subscription stands.
+///
+/// The licence is checked here, against the public key in settings, before
+/// anyone is asked anything: a signature is a fact the laptop can establish on
+/// its own, and it is what lets the app say "expired" while the network is
+/// down. The credits come from the gateway, because only the gateway knows
+/// what has been spent.
+#[derive(Debug, Clone, Serialize)]
+pub struct CloudStatus {
+    /// True when the licence is signed by the key we carry and still in date.
+    pub valid: bool,
+    pub license_id: String,
+    pub tier: String,
+    pub expires_at: i64,
+    pub max_peers: u32,
+    /// Empty when the licence itself is fine.
+    pub problem: String,
+    /// Filled in only when the gateway answered.
+    pub credits_left_5h: Option<f64>,
+    pub credits_left_week: Option<f64>,
+    pub reset_at: Option<i64>,
+}
+
+const CLOUD_PROVIDER: &str = "velvetdesk-cloud";
+
+#[tauri::command]
+pub async fn cloud_status(state: State<'_, AppState>) -> Result<CloudStatus> {
+    let settings = state.settings.read().clone();
+    let token = state
+        .secrets
+        .read()
+        .for_provider(CLOUD_PROVIDER)
+        .first()
+        .cloned()
+        .unwrap_or_default();
+    let base_url = settings
+        .provider(CLOUD_PROVIDER)
+        .map(|p| p.base_url.trim_end_matches('/').to_string())
+        .unwrap_or_default();
+
+    let mut status = CloudStatus {
+        valid: false,
+        license_id: String::new(),
+        tier: String::new(),
+        expires_at: 0,
+        max_peers: 0,
+        problem: String::new(),
+        credits_left_5h: None,
+        credits_left_week: None,
+        reset_at: None,
+    };
+
+    if token.trim().is_empty() {
+        status.problem = "license.missing".into();
+        return Ok(status);
+    }
+
+    // Without a public key there is nothing to check against, and pretending
+    // otherwise would be the one lie this whole design exists to avoid: the
+    // gateway still decides, the app just cannot say so in advance.
+    match vd_license::public_key_from_base64(&settings.cloud_public_key) {
+        Some(public_key) => match vd_license::verify(&token, &public_key) {
+            Ok(license) => {
+                let now = chrono::Utc::now().timestamp();
+                status.license_id = license.license_id.clone();
+                status.tier = license.tier.clone();
+                status.expires_at = license.expires_at;
+                status.max_peers = license.max_peers;
+                status.valid = !license.expired_at(now);
+                if !status.valid {
+                    status.problem = "license.expired".into();
+                }
+            }
+            Err(err) => {
+                status.problem = format!("license.invalid:{err}");
+                return Ok(status);
+            }
+        },
+        None => status.problem = "license.noPublicKey".into(),
+    }
+
+    if base_url.is_empty() {
+        return Ok(status);
+    }
+
+    // What is left is the gateway's to say. A gateway that cannot be reached
+    // leaves the numbers empty rather than guessing at them.
+    let response = state
+        .llm
+        .http
+        .get(format!("{base_url}/usage"))
+        .header("authorization", format!("Bearer {}", token.trim()))
+        .send()
+        .await;
+    let Ok(response) = response else {
+        return Ok(status);
+    };
+    if !response.status().is_success() {
+        if response.status().as_u16() == 403 || response.status().as_u16() == 401 {
+            status.valid = false;
+            if status.problem.is_empty() {
+                status.problem = "license.refused".into();
+            }
+        }
+        return Ok(status);
+    }
+    let Ok(body) = response.json::<Value>().await else {
+        return Ok(status);
+    };
+    status.credits_left_5h = body.get("credits_left_5h").and_then(Value::as_f64);
+    status.credits_left_week = body.get("credits_left_week").and_then(Value::as_f64);
+    status.reset_at = body.get("reset_at").and_then(Value::as_i64);
+    if status.license_id.is_empty() {
+        status.license_id = body
+            .get("license_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        status.tier = body
+            .get("tier")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+    }
+    Ok(status)
+}
+
 #[tauri::command]
 pub fn list_keys(state: State<'_, AppState>, provider_id: String) -> Result<Vec<KeyStatus>> {
     Ok(state.pool(&provider_id).status())

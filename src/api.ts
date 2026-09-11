@@ -10,6 +10,7 @@ import type {
   AgentLog,
   Bootstrap,
   ChatThread,
+  CloudStatus,
   DoctorReport,
   GlobalIndex,
   KeyStatus,
@@ -145,6 +146,8 @@ export const api = {
   getSettings: () => invoke<Settings>("get_settings"),
   saveSettings: (settings: Settings) => invoke<Settings>("save_settings", { settings }),
 
+  /** Licence and credits for the cloud provider, checked locally then asked of the gateway. */
+  cloudStatus: () => invoke<CloudStatus>("cloud_status"),
   listKeys: (providerId: string) => invoke<KeyStatus[]>("list_keys", { providerId }),
   setKeys: (providerId: string, keys: string[]) =>
     invoke<KeyStatus[]>("set_keys", { providerId, keys }),

@@ -5255,6 +5255,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
+name = "vd-license"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "ed25519-dalek",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "vd-llm"
 version = "0.2.0"
 dependencies = [
@@ -5291,6 +5302,7 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "uuid",
+ "vd-license",
  "vd-llm",
  "webview2-com",
  "windows",
@@ -5316,6 +5328,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "uuid",
+ "vd-license",
  "vd-llm",
 ]
 

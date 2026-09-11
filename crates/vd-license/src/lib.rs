@@ -12,6 +12,8 @@
 use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64;
 use base64::Engine;
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+
+pub use ed25519_dalek::{SigningKey as LicenseSigningKey, VerifyingKey as LicensePublicKey};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

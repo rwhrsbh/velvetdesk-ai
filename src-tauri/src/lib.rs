@@ -163,6 +163,7 @@ pub fn run() {
             commands::doctor_fix,
             commands::get_settings,
             commands::save_settings,
+            commands::cloud_status,
             commands::list_keys,
             commands::set_keys,
             commands::add_key,

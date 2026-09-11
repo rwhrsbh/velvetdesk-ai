@@ -15,10 +15,10 @@ use serde_json::{json, Value};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::config::Tier;
-use crate::license::{verify, License, LicenseError};
 use crate::quota::{allowance, charge, Allowance};
 use crate::state::AppState;
 use crate::translate;
+use vd_license::{verify, License, LicenseError};
 
 pub fn router(state: AppState) -> Router {
     Router::new()
