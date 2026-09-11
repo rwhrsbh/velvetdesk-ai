@@ -38,6 +38,7 @@ VD_GATEWAY_CONFIG=/etc/velvetdesk/gateway.json ./velvetdesk-gateway serve
 | POST | `/v1/chat/completions` | OpenAI-совместимый, `stream` поддержан |
 | POST | `/v1beta/models/<model>:generateContent` | нативный Gemini |
 | POST | `/v1beta/models/<model>:streamGenerateContent` | он же потоком |
+| GET | `/sync/ws?room=<id>` | релей синхронизации: перекладывает запечатанные кадры между устройствами одной пары |
 | POST | `/admin/revoke` | отозвать лицензию (`X-VD-Admin`) |
 | GET | `/admin/stats?hours=24` | доля попаданий кеша (`X-VD-Admin`) |
 
@@ -50,6 +51,13 @@ VD_GATEWAY_CONFIG=/etc/velvetdesk/gateway.json ./velvetdesk-gateway serve
 стоит в долларах, цены моделей заданы за миллион токенов. Кешированные
 промпт-токены считаются по своей цене, остальные по полной. Лимит — два окна
 сразу: скользящие 5 часов и неделя; при исчерпании `429` с `reset_at`.
+
+## Синхронизация
+
+Шлюз в синхронизации участвует только как почтальон: устройства пары приходят
+в комнату `/sync/ws?room=<хеш ключа пары>` и обмениваются кадрами
+XChaCha20-Poly1305. Ключ пары шлюз не видит и расшифровать ничего не может;
+сколько устройств пускать в комнату, говорит `max_peers` лицензии.
 
 ## systemd
 
