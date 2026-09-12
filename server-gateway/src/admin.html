@@ -729,6 +729,7 @@
                 <td class="muted">${esc(row.note)}</td>
                 <td style="text-align:right" class="row" style="justify-content:flex-end">
                   <button class="ghost" data-devices="${esc(row.license_id)}">устройства</button>
+                  <button class="ghost" data-mailbox="${esc(row.license_id)}">очистить обмен</button>
                   <button class="ghost ${row.revoked ? "" : "danger"}" data-revoke="${esc(row.license_id)}" data-on="${row.revoked}">
                     ${row.revoked ? "вернуть" : "отозвать"}
                   </button>
@@ -807,6 +808,23 @@
             } catch (error) {
               box.innerHTML = "";
               box.dataset.open = "0";
+              toast(error.message, true);
+            }
+          });
+        });
+
+        // Everything in a mailbox is sealed and unreadable here; clearing it
+        // reclaims the space and makes every device start the exchange again
+        // from what it holds locally.
+        document.querySelectorAll("[data-mailbox]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            const id = button.dataset.mailbox;
+            try {
+              const out = await call(`/admin/licenses/${encodeURIComponent(id)}/mailbox`, {
+                method: "DELETE",
+              });
+              toast(`Очищено записей: ${out.cleared}`);
+            } catch (error) {
               toast(error.message, true);
             }
           });

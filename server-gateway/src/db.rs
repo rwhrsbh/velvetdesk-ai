@@ -165,6 +165,7 @@ impl Db {
                  PRIMARY KEY (license_id, device_id)
              );",
         )?;
+        Db::add_column(conn, "license", "room", "TEXT NOT NULL DEFAULT ''");
         Db::add_column(conn, "model", "voice", "INTEGER NOT NULL DEFAULT 0");
         Db::add_column(conn, "model", "price_request", "REAL NOT NULL DEFAULT 0");
         Ok(())
@@ -254,6 +255,34 @@ impl Db {
     }
 
     // -------------------------------------------------------------- mailbox
+
+    /// Remember which mailbox belongs to a licence.
+    ///
+    /// The room is a hash of the licence token, which the gateway never
+    /// stores — so it can only learn the pairing at the moment a device
+    /// presents both, and it writes it down then. Without this an operator
+    /// clearing a mailbox from the admin page would have nothing to clear
+    /// it by.
+    pub fn note_room(&self, license_id: &str, room: &str) -> rusqlite::Result<()> {
+        self.conn.lock().execute(
+            "UPDATE license SET room = ?2 WHERE license_id = ?1 AND room <> ?2",
+            rusqlite::params![license_id, room],
+        )?;
+        Ok(())
+    }
+
+    pub fn room_of(&self, license_id: &str) -> rusqlite::Result<Option<String>> {
+        let room: Option<String> = self
+            .conn
+            .lock()
+            .query_row(
+                "SELECT room FROM license WHERE license_id = ?1",
+                [license_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(room.filter(|room| !room.is_empty()))
+    }
 
     /// Leave a record for the other devices, if this is newer than what is
     /// already there.

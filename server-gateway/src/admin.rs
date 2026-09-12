@@ -44,6 +44,7 @@ pub fn router() -> Router<AppState> {
         .route("/admin/licenses/{id}/peers", post(set_peers))
         .route("/admin/upstreams/{id}/catalog", get(catalog))
         .route("/admin/licenses/{id}/devices", get(list_devices))
+        .route("/admin/licenses/{id}/mailbox", delete(clear_mailbox))
         .route(
             "/admin/licenses/{id}/devices/{device}",
             delete(forget_device),
@@ -395,6 +396,29 @@ async fn catalog(
             Err(ApiError::Upstream(err.message()))
         }
     }
+}
+
+/// Empty a licence's sync mailbox.
+///
+/// Everything in it is sealed and unreadable here, so this is not a way to
+/// look at anybody's correspondence — it is the way to reclaim the space
+/// when a licence is finished with, or to force every device to start the
+/// exchange again from what it holds locally.
+async fn clear_mailbox(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    admin(&state, &headers)?;
+    // The room is a hash of the licence token, which is never stored here;
+    // what is stored is the room a device presented alongside this licence
+    // the last time it pushed. A licence whose devices have never synced has
+    // no mailbox to clear.
+    let room = state.db.room_of(&id)?.ok_or_else(|| {
+        ApiError::BadRequest(format!("{id} has no mailbox: no device has synced with it"))
+    })?;
+    let cleared = state.db.mailbox_clear(&room)?;
+    Ok(Json(json!({ "cleared": cleared })))
 }
 
 /// The machines one licence is in use from.

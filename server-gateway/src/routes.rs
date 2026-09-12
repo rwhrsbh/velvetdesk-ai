@@ -735,6 +735,7 @@ async fn sync_push(
     let caller = authenticate(&state, &headers, &query)?;
     seat(&state, &caller, &headers)?;
     let room = allowed_room(&body.room, &headers, &query)?;
+    state.db.note_room(&caller.license.license_id, &room)?;
     if body.items.len() > MAX_ITEMS {
         return Err(ApiError::BadRequest(format!(
             "at most {MAX_ITEMS} records at a time"
