@@ -12,6 +12,7 @@ import {
   escapeHtml,
   openModal,
   toast,
+  whenFree,
 } from "./dom";
 import {
   copyText,
@@ -2802,22 +2803,25 @@ async function boot() {
     renderAll();
     await refreshPlanChip();
 
+    // Both of these arrive on a timer, and used to land on top of each
+    // other: whichever was second replaced the first before anyone had read
+    // it. They queue for the screen instead — the update offer first,
+    // because a new version is the more perishable news.
+    if (data.settings.update_check) {
+      window.setTimeout(() => whenFree(() => void offerUpdate(false)), 4000);
+    }
+
     // The free version says so once, after the window has settled — and the
     // pitch is the four things a subscription actually changes, not a wall.
     if (store.plan?.plan === "free") {
-      window.setTimeout(() => nagAboutFree(), 6000);
-    }
-
-    // A quiet look at the release page a moment after the window is usable.
-    if (data.settings.update_check) {
-      window.setTimeout(() => void offerUpdate(false), 4000);
+      window.setTimeout(() => whenFree(() => nagAboutFree()), 6000);
     }
 
     // The first run opens the guide by itself: an empty window explains
     // nothing on its own, and the language it should explain itself in is the
     // guide's own first question.
     if (!data.settings.tour_done) {
-      window.setTimeout(() => openTour(), 400);
+      window.setTimeout(() => whenFree(() => openTour()), 400);
     }
 
     if (data.profiles.length === 0) {

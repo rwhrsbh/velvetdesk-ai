@@ -103,6 +103,52 @@ export function notify(message: string, onOpen: () => void) {
 
 let closeHandler: (() => void) | null = null;
 
+/** Is a dialog on screen right now? */
+export function modalIsOpen(): boolean {
+  return $("modalOverlay").classList.contains("open");
+}
+
+/**
+ * Things waiting for the screen to be free.
+ *
+ * Two dialogs that decide to appear on a timer — the update offer and the
+ * free-version notice — used to land on top of each other, and the second
+ * one replaced the first before it had been read. They queue now: whoever
+ * asks first shows first, the rest wait for the screen.
+ */
+const waiting: Array<() => void> = [];
+
+/**
+ * Show a dialog when nothing else is up.
+ *
+ * For dialogs the app opens by itself. A dialog the operator asked for by
+ * pressing a button should not queue — they are looking at the screen and
+ * expect it now — so those still call `openModal` directly.
+ */
+export function whenFree(show: () => void) {
+  if (!modalIsOpen()) {
+    show();
+    return;
+  }
+  waiting.push(show);
+}
+
+/** The next thing in the queue, once the screen is clear. */
+function showNextWaiting() {
+  const next = waiting.shift();
+  if (!next) return;
+  // A frame's grace, so the closing dialog is gone before the next appears
+  // rather than the two swapping in the same paint.
+  window.setTimeout(() => {
+    if (modalIsOpen()) {
+      // Something else opened in the meantime; wait for that one instead.
+      waiting.unshift(next);
+      return;
+    }
+    next();
+  }, 120);
+}
+
 export function openModal(html: string, onClose?: () => void) {
   const overlay = $("modalOverlay");
   const card = $("modalCard");
@@ -131,6 +177,7 @@ export function closeModal() {
     closeHandler = null;
     fn();
   }
+  showNextWaiting();
 }
 
 export function bindModalDismiss() {

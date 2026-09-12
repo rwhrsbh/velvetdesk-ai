@@ -67,13 +67,14 @@ pub const DEVICE_HEADER: &str = "X-VD-Device";
 /// as a name (`http://203.0.113.10:8787/v1`), and a test build points at a
 /// gateway on the bench the same way.
 ///
-/// Empty by default, and deliberately: a made-up address that resolves to
-/// nothing fails as "the gateway did not answer", which sends whoever is
-/// debugging it looking at the network. An empty one says what is actually
-/// true — this build was made without a subscription address.
+/// Until there is a server to point at, the default is the gateway on this
+/// machine: a build made without the variable is a build for the bench, and
+/// the bench is where the gateway currently runs. Releases are built with
+/// the variable set to the real address, which is an IP for as long as there
+/// is no name to use.
 pub const CLOUD_BASE_URL: &str = match option_env!("VD_CLOUD_BASE_URL") {
     Some(url) => url,
-    None => "",
+    None => "http://127.0.0.1:8787/v1",
 };
 
 /// The address this run uses.

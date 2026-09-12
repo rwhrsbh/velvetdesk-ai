@@ -433,10 +433,7 @@ export async function openKeysModal(deps: ModalDeps) {
         <summary>${t("keys.advanced")}</summary>
         ${
           isCloud
-            ? `<div class="field">
-          <label>${t("keys.baseUrl")}</label>
-          <div class="meta"><code>${escapeHtml(p.base_url)}</code> · ${t("plan.addressFixed")}</div>
-        </div>`
+            ? ""
             : `<div class="field">
           <label>${t("keys.baseUrl")}</label>
           <input class="field-input" id="baseUrl" list="basePresets" value="${escapeHtml(p.base_url)}" />
@@ -459,12 +456,16 @@ export async function openKeysModal(deps: ModalDeps) {
           </div>`
           }
         </div>
-        <div class="field">
+        ${
+          isCloud
+            ? ""
+            : `<div class="field">
           <label>${t("keys.headers")}</label>
           <textarea class="field-area" id="headers" placeholder="HTTP-Referer: https://example.com">${escapeHtml(
             p.extra_headers.map(([k, v]) => `${k}: ${v}`).join("\n"),
           )}</textarea>
-        </div>
+        </div>`
+        }
         <div class="field-grid">
           <div class="field">
             <label>${t("keys.thinkingBudget")}</label>
