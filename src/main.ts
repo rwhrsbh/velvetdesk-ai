@@ -1370,6 +1370,21 @@ function bindTopbar() {
     });
   });
 
+  // The narrow-window versions of the same two choices.
+  const modeSelect = $("modeSelect") as HTMLSelectElement;
+  modeSelect.addEventListener("change", () => {
+    store.mode = modeSelect.value as AgentMode;
+    void persistSettings({ agent_mode: store.mode });
+    renderTopbar();
+  });
+
+  const securitySelect = $("securitySelect") as HTMLSelectElement;
+  securitySelect.addEventListener("change", () => {
+    store.security = securitySelect.value as SecurityLevel;
+    void persistSettings({ security_level: store.security });
+    renderTopbar();
+  });
+
   $("btnKeys").addEventListener("click", () => void openKeysModal(deps));
   $("providerChip").addEventListener("click", () => void openKeysModal(deps));
   $("planChip").addEventListener("click", () => nagAboutFree(true));
@@ -2823,7 +2838,7 @@ function bindComposer() {
 
   // The row of controls under the composer opens the app's own menus rather
   // than the platform's popup.
-  for (const id of ["thinkingSelect", "channelSelect"]) {
+  for (const id of ["thinkingSelect", "channelSelect", "modeSelect", "securitySelect"]) {
     dressSelect($(id) as HTMLSelectElement);
   }
 

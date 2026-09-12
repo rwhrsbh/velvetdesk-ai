@@ -2346,10 +2346,30 @@ details.advanced[open] {
   color: var(--accent);
 }
 
-@media (max-width: 900px) {
-  .topbar-center {
+/* Wide enough for the rows of buttons: the dropdowns stay out of the way. */
+.topbar-compact {
+  display: none;
+  width: auto;
+  max-width: 150px;
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+/* Not wide enough. The buttons wrapped onto a second line here and landed on
+   top of the provider chip, and below 900px the whole row used to vanish —
+   taking the agent's mode with it. Two dropdowns say the same thing in a
+   quarter of the space. */
+@media (max-width: 1180px) {
+  .topbar-center .segmented-control {
     display: none;
   }
+
+  .topbar-compact {
+    display: block;
+  }
+}
+
+@media (max-width: 900px) {
 
   .rail,
   .center {

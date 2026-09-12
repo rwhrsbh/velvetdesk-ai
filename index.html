@@ -80,6 +80,22 @@
           <button class="segmented-btn active" data-security="safe" data-i18n="sec.safe" data-i18n-title="sec.safe.hint">Безопасно</button>
           <button class="segmented-btn" data-security="yolo" data-i18n="sec.full" data-i18n-title="sec.full.hint">Полный</button>
         </div>
+
+        <!-- The same two choices for a window too narrow to lay them out in a
+             row. They are not decoration: the mode decides what the agent is
+             allowed to do on its own, and hiding it on a small screen — which
+             is what used to happen — left a phone with no way to change it. -->
+        <select class="field-input topbar-compact" id="modeSelect" data-i18n-title="mode.auto.hint">
+          <option value="auto" data-i18n="mode.auto">Auto</option>
+          <option value="act" data-i18n="mode.act">Act</option>
+          <option value="memorize" data-i18n="mode.memorize">Memorize</option>
+          <option value="letters" data-i18n="mode.letters">Letters</option>
+        </select>
+        <select class="field-input topbar-compact" id="securitySelect" data-i18n-title="sec.safe.hint">
+          <option value="ask" data-i18n="sec.ask">Спрашивать</option>
+          <option value="safe" data-i18n="sec.safe">Безопасно</option>
+          <option value="yolo" data-i18n="sec.full">Полный</option>
+        </select>
       </div>
 
       <div class="topbar-right">

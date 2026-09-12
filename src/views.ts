@@ -53,6 +53,14 @@ export function renderTopbar() {
   count.textContent = String(store.pending.length);
   count.className = store.pending.length ? "count" : "count zero";
 
+  // Whichever control the operator used, both show the same thing afterwards.
+  const modeSelect = document.getElementById("modeSelect") as HTMLSelectElement | null;
+  if (modeSelect && modeSelect.value !== store.mode) modeSelect.value = store.mode;
+  const securitySelect = document.getElementById("securitySelect") as HTMLSelectElement | null;
+  if (securitySelect && securitySelect.value !== store.security) {
+    securitySelect.value = store.security;
+  }
+
   document.querySelectorAll<HTMLButtonElement>("#modeControl .segmented-btn").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.mode === store.mode);
   });
