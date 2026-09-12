@@ -33,10 +33,11 @@
 	}
 
 	encode gzip
-	log {
-		output file /var/log/caddy/gateway.log
-		format json
-	}
+
+	# Logs go to the container's output, where `docker compose logs caddy`
+	# finds them — a file inside the container would vanish on the next
+	# restart and surprise whoever went looking for it.
+	log
 }
 
 # ------------------------------------------------------ without a name at all
