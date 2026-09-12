@@ -2735,14 +2735,54 @@ async function refreshPlanChip() {
   }
 }
 
-/** Shown once a session, and again when the day runs out. */
-let nagged = false;
+/** When the free-version notice was last on screen. */
+let nagShownAt = 0;
+
+/** The last thing the operator did — a key, a click, a message sent. */
+let lastActivity = Date.now();
+
+/** No sooner than this after the last showing. */
+const NAG_EVERY = 60 * 60 * 1000;
+
+/** Away from the app at least this long before it is worth showing again. */
+const AWAY_FOR = 10 * 60 * 1000;
+
+/**
+ * Show it again to somebody who has come back to the app.
+ *
+ * Once a session is too little for a notice that is meant to sell something,
+ * and every hour regardless would land in the middle of a reply being
+ * written. So: at most hourly, and only when the app has been sitting idle —
+ * which is when somebody is returning to it and looking at the window rather
+ * than working in it.
+ */
+function nagWhenIdle() {
+  if (store.plan?.plan !== "free") return;
+  const now = Date.now();
+  if (now - nagShownAt < NAG_EVERY) return;
+  if (now - lastActivity < AWAY_FOR) return;
+  whenFree(() => nagAboutFree(true));
+}
+
+function watchActivity() {
+  const touched = () => {
+    lastActivity = Date.now();
+  };
+  for (const event of ["pointerdown", "keydown", "wheel"]) {
+    window.addEventListener(event, touched, { passive: true });
+  }
+  // A window that was hidden and is now in front is somebody coming back.
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) nagWhenIdle();
+  });
+  window.setInterval(nagWhenIdle, 60 * 1000);
+}
 
 function nagAboutFree(force = false) {
   const plan = store.plan;
   if (!plan || plan.plan !== "free") return;
-  if (nagged && !force) return;
-  nagged = true;
+  if (nagShownAt > 0 && !force) return;
+  nagShownAt = Date.now();
   const cap = plan.limits.requests_per_day ?? 0;
   const card = openModal(
     `
@@ -2813,6 +2853,7 @@ async function boot() {
     if (store.plan?.plan === "free") {
       whenFree(() => nagAboutFree());
     }
+    watchActivity();
 
     // The update offer waits its turn behind it. Two dialogs on a timer used
     // to land on top of each other, and whichever was second replaced the

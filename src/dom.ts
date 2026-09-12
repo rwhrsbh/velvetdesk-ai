@@ -175,6 +175,13 @@ export function openModal(html: string, onClose?: () => void, sticky = false) {
   }
   // Its dropdowns are drawn outside the page too, so they are ours as well.
   dressSelectsIn(card);
+
+  // Every dialog writes its dismiss button the same way, and every dialog
+  // used to wire it up separately — so a new one that forgot had a button
+  // that did nothing at all. It is wired here once, for all of them.
+  for (const button of card.querySelectorAll<HTMLElement>('[data-act="close"]')) {
+    button.addEventListener("click", () => closeModal());
+  }
   overlay.classList.add("open");
   closeHandler = onClose ?? null;
   return card;

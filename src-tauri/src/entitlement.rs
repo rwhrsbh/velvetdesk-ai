@@ -40,6 +40,9 @@ pub const PUBLIC_KEY: &str = match option_env!("VD_LICENSE_PUBLIC_KEY") {
 /// environment, because that is how the gateway on the bench is tested
 /// without rebuilding the app for every key.
 pub fn public_key() -> String {
+    // An unset repository secret compiles in as an empty string; here that
+    // correctly means "this build checks no signatures", so it needs no
+    // special case beyond the trim.
     if !PUBLIC_KEY.trim().is_empty() {
         return PUBLIC_KEY.trim().to_string();
     }
@@ -74,8 +77,12 @@ pub const DEVICE_HEADER: &str = "X-VD-Device";
 /// is no name to use.
 pub const CLOUD_BASE_URL: &str = match option_env!("VD_CLOUD_BASE_URL") {
     Some(url) => url,
-    None => "http://127.0.0.1:8787/v1",
+    None => DEFAULT_CLOUD_BASE_URL,
 };
+
+/// Where a build with no address of its own looks: the gateway on this
+/// machine, which is where it runs until there is a server to point at.
+pub const DEFAULT_CLOUD_BASE_URL: &str = "http://127.0.0.1:8787/v1";
 
 /// The address this run uses.
 ///
@@ -90,7 +97,14 @@ pub fn cloud_base_url() -> String {
             }
         }
     }
-    CLOUD_BASE_URL.to_string()
+    // A CI build passes the variable from a repository secret, and an unset
+    // secret arrives as an empty string rather than as nothing at all — so
+    // the compiled-in value can be present and blank, which is not the same
+    // as "no address was chosen". Blank means the same as absent here.
+    if CLOUD_BASE_URL.trim().is_empty() {
+        return DEFAULT_CLOUD_BASE_URL.to_string();
+    }
+    CLOUD_BASE_URL.trim().trim_end_matches('/').to_string()
 }
 
 /// Model calls a free copy may make in a day.
