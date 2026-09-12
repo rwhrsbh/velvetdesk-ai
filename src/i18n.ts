@@ -6,6 +6,7 @@ type Dict = Record<string, string>;
 
 const ru: Dict = {
   // ---- подписка и пределы бесплатной версии
+  "plan.addressFixed": "адрес подписки вшит в приложение и не меняется",
   "plan.chip": "Free · {left} из {cap}",
   "plan.freeTitle": "Бесплатная версия",
   "plan.freeBadge": "без подписки",
@@ -633,6 +634,7 @@ const ru: Dict = {
 
 const en: Dict = {
   // ---- the subscription, and the edges of the free version
+  "plan.addressFixed": "the subscription's address is part of the build, not a setting",
   "plan.chip": "Free · {left} of {cap}",
   "plan.freeTitle": "Free version",
   "plan.freeBadge": "no subscription",

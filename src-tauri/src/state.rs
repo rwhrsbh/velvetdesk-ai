@@ -81,6 +81,8 @@ impl AppState {
     }
 
     pub fn save_settings(&self, next: Settings) -> Result<()> {
+        let mut next = next;
+        next.pin_cloud();
         next.save(&self.paths)?;
         *self.settings.write() = next;
         self.reload_pools();

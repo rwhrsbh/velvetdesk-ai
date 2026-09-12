@@ -123,6 +123,8 @@ impl From<rusqlite::Error> for ApiError {
 pub struct Caller {
     pub license: License,
     pub tier: Tier,
+    /// Devices this licence may pair, after the server has had its say.
+    pub peers: u32,
 }
 
 /// The licence, whichever way the client carries it: an OpenAI-style bearer
@@ -165,7 +167,21 @@ fn authenticate(
         return Err(ApiError::Forbidden(LicenseError::Revoked.to_string()));
     }
     let tier = state.registry.read().tier(&license.tier);
-    Ok(Caller { license, tier })
+    // Three numbers can say how many devices are allowed, and the server's
+    // own entry wins: the licence carries what it was sold with, the tier
+    // carries the plan's default, and the ledger carries whatever the
+    // operator has been granted since — a team that asked for more gets it
+    // without being issued a new key.
+    let peers = state
+        .db
+        .peers_for(&license.license_id)?
+        .unwrap_or_else(|| license.max_peers.max(tier.max_peers))
+        .max(1);
+    Ok(Caller {
+        license,
+        tier,
+        peers,
+    })
 }
 
 /// Wait for a slot in the gateway, or turn the caller away politely.
@@ -276,7 +292,7 @@ async fn usage(
         "license_id": caller.license.license_id,
         "tier": caller.license.tier,
         "expires_at": caller.license.expires_at,
-        "max_peers": caller.license.max_peers.max(caller.tier.max_peers),
+        "max_peers": caller.peers,
         "credits_left_5h": state_now.left_5h,
         "credits_left_week": state_now.left_week,
         "reset_at": state_now.reset_at,
@@ -544,7 +560,7 @@ async fn sync_ws(
     // rather than discovering later that nothing arrived.
     let channel = state.room(&room);
     let peers = channel.receiver_count();
-    let allowed = caller.license.max_peers.max(caller.tier.max_peers).max(1) as usize;
+    let allowed = caller.peers as usize;
     if peers >= allowed {
         return Err(ApiError::Forbidden(format!(
             "this licence pairs {allowed} device(s), and {peers} are already connected"

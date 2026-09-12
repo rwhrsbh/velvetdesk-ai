@@ -431,13 +431,20 @@ export async function openKeysModal(deps: ModalDeps) {
 
       <details class="advanced">
         <summary>${t("keys.advanced")}</summary>
-        <div class="field">
+        ${
+          isCloud
+            ? `<div class="field">
+          <label>${t("keys.baseUrl")}</label>
+          <div class="meta"><code>${escapeHtml(p.base_url)}</code> · ${t("plan.addressFixed")}</div>
+        </div>`
+            : `<div class="field">
           <label>${t("keys.baseUrl")}</label>
           <input class="field-input" id="baseUrl" list="basePresets" value="${escapeHtml(p.base_url)}" />
           <datalist id="basePresets">
             ${BASE_URL_PRESETS.map((u) => `<option value="${u}"></option>`).join("")}
           </datalist>
-        </div>
+        </div>`
+        }
         <div class="field-grid">
           <div class="field">
             <label>${t("keys.temperature", { v: p.temperature.toFixed(2) })}</label>

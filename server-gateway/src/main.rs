@@ -163,7 +163,31 @@ fn mint(args: &[String]) -> std::io::Result<()> {
         },
         max_peers,
     };
-    println!("{}", vd_license::mint(&key, &license));
+    let token = vd_license::mint(&key, &license);
+
+    // The ledger is what the gateway enforces: without a row here the
+    // licence works, but it cannot be found, revoked, or given more devices
+    // later. A key minted from the command line belongs in it just as much
+    // as one minted from the admin page.
+    match GatewayConfig::load(&config_path()).and_then(|cfg| {
+        Db::open(&cfg.db_path)
+            .and_then(|db| {
+                db.record_license(
+                    &license.license_id,
+                    &license.tier,
+                    license.expires_at,
+                    license.max_peers,
+                    "minted from the command line",
+                    chrono::Utc::now().timestamp(),
+                )
+            })
+            .map_err(std::io::Error::other)
+    }) {
+        Ok(()) => {}
+        Err(err) => eprintln!("warning: the licence was not recorded in the ledger: {err}"),
+    }
+
+    println!("{token}");
     Ok(())
 }
 

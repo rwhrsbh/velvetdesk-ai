@@ -41,6 +41,7 @@ pub fn router() -> Router<AppState> {
         .route("/admin/tiers", get(list_tiers).post(save_tier))
         .route("/admin/tiers/{name}", delete(delete_tier))
         .route("/admin/licenses", get(list_licenses).post(mint_license))
+        .route("/admin/licenses/{id}/peers", post(set_peers))
         .route("/admin/revoke", post(revoke))
         .route("/admin/unrevoke", post(unrevoke))
         .route("/admin/stats", get(stats))
@@ -328,6 +329,42 @@ async fn delete_tier(
     state.db.delete_tier(&name)?;
     state.reload()?;
     Ok(Json(json!({ "deleted": name })))
+}
+
+#[derive(Deserialize)]
+struct PeersBody {
+    max_peers: u32,
+}
+
+/// Change how many devices one licence pairs.
+///
+/// The key itself is not reissued and does not change: the number it was
+/// sold with stays in the signature, and this is the server's own record,
+/// which is what the gateway actually enforces. A team of twelve on a
+/// ten-device licence is a line in this table, not a support ticket.
+async fn set_peers(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<PeersBody>,
+) -> Result<Json<Value>, ApiError> {
+    admin(&state, &headers)?;
+    let known = state
+        .db
+        .list_licenses()?
+        .into_iter()
+        .find(|row| row.license_id == id)
+        .ok_or_else(|| ApiError::BadRequest(format!("no licence called {id}")))?;
+    let peers = body.max_peers.max(1);
+    state.db.record_license(
+        &known.license_id,
+        &known.tier,
+        known.expires_at,
+        peers,
+        &known.note,
+        crate::registry::now(),
+    )?;
+    Ok(Json(json!({ "license_id": id, "max_peers": peers })))
 }
 
 async fn list_licenses(

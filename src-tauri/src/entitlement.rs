@@ -35,6 +35,18 @@ pub const PUBLIC_KEY: &str = match option_env!("VD_LICENSE_PUBLIC_KEY") {
 /// The provider that is the subscription: its "key" is the licence.
 pub const CLOUD_PROVIDER: &str = "velvetdesk-cloud";
 
+/// Where the subscription lives, fixed at build time.
+///
+/// Not a setting. The operator has no way of knowing a good value for this,
+/// and a wrong one turns a paid-for subscription into a provider that
+/// answers nothing — so the address is part of the build, like the licence
+/// key it is checked with. `VD_CLOUD_BASE_URL` moves it, which is how a test
+/// build points at a gateway on the bench.
+pub const CLOUD_BASE_URL: &str = match option_env!("VD_CLOUD_BASE_URL") {
+    Some(url) => url,
+    None => "https://cloud.velvetdesk.ai/v1",
+};
+
 /// Model calls a free copy may make in a day.
 pub const FREE_REQUESTS_PER_DAY: u32 = 100;
 /// Profiles a free copy may hold.

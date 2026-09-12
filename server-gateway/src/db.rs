@@ -197,6 +197,24 @@ impl Db {
         Ok(cached as f64 / prompt as f64)
     }
 
+    /// The device count recorded for one licence, when the ledger has an
+    /// entry for it.
+    ///
+    /// The number inside a licence is what it was sold with; this is what the
+    /// operator has since been given. A team that outgrew its plan gets the
+    /// bigger number here and keeps the key it paid for.
+    pub fn peers_for(&self, license_id: &str) -> rusqlite::Result<Option<u32>> {
+        let conn = self.conn.lock();
+        let found: Option<i64> = conn
+            .query_row(
+                "SELECT max_peers FROM license WHERE license_id = ?1",
+                [license_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(found.filter(|peers| *peers > 0).map(|peers| peers as u32))
+    }
+
     pub fn is_revoked(&self, license_id: &str) -> rusqlite::Result<bool> {
         let found: Option<String> = self
             .conn

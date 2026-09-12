@@ -197,15 +197,14 @@ impl GatewayConfig {
             license_public_key: String::new(),
             credit_usd: default_credit_usd(),
             upstreams: vec![],
+            // What is sold, as of now: pro is $10 a month for two people on
+            // two machines, business is $150 a month or $1000 a year for a
+            // team of ten. A credit is a tenth of a cent of cost, so the
+            // budgets below are what each plan may spend before it stops
+            // paying for itself — 20 000 credits is $20 of upstream calls
+            // against a $10 subscription, which is the shape of a plan whose
+            // users mostly do not run it flat out.
             tiers: HashMap::from([
-                (
-                    "solo".to_string(),
-                    Tier {
-                        credits_5h: 300.0,
-                        credits_week: 4_000.0,
-                        max_peers: 1,
-                    },
-                ),
                 (
                     "pro".to_string(),
                     Tier {

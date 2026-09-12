@@ -191,10 +191,9 @@ impl Default for Settings {
                     id: "velvetdesk-cloud".into(),
                     label: "VelvetDesk Cloud".into(),
                     kind: ProviderKind::OpenaiCompatible,
-                    // The operator's own gateway. Nothing is sent anywhere by
-                    // default: without a licence key this provider is inert,
-                    // exactly like the others without their keys.
-                    base_url: "https://cloud.velvetdesk.ai/v1".into(),
+                    // Ours, and fixed: without a licence key this provider is
+                    // inert, exactly like the others without their keys.
+                    base_url: crate::entitlement::CLOUD_BASE_URL.into(),
                     api_version: "v1".into(),
                     model: "deepseek-chat".into(),
                     extra_headers: vec![],
@@ -266,11 +265,29 @@ impl Settings {
                 settings.providers.push(provider);
             }
         }
+        settings.pin_cloud();
         Ok(settings)
     }
 
     pub fn save(&self, paths: &Paths) -> Result<()> {
         write_json(&paths.settings_file(), self)
+    }
+
+    /// Put the cloud provider's address back where it belongs.
+    ///
+    /// Called on the way in and on the way out, so neither a settings file
+    /// edited by hand nor a client sending an old copy of the settings can
+    /// point the subscription at something that is not the subscription.
+    /// The address moves when the build moves it, and at no other time.
+    pub fn pin_cloud(&mut self) {
+        if let Some(cloud) = self
+            .providers
+            .iter_mut()
+            .find(|p| p.id == crate::entitlement::CLOUD_PROVIDER)
+        {
+            cloud.base_url = crate::entitlement::CLOUD_BASE_URL.to_string();
+            cloud.api_version = "v1".into();
+        }
     }
 
     pub fn provider(&self, id: &str) -> Option<&ProviderConfig> {
