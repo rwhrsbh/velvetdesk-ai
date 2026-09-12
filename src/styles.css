@@ -666,31 +666,35 @@ input[type="range"] {
 }
 
 .row-card {
-  /* The card is what gets picked up, not the text inside it: without this a
-     drag starts as a text selection and never becomes a drag at all. */
-  -webkit-user-drag: element;
+  /* The card is carried by pointer, so nothing in it should start a native
+     drag or a text selection under the finger. */
+  -webkit-user-drag: none;
   user-select: none;
 }
 
-/* A card on its way to a new place in the rail: lifted off the list, tilted
-   a degree so it reads as held rather than stuck, and still legible — the
-   operator is aiming it at a gap. */
+/* The gap the card left behind: still in the list, holding its place. */
 .row-card.dragging {
-  opacity: 0.9;
+  opacity: 0.35;
   cursor: grabbing;
-  background: var(--surface-hi);
+  background: var(--sunken);
+  border-style: dashed;
   border-color: var(--accent);
-  box-shadow: 0 12px 28px rgb(0 0 0 / 0.45);
-  transform: rotate(-1deg) scale(1.02);
 }
 
-/* Where it would land. */
-.row-card.drop-before {
-  box-shadow: inset 0 2px 0 var(--accent);
-}
-
-.row-card.drop-after {
-  box-shadow: inset 0 -2px 0 var(--accent);
+/* The copy that follows the pointer. Lifted off the page and tilted a degree
+   so it reads as held rather than stuck, and transparent to the pointer so
+   the card underneath it is what decides where the gap goes. */
+.drag-ghost {
+  position: fixed;
+  z-index: 90;
+  pointer-events: none;
+  margin: 0;
+  background: var(--surface-hi);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  box-shadow: 0 16px 34px rgb(0 0 0 / 0.5);
+  transform: rotate(-1.5deg) scale(1.03);
+  opacity: 0.96;
 }
 
 /* The guided tour: everything dark except the one control being explained. */

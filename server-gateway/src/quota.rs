@@ -178,6 +178,7 @@ pub fn charge(db: &Db, bill: &Bill<'_>) -> rusqlite::Result<Allowance> {
     if before.on_the_wallet() && spent > 0.0 {
         db.wallet_spend(bill.license_id, spent, bill.now)?;
     }
+
     db.record(
         &crate::db::Spend {
             license_id: bill.license_id.to_string(),

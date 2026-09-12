@@ -136,6 +136,8 @@ async fn overview(
     let upstreams: Vec<&UpstreamRow> = registry.upstreams.iter().collect();
     Ok(Json(json!({
         "credit_usd": state.cfg.credit_usd,
+        "credit_price_usd": state.cfg.credit_price_usd,
+        "topup_url": state.cfg.topup_url,
         "licensing": !state.cfg.license_public_key.trim().is_empty(),
         "upstreams": upstreams,
         "models": registry.models,
@@ -476,9 +478,18 @@ async fn add_credits(
         .db
         .list_licenses()?
         .into_iter()
-        .any(|row| row.license_id == id);
-    if !known {
-        return Err(ApiError::BadRequest(format!("no licence called {id}")));
+        .find(|row| row.license_id == id)
+        .ok_or_else(|| ApiError::BadRequest(format!("no licence called {id}")))?;
+    // Top-ups are a business feature, deliberately. A pro licence that keeps
+    // running out is a pro licence that has outgrown its plan, and the answer
+    // to that is the bigger plan — which is also the cheaper one per seat.
+    // Selling credits into pro would let somebody stay on the small plan
+    // forever at the price of the large one.
+    if !known.tier.eq_ignore_ascii_case("business") {
+        return Err(ApiError::BadRequest(format!(
+            "credits are sold on business licences; {id} is on {}",
+            known.tier
+        )));
     }
     let left = state
         .db

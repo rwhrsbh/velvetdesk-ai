@@ -336,6 +336,9 @@ export interface CloudStatus {
   credits_week: number | null;
   /** Bought on top of the plan; spent only when both windows are empty. */
   credits_extra: number | null;
+  /** Where to buy more. Empty when this plan cannot. */
+  topup_url: string;
+  can_top_up: boolean;
   reset_at: number | null;
 }
 

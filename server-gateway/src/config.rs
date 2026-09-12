@@ -28,6 +28,22 @@ pub struct GatewayConfig {
     /// so a credit is a unit of money, and the tier limits are budgets.
     #[serde(default = "default_credit_usd")]
     pub credit_usd: f64,
+    /// What a credit is sold for, in dollars.
+    ///
+    /// `credit_usd` above is what one costs us; this is what one goes for.
+    /// Kept apart on purpose: selling at cost is a way to lose money on
+    /// every top-up while believing the plans are profitable. Four times
+    /// cost is the default — in the same range as the subscriptions, which
+    /// work out at two and a half to three times cost when spent in full,
+    /// with a little more margin because a top-up is bought by somebody who
+    /// has already run out and is not shopping around.
+    #[serde(default = "default_credit_price")]
+    pub credit_price_usd: f64,
+    /// Where the app sends an operator who wants more credits: a payment
+    /// page, a Telegram account, an email link. Empty hides the button
+    /// rather than showing one that goes nowhere.
+    #[serde(default)]
+    pub topup_url: String,
     /// Upstreams in the order they are tried when the request names no model.
     pub upstreams: Vec<Upstream>,
     /// Budgets per tier, by the `tier` in the licence.
@@ -138,6 +154,12 @@ fn default_credit_usd() -> f64 {
     0.001
 }
 
+fn default_credit_price() -> f64 {
+    // Four tenths of a cent a credit: a thousand credits is $4 of sales
+    // against $1 of cost.
+    0.004
+}
+
 fn default_inflight() -> usize {
     crate::queue::DEFAULT_INFLIGHT
 }
@@ -196,6 +218,8 @@ impl GatewayConfig {
             db_path: default_db(),
             license_public_key: String::new(),
             credit_usd: default_credit_usd(),
+            credit_price_usd: default_credit_price(),
+            topup_url: String::new(),
             upstreams: vec![],
             // What is sold, as of now: pro is $10 a month for two people on
             // two machines, business is $150 a month or $1000 a year for a

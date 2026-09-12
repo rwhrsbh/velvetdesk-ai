@@ -862,6 +862,27 @@ async function addFromUrl(url: string) {
   }
 }
 
+/**
+ * Put dropped text into the box.
+ *
+ * At the caret when the box already has something in it — an operator
+ * dropping a phrase into a half-written message means it to go where they
+ * dropped it — and on its own line when the phrase is long enough to be a
+ * paragraph rather than a word.
+ */
+function dropText(text: string) {
+  const input = $("composerInput") as HTMLTextAreaElement;
+  const at = input.selectionStart ?? input.value.length;
+  const before = input.value.slice(0, at);
+  const after = input.value.slice(at);
+  const joiner = before && !before.endsWith("\n") && !before.endsWith(" ") ? " " : "";
+  input.value = `${before}${joiner}${text}${after}`;
+  const caret = (before + joiner + text).length;
+  input.focus();
+  input.setSelectionRange(caret, caret);
+  input.dispatchEvent(new Event("input"));
+}
+
 /** Every picture a paste or a drop is carrying, whichever way it packed them. */
 function imageFiles(data: DataTransfer | null): File[] {
   if (!data) return [];
@@ -1408,77 +1429,133 @@ function openTour() {
  * a starting point. A drop writes the new order to disk, so it survives the
  * next launch.
  */
+/**
+ * Drag a card up or down its rail, and keep it there.
+ *
+ * Pointer events rather than HTML5 drag-and-drop, and not by preference: the
+ * window has `dragDropEnabled` on so that pictures can be dropped into the
+ * composer from the desktop, and on Windows that hands every drag to the
+ * webview host — `dragstart` never reaches the page at all. So the card is
+ * carried by hand: a copy of it follows the pointer, a gap opens where it
+ * would land, and the original stays dimmed in the list until it is dropped.
+ *
+ * A press that does not travel is still a click: five pixels of movement
+ * separate picking a card up from selecting it.
+ */
+/** Set when a drag has just ended, so the click it produces is ignored. */
+let swallowNextClick = false;
+
 function bindReordering(listId: string, attribute: "profile" | "man", save: (ids: string[]) => void) {
   const list = $(listId);
-  let dragged: HTMLElement | null = null;
+  const THRESHOLD = 5;
 
-  const clearMarks = () => {
-    for (const card of list.querySelectorAll<HTMLElement>(".drop-before, .drop-after")) {
-      card.classList.remove("drop-before", "drop-after");
-    }
-  };
+  let card: HTMLElement | null = null;
+  let ghost: HTMLElement | null = null;
+  let startY = 0;
+  let startX = 0;
+  let grabY = 0;
+  let moved = false;
 
-  list.addEventListener("dragstart", (event) => {
-    const card = (event.target as HTMLElement).closest<HTMLElement>(`[data-${attribute}]`);
-    if (!card) return;
-    dragged = card;
-    setDragging(true);
-    // The class has to land after the browser has taken its snapshot, or the
-    // picture under the pointer is the lifted, tilted version of the card
-    // rather than the card.
-    window.setTimeout(() => card.classList.add("dragging"), 0);
-    // Firefox refuses to start a drag without something in the payload.
-    event.dataTransfer?.setData("text/plain", card.dataset[attribute] ?? "");
-    if (event.dataTransfer) {
-      event.dataTransfer.effectAllowed = "move";
-      // The whole card travels with the pointer, held where it was grabbed.
-      const box = card.getBoundingClientRect();
-      event.dataTransfer.setDragImage(card, event.clientX - box.left, event.clientY - box.top);
-    }
-  });
+  const cards = () => Array.from(list.querySelectorAll<HTMLElement>(`[data-${attribute}]`));
 
-  list.addEventListener("dragover", (event) => {
-    if (!dragged) return;
-    event.preventDefault();
-    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
-    const over = (event.target as HTMLElement).closest<HTMLElement>(`[data-${attribute}]`);
-    clearMarks();
-    if (!over || over === dragged) return;
-    const box = over.getBoundingClientRect();
-    // Past the middle of a card means "after it", which is what makes the
-    // list feel like it is being pushed apart rather than snapping around.
-    const after = event.clientY > box.top + box.height / 2;
-    over.classList.add(after ? "drop-after" : "drop-before");
-    list.insertBefore(dragged, after ? over.nextSibling : over);
-  });
-
-  const finish = () => {
-    clearMarks();
+  const cleanUp = () => {
+    ghost?.remove();
+    ghost = null;
+    card?.classList.remove("dragging");
+    card = null;
+    moved = false;
     setDragging(false);
-    if (!dragged) return;
-    dragged.classList.remove("dragging");
-    dragged = null;
-    const ids = Array.from(list.querySelectorAll<HTMLElement>(`[data-${attribute}]`))
-      .map((card) => card.dataset[attribute] ?? "")
-      .filter(Boolean);
-    save(ids);
   };
 
-  list.addEventListener("drop", (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    finish();
+  list.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    const target = event.target as HTMLElement;
+    // Buttons inside a card belong to the button.
+    if (target.closest("button, input, textarea, a")) return;
+    const hit = target.closest<HTMLElement>(`[data-${attribute}]`);
+    if (!hit) return;
+    card = hit;
+    startY = event.clientY;
+    startX = event.clientX;
+    grabY = event.clientY - hit.getBoundingClientRect().top;
+    moved = false;
   });
-  list.addEventListener("dragend", finish);
-  // A drag that ends outside the rail — over the chat, off the window — still
-  // has to put the card back down.
-  list.addEventListener("dragleave", (event) => {
-    if (!list.contains(event.relatedTarget as Node)) clearMarks();
+
+  window.addEventListener("pointermove", (event) => {
+    if (!card) return;
+    if (!moved) {
+      const far =
+        Math.abs(event.clientY - startY) > THRESHOLD ||
+        Math.abs(event.clientX - startX) > THRESHOLD;
+      if (!far) return;
+      moved = true;
+      setDragging(true);
+      const box = card.getBoundingClientRect();
+      // The copy is what the operator sees moving; the original stays where
+      // it is, dimmed, so the list keeps its shape while the gap travels.
+      ghost = card.cloneNode(true) as HTMLElement;
+      ghost.classList.add("drag-ghost");
+      ghost.style.width = `${box.width}px`;
+      ghost.style.left = `${box.left}px`;
+      document.body.appendChild(ghost);
+      card.classList.add("dragging");
+      list.setPointerCapture?.(event.pointerId);
+    }
+
+    if (ghost) ghost.style.top = `${event.clientY - grabY}px`;
+
+    // Where it would land: the first card whose middle is below the pointer.
+    const others = cards().filter((item) => item !== card);
+    let before: HTMLElement | null = null;
+    for (const item of others) {
+      const box = item.getBoundingClientRect();
+      if (event.clientY < box.top + box.height / 2) {
+        before = item;
+        break;
+      }
+    }
+    if (before) {
+      list.insertBefore(card, before);
+    } else {
+      list.appendChild(card);
+    }
+    event.preventDefault();
+  });
+
+  window.addEventListener("pointerup", () => {
+    if (!card) return;
+    const wasDragged = moved;
+    const ids = cards()
+      .map((item) => item.dataset[attribute] ?? "")
+      .filter(Boolean);
+    cleanUp();
+    if (!wasDragged) return;
+    // The click that follows the release belongs to the drag, not to the
+    // card it landed on: without this, moving a dossier also opens it.
+    swallowNextClick = true;
+    save(ids);
+  });
+
+  // A drag interrupted — the window lost focus, the pointer was cancelled —
+  // leaves the list as it stands rather than snapping back, and saves it:
+  // what is on screen is what the operator arranged.
+  window.addEventListener("pointercancel", () => {
+    if (!card) return;
+    const wasDragged = moved;
+    const ids = cards()
+      .map((item) => item.dataset[attribute] ?? "")
+      .filter(Boolean);
+    cleanUp();
+    if (wasDragged) save(ids);
   });
 }
 
 function bindPanels() {
   $("profileList").addEventListener("click", (event) => {
+    if (swallowNextClick) {
+      swallowNextClick = false;
+      return;
+    }
     const target = event.target as HTMLElement;
     if (target.dataset.act === "guide") {
       event.preventDefault();
@@ -1516,6 +1593,10 @@ function bindPanels() {
   });
 
   $("menList").addEventListener("click", (event) => {
+    if (swallowNextClick) {
+      swallowNextClick = false;
+      return;
+    }
     const card = (event.target as HTMLElement).closest<HTMLElement>("[data-man]");
     if (!card?.dataset.man) return;
     if (card.dataset.man === store.activeManId) {
@@ -2494,12 +2575,24 @@ function bindComposer() {
   });
 
   const composer = document.querySelector(".composer") as HTMLElement;
+  // Anything can be dropped here: a file from the desktop, a picture from a
+  // browser, or a line of text selected anywhere — including out of the chat
+  // above. Text lands in the box at the point it was dropped; pictures
+  // become attachments.
+  //
+  // The window is configured with `dragDropEnabled: false` for this. With it
+  // on, the webview host takes every drag and the page sees nothing at all —
+  // which is why none of this worked before and why the rails had to be
+  // carried by hand.
   composer.addEventListener("dragover", (event) => {
-    if (!event.dataTransfer?.types.includes("Files")) return;
+    if (!event.dataTransfer) return;
     event.preventDefault();
+    event.dataTransfer.dropEffect = event.dataTransfer.types.includes("Files") ? "copy" : "copy";
     composer.classList.add("dropping");
   });
-  composer.addEventListener("dragleave", () => composer.classList.remove("dropping"));
+  composer.addEventListener("dragleave", (event) => {
+    if (!composer.contains(event.relatedTarget as Node)) composer.classList.remove("dropping");
+  });
   composer.addEventListener("drop", (event) => {
     composer.classList.remove("dropping");
     const files = imageFiles(event.dataTransfer);
@@ -2509,9 +2602,15 @@ function bindComposer() {
       return;
     }
     const link = imageLink(event.dataTransfer);
-    if (!link) return;
+    if (link) {
+      event.preventDefault();
+      void addFromUrl(link);
+      return;
+    }
+    const text = event.dataTransfer?.getData("text/plain")?.trim();
+    if (!text) return;
     event.preventDefault();
-    void addFromUrl(link);
+    dropText(text);
   });
 
   // A queued line can be taken back until it goes out.

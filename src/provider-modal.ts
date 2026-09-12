@@ -164,6 +164,7 @@ function planPanel(plan: PlanState | null, hasKey: boolean): string {
     </div>
     <div class="meta">${t("plan.paidWhat", { devices: plan.limits.devices })}</div>
     <div class="meta" id="syncStatus">${t("keys.syncChecking")}</div>
+    <div class="meta" id="cloudTopUp" hidden></div>
     <div class="row-inline">
       <button class="btn btn-secondary" id="btnSyncNow">${t("keys.syncNow")}</button>
       <button class="btn btn-secondary" id="btnSyncForget">${t("keys.syncForget")}</button>
@@ -617,6 +618,18 @@ export async function openKeysModal(deps: ModalDeps) {
         }
         if ((status.credits_extra ?? 0) > 0) {
           parts.push(t("keys.cloudExtra", { n: Math.round(status.credits_extra!) }));
+        }
+        // The way to more credits is shown before anybody hits the wall, and
+        // only where it exists: on pro the answer is the bigger plan, not a
+        // top-up, and saying so is more use than a button that refuses.
+        const more = card.querySelector<HTMLElement>("#cloudTopUp");
+        if (more) {
+          more.hidden = false;
+          more.innerHTML = status.can_top_up
+            ? `<a href="${escapeHtml(status.topup_url)}" target="_blank" rel="noreferrer">${t(
+                "plan.buyCredits",
+              )}</a>`
+            : t("plan.buyOnBusiness");
         }
         line.textContent = parts.join(" · ");
       } catch (error) {

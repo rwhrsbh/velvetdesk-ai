@@ -395,6 +395,17 @@ async fn usage(
         // Bought on top of the plan, and spent only once the plan's windows
         // are empty.
         "credits_extra": state_now.wallet,
+        // What more would cost, and where to get it. The app shows the way
+        // to buy before anybody hits the wall, not after.
+        "credit_price_usd": state.cfg.credit_price_usd,
+        // Only business licences can buy more; pro that keeps running out is
+        // pro that should move up, and the app says which.
+        "topup_url": if caller.license.tier.eq_ignore_ascii_case("business") {
+            state.cfg.topup_url.clone()
+        } else {
+            String::new()
+        },
+        "can_top_up": caller.license.tier.eq_ignore_ascii_case("business"),
         "reset_at": state_now.reset_at,
     })))
 }
