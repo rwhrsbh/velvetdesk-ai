@@ -16,7 +16,7 @@ use vd_llm::provider::ProviderKind;
 use vd_llm::Usage;
 
 use crate::config::Tier;
-use crate::registry::{KeyRow, LicenseRow, ModelRow, UpstreamRow};
+use crate::registry::{DeviceRow, DeviceVerdict, KeyRow, LicenseRow, ModelRow, UpstreamRow};
 
 #[derive(Clone)]
 pub struct Db {
@@ -125,6 +125,18 @@ impl Db {
                  max_peers INTEGER NOT NULL DEFAULT 2,
                  issued_at INTEGER NOT NULL,
                  note TEXT NOT NULL DEFAULT ''
+             );
+             -- The machines a licence is actually used from. A seat is taken
+             -- by the first device that appears and kept until the operator
+             -- releases it, because a seat that frees itself is not a seat
+             -- anyone is paying for.
+             CREATE TABLE IF NOT EXISTS device (
+                 license_id TEXT NOT NULL,
+                 device_id TEXT NOT NULL,
+                 first_seen INTEGER NOT NULL,
+                 last_seen INTEGER NOT NULL,
+                 note TEXT NOT NULL DEFAULT '',
+                 PRIMARY KEY (license_id, device_id)
              );",
         )?;
         Db::add_column(conn, "model", "voice", "INTEGER NOT NULL DEFAULT 0");
@@ -213,6 +225,87 @@ impl Db {
             )
             .optional()?;
         Ok(found.filter(|peers| *peers > 0).map(|peers| peers as u32))
+    }
+
+    // -------------------------------------------------------------- devices
+
+    /// Note that a device is in use, and say whether it may be.
+    ///
+    /// A device already on the list is simply touched. A new one takes a
+    /// free seat if there is one; if every seat is taken it is refused, and
+    /// nothing is written — the licence does not quietly grow by being used
+    /// from one more laptop.
+    pub fn admit_device(
+        &self,
+        license_id: &str,
+        device_id: &str,
+        seats: u32,
+        now: i64,
+    ) -> rusqlite::Result<DeviceVerdict> {
+        let conn = self.conn.lock();
+        let touched = conn.execute(
+            "UPDATE device SET last_seen = ?3 WHERE license_id = ?1 AND device_id = ?2",
+            rusqlite::params![license_id, device_id, now],
+        )?;
+        if touched > 0 {
+            return Ok(DeviceVerdict::Known);
+        }
+        let taken: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM device WHERE license_id = ?1",
+            [license_id],
+            |row| row.get(0),
+        )?;
+        if taken >= seats as i64 {
+            return Ok(DeviceVerdict::NoSeats {
+                taken: taken as u32,
+            });
+        }
+        conn.execute(
+            "INSERT INTO device (license_id, device_id, first_seen, last_seen)
+             VALUES (?1, ?2, ?3, ?3)",
+            rusqlite::params![license_id, device_id, now],
+        )?;
+        Ok(DeviceVerdict::Admitted {
+            taken: taken as u32 + 1,
+        })
+    }
+
+    pub fn devices(&self, license_id: &str) -> rusqlite::Result<Vec<DeviceRow>> {
+        let conn = self.conn.lock();
+        let mut statement = conn.prepare(
+            "SELECT device_id, first_seen, last_seen, note FROM device
+             WHERE license_id = ?1 ORDER BY first_seen",
+        )?;
+        let rows = statement
+            .query_map([license_id], |row| {
+                Ok(DeviceRow {
+                    device_id: row.get(0)?,
+                    first_seen: row.get(1)?,
+                    last_seen: row.get(2)?,
+                    note: row.get(3)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Free a seat: a laptop that was lost, sold, or reinstalled.
+    pub fn forget_device(&self, license_id: &str, device_id: &str) -> rusqlite::Result<()> {
+        self.conn.lock().execute(
+            "DELETE FROM device WHERE license_id = ?1 AND device_id = ?2",
+            rusqlite::params![license_id, device_id],
+        )?;
+        Ok(())
+    }
+
+    /// How many seats one licence has taken.
+    pub fn device_count(&self, license_id: &str) -> rusqlite::Result<u32> {
+        let count: i64 = self.conn.lock().query_row(
+            "SELECT COUNT(*) FROM device WHERE license_id = ?1",
+            [license_id],
+            |row| row.get(0),
+        )?;
+        Ok(count as u32)
     }
 
     pub fn is_revoked(&self, license_id: &str) -> rusqlite::Result<bool> {

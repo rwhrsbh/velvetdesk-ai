@@ -200,6 +200,43 @@ async fn admit(state: &AppState, license_id: &str) -> Result<crate::queue::Slot,
         })
 }
 
+/// Which machine is calling, if it says.
+///
+/// Our own app always says; a third-party client pointed at the gateway may
+/// not, and is treated as one shared, nameless device rather than refused —
+/// the licence still limits what it can spend.
+fn device_id(headers: &HeaderMap) -> String {
+    headers
+        .get("x-vd-device")
+        .and_then(|value| value.to_str().ok())
+        .map(|id| id.trim())
+        .filter(|id| !id.is_empty() && id.len() <= 64)
+        .unwrap_or("unnamed")
+        .to_string()
+}
+
+/// Take a seat on the licence, or explain that they are all taken.
+///
+/// A seat is held by the first machine that uses it and stays held: that is
+/// what a ten-device licence means to whoever bought one. Nothing the
+/// operator can do releases a seat — otherwise a licence for ten would be a
+/// licence for however many people take turns — so a replaced laptop is
+/// freed by whoever sells the licences, on the admin page.
+fn seat(state: &AppState, caller: &Caller, headers: &HeaderMap) -> Result<(), ApiError> {
+    let device = device_id(headers);
+    match state
+        .db
+        .admit_device(&caller.license.license_id, &device, caller.peers, now())?
+    {
+        crate::registry::DeviceVerdict::Known
+        | crate::registry::DeviceVerdict::Admitted { .. } => Ok(()),
+        crate::registry::DeviceVerdict::NoSeats { taken } => Err(ApiError::Forbidden(format!(
+            "this licence covers {} device(s) and {taken} are already registered - ask whoever sold it to release one",
+            caller.peers
+        ))),
+    }
+}
+
 fn now() -> i64 {
     chrono::Utc::now().timestamp()
 }
@@ -287,12 +324,18 @@ async fn usage(
     Query(query): Query<HashMap<String, String>>,
 ) -> Result<Json<Value>, ApiError> {
     let caller = authenticate(&state, &headers, &query)?;
+    // Asking what the licence has left is what the app does the moment a key
+    // is entered, so this is where a machine claims its seat — and where a
+    // licence with no seats left says so, before the operator has typed a
+    // single reply.
+    seat(&state, &caller, &headers)?;
     let state_now = allowance(&state.db, &caller.license.license_id, caller.tier, now())?;
     Ok(Json(json!({
         "license_id": caller.license.license_id,
         "tier": caller.license.tier,
         "expires_at": caller.license.expires_at,
         "max_peers": caller.peers,
+        "devices_used": state.db.device_count(&caller.license.license_id)?,
         "credits_left_5h": state_now.left_5h,
         "credits_left_week": state_now.left_week,
         "reset_at": state_now.reset_at,
@@ -311,6 +354,7 @@ async fn chat_completions(
         return Err(ApiError::OutOfCredits(before));
     }
 
+    seat(&state, &caller, &headers)?;
     let slot = admit(&state, &caller.license.license_id).await?;
 
     let request: translate::OaiRequest = serde_json::from_value(body)
@@ -401,6 +445,8 @@ async fn transcriptions(
         return Err(ApiError::OutOfCredits(before));
     }
 
+    seat(&state, &caller, &headers)?;
+
     let mut clip: Vec<u8> = vec![];
     let mut mime = String::new();
     while let Some(field) = form
@@ -469,6 +515,7 @@ async fn gemini_generate(
         return Err(ApiError::OutOfCredits(before));
     }
 
+    seat(&state, &caller, &headers)?;
     let slot = admit(&state, &caller.license.license_id).await?;
 
     // `gemini-2.5-flash:streamGenerateContent` — the model, then the verb.
@@ -555,15 +602,16 @@ async fn sync_ws(
         .cloned()
         .ok_or_else(|| ApiError::BadRequest("a room is required".into()))?;
 
-    // The licence says how many devices may be paired, and the room is where
-    // that is actually enforced: a third laptop is turned away at the door
-    // rather than discovering later that nothing arrived.
+    // The seat register is the real limit — a sync round lasts seconds, so
+    // counting who is in the room at this instant would let any number of
+    // machines share a licence by never overlapping. What the room still
+    // enforces is that a round is between two devices and not a crowd.
+    seat(&state, &caller, &headers)?;
     let channel = state.room(&room);
-    let peers = channel.receiver_count();
-    let allowed = caller.peers as usize;
-    if peers >= allowed {
+    let here = channel.receiver_count();
+    if here >= caller.peers.max(2) as usize {
         return Err(ApiError::Forbidden(format!(
-            "this licence pairs {allowed} device(s), and {peers} are already connected"
+            "{here} device(s) are already in this room"
         )));
     }
 

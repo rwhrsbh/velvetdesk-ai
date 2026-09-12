@@ -42,6 +42,12 @@ pub fn router() -> Router<AppState> {
         .route("/admin/tiers/{name}", delete(delete_tier))
         .route("/admin/licenses", get(list_licenses).post(mint_license))
         .route("/admin/licenses/{id}/peers", post(set_peers))
+        .route("/admin/upstreams/{id}/catalog", get(catalog))
+        .route("/admin/licenses/{id}/devices", get(list_devices))
+        .route(
+            "/admin/licenses/{id}/devices/{device}",
+            delete(forget_device),
+        )
         .route("/admin/revoke", post(revoke))
         .route("/admin/unrevoke", post(unrevoke))
         .route("/admin/stats", get(stats))
@@ -329,6 +335,92 @@ async fn delete_tier(
     state.db.delete_tier(&name)?;
     state.reload()?;
     Ok(Json(json!({ "deleted": name })))
+}
+
+/// What an upstream says it serves, with the prices it publishes.
+///
+/// Typing a model name and three prices by hand is how a pricing table ends
+/// up quietly wrong — a decimal point in the wrong place bills a tenth of
+/// what a model costs. OpenRouter publishes both; this fetches them with one
+/// of the upstream's own keys and hands them to the form.
+async fn catalog(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    admin(&state, &headers)?;
+    let (provider, pool) = {
+        let registry = state.registry.read();
+        let upstream = registry
+            .upstreams
+            .iter()
+            .find(|up| up.id == id)
+            .ok_or_else(|| ApiError::BadRequest(format!("no upstream called {id}")))?;
+        // Any model of this upstream will do: the catalogue is a property of
+        // the endpoint, not of the model asked about.
+        let sample = registry
+            .models
+            .iter()
+            .find(|model| model.upstream_id == id)
+            .cloned()
+            .unwrap_or_else(|| crate::registry::ModelRow {
+                name: String::new(),
+                upstream_id: id.clone(),
+                upstream_name: String::new(),
+                price_in: 0.0,
+                price_cached: None,
+                price_out: 0.0,
+                context_tokens: None,
+                enabled: true,
+                position: 0,
+                voice: false,
+                price_request: 0.0,
+            });
+        (
+            crate::registry::provider_for(upstream, &sample),
+            registry.pool(&id),
+        )
+    };
+    let pool = pool.ok_or_else(|| ApiError::BadRequest("this upstream has no keys".into()))?;
+    let lease = pool
+        .acquire()
+        .ok_or_else(|| ApiError::BadRequest("this upstream has no key that works".into()))?;
+    match vd_llm::catalog::list_models(&state.llm.http, &provider, &lease.key).await {
+        Ok(catalog) => {
+            pool.report_success(lease.index);
+            Ok(Json(json!({ "models": catalog.models })))
+        }
+        Err(err) => {
+            pool.report_failure(lease.index, err.verdict());
+            Err(ApiError::Upstream(err.message()))
+        }
+    }
+}
+
+/// The machines one licence is in use from.
+async fn list_devices(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    admin(&state, &headers)?;
+    Ok(Json(json!(state.db.devices(&id)?)))
+}
+
+/// Release a seat.
+///
+/// Only from here: an operator who could free their own seat could work
+/// through a ten-device licence with a whole floor of people. A laptop that
+/// was replaced, sold or reinstalled is unbound by whoever sold the licence,
+/// and the next machine to call takes the seat.
+async fn forget_device(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((id, device)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiError> {
+    admin(&state, &headers)?;
+    state.db.forget_device(&id, &device)?;
+    Ok(Json(json!({ "released": device })))
 }
 
 #[derive(Deserialize)]

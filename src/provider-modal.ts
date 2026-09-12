@@ -562,7 +562,11 @@ export async function openKeysModal(deps: ModalDeps) {
             "license.noPublicKey": "keys.cloudNoPublicKey",
             "license.refused": "keys.cloudRefused",
           };
-          parts.push(t(wording[status.problem.split(":")[0]] ?? "keys.cloudInvalid"));
+          const [name, ...rest] = status.problem.split(":");
+          const said = rest.join(":").trim();
+          // A refusal the gateway explained is shown as it explained it —
+          // "all ten devices are registered" is actionable, "refused" is not.
+          parts.push(said || t(wording[name] ?? "keys.cloudInvalid"));
         } else if (status.valid) {
           parts.push(
             t("keys.cloudValid", {

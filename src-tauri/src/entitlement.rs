@@ -35,6 +35,9 @@ pub const PUBLIC_KEY: &str = match option_env!("VD_LICENSE_PUBLIC_KEY") {
 /// The provider that is the subscription: its "key" is the licence.
 pub const CLOUD_PROVIDER: &str = "velvetdesk-cloud";
 
+/// The header the gateway counts devices by.
+pub const DEVICE_HEADER: &str = "X-VD-Device";
+
 /// Where the subscription lives, fixed at build time.
 ///
 /// Not a setting. The operator has no way of knowing a good value for this,

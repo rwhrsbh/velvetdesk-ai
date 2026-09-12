@@ -4,6 +4,7 @@ pub mod config;
 pub mod doctor;
 pub mod entitlement;
 pub mod error;
+pub mod hwid;
 pub mod llm;
 pub mod models;
 pub mod state;

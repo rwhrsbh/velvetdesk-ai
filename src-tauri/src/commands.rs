@@ -1282,11 +1282,19 @@ pub async fn cloud_status(state: State<'_, AppState>) -> Result<CloudStatus> {
 
     // What is left is the gateway's to say. A gateway that cannot be reached
     // leaves the numbers empty rather than guessing at them.
+    // The same header every other call carries: asking what the licence has
+    // left is also how a freshly entered key claims its seat, so a licence
+    // whose devices are all taken says so here rather than at the first
+    // reply the operator tries to write.
     let response = state
         .llm
         .http
         .get(format!("{base_url}/usage"))
         .header("authorization", format!("Bearer {}", token.trim()))
+        .header(
+            entitlement::DEVICE_HEADER,
+            crate::hwid::device_id(&state.paths),
+        )
         .send()
         .await;
     let Ok(response) = response else {
@@ -1295,9 +1303,25 @@ pub async fn cloud_status(state: State<'_, AppState>) -> Result<CloudStatus> {
     if !response.status().is_success() {
         if response.status().as_u16() == 403 || response.status().as_u16() == 401 {
             status.valid = false;
-            if status.problem.is_empty() {
-                status.problem = "license.refused".into();
-            }
+            // The gateway's own words, when it has any: "this licence covers
+            // 10 devices and 10 are already registered" is the one refusal
+            // the operator can actually act on, and a generic "refused"
+            // would send them to support to find that out.
+            let said = response
+                .json::<Value>()
+                .await
+                .ok()
+                .and_then(|body| {
+                    body.pointer("/error/message")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                })
+                .unwrap_or_default();
+            status.problem = if said.is_empty() {
+                "license.refused".into()
+            } else {
+                format!("license.refused:{said}")
+            };
         }
         return Ok(status);
     }

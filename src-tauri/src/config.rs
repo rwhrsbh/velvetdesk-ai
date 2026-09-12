@@ -265,7 +265,7 @@ impl Settings {
                 settings.providers.push(provider);
             }
         }
-        settings.pin_cloud();
+        settings.pin_cloud(&crate::hwid::device_id(paths));
         Ok(settings)
     }
 
@@ -279,7 +279,7 @@ impl Settings {
     /// edited by hand nor a client sending an old copy of the settings can
     /// point the subscription at something that is not the subscription.
     /// The address moves when the build moves it, and at no other time.
-    pub fn pin_cloud(&mut self) {
+    pub fn pin_cloud(&mut self, device_id: &str) {
         if let Some(cloud) = self
             .providers
             .iter_mut()
@@ -287,6 +287,17 @@ impl Settings {
         {
             cloud.base_url = crate::entitlement::CLOUD_BASE_URL.to_string();
             cloud.api_version = "v1".into();
+            // Which machine is using the subscription. A licence for ten
+            // devices is enforced on this, so it travels with every call
+            // and is not something the settings file can change: anything
+            // already in the list under this name is replaced.
+            cloud
+                .extra_headers
+                .retain(|(name, _)| !name.eq_ignore_ascii_case(crate::entitlement::DEVICE_HEADER));
+            cloud.extra_headers.push((
+                crate::entitlement::DEVICE_HEADER.to_string(),
+                device_id.to_string(),
+            ));
         }
     }
 

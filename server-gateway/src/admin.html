@@ -19,23 +19,51 @@
       * { box-sizing: border-box; }
       body {
         margin: 0;
-        background: var(--bg);
+        background:
+          radial-gradient(900px 420px at 15% -10%, color-mix(in srgb, var(--accent) 12%, transparent), transparent),
+          var(--bg);
         color: var(--text);
-        font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        font: 14px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      /* Everything sits in one column of the same width, centred: the page
+         used to start hard against the top-left corner of a wide monitor. */
+      .wrap {
+        width: min(1100px, 100%);
+        margin-inline: auto;
+        padding-inline: 24px;
       }
       header {
-        display: flex;
-        gap: 12px;
-        align-items: center;
-        padding: 14px 20px;
         border-bottom: 1px solid var(--line);
         position: sticky;
         top: 0;
-        background: var(--bg);
+        background: color-mix(in srgb, var(--bg) 86%, transparent);
+        backdrop-filter: blur(8px);
         z-index: 5;
+      }
+      header .wrap {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        padding-block: 14px;
         flex-wrap: wrap;
       }
-      h1 { font-size: 16px; margin: 0 16px 0 0; font-weight: 600; }
+      h1 {
+        font-size: 15px;
+        margin: 0 12px 0 0;
+        font-weight: 600;
+        letter-spacing: .01em;
+        white-space: nowrap;
+      }
+      h1 .dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--ok);
+        margin-right: 8px;
+        vertical-align: 1px;
+      }
       nav { display: flex; gap: 4px; flex-wrap: wrap; }
       nav button {
         background: none;
@@ -46,52 +74,80 @@
         cursor: pointer;
         font: inherit;
       }
+      nav button:hover { color: var(--text); background: color-mix(in srgb, var(--card) 70%, transparent); }
       nav button.on { color: var(--text); border-color: var(--line); background: var(--card); }
-      main { padding: 20px; max-width: 1100px; }
+      main { padding-block: 24px 64px; }
       section { display: none; }
       section.on { display: block; }
       .card {
         background: var(--card);
         border: 1px solid var(--line);
-        border-radius: 12px;
-        padding: 16px;
-        margin-bottom: 16px;
+        border-radius: 14px;
+        padding: 18px 18px 20px;
+        margin-bottom: 18px;
+        box-shadow: 0 1px 0 color-mix(in srgb, #fff 4%, transparent) inset;
       }
-      .card h2 { font-size: 14px; margin: 0 0 12px; font-weight: 600; }
+      .card h2 {
+        font-size: 13px;
+        margin: 0 0 6px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: .06em;
+        color: var(--dim);
+      }
+      .card > .muted:first-of-type { margin-top: 0; }
+      .card p { margin: 0 0 12px; }
       .muted { color: var(--dim); }
+      .table-scroll { overflow-x: auto; }
       table { width: 100%; border-collapse: collapse; }
-      th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+      th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+      tbody tr:last-child td { border-bottom: 0; }
+      tbody tr:hover { background: color-mix(in srgb, var(--accent) 5%, transparent); }
       th { color: var(--dim); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
       input, select {
         background: #0c0e13;
         border: 1px solid var(--line);
         color: var(--text);
         border-radius: 8px;
-        padding: 7px 9px;
+        padding: 8px 10px;
         font: inherit;
         min-width: 0;
         width: 100%;
+        transition: border-color .12s, box-shadow .12s;
       }
+      input:focus, select:focus, button:focus-visible {
+        outline: none;
+        border-color: color-mix(in srgb, var(--accent) 60%, var(--line));
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+      }
+      input::placeholder { color: color-mix(in srgb, var(--dim) 70%, transparent); }
+      label.field { display: grid; gap: 4px; font-size: 12px; color: var(--dim); }
       button.act {
         background: var(--accent);
         border: 0;
         color: #16121a;
         border-radius: 8px;
-        padding: 7px 14px;
+        padding: 8px 16px;
         font: inherit;
         font-weight: 600;
         cursor: pointer;
+        transition: filter .12s, transform .06s;
       }
+      button.act:hover { filter: brightness(1.08); }
+      button.act:active { transform: translateY(1px); }
       button.ghost {
         background: none;
         border: 1px solid var(--line);
         color: var(--text);
         border-radius: 8px;
-        padding: 6px 10px;
+        padding: 6px 11px;
         font: inherit;
         cursor: pointer;
+        transition: background .12s, border-color .12s;
       }
+      button.ghost:hover { background: color-mix(in srgb, #fff 5%, transparent); }
       button.danger { color: var(--bad); }
+      button.danger:hover { border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
       .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
       .grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
       .pill { border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; font-size: 12px; color: var(--dim); }
@@ -99,15 +155,28 @@
       .pill.off { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
       code { background: #0c0e13; padding: 2px 6px; border-radius: 6px; word-break: break-all; }
       #toast {
-        position: fixed; right: 16px; bottom: 16px; background: var(--card);
-        border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; display: none;
+        position: fixed; right: 18px; bottom: 18px; background: var(--card);
+        border: 1px solid var(--line); border-radius: 10px; padding: 11px 15px; display: none;
+        box-shadow: 0 10px 30px rgb(0 0 0 / .45);
+        max-width: min(420px, calc(100vw - 36px));
       }
-      @media (max-width: 640px) { main { padding: 12px; } td, th { padding: 6px 4px; } }
+      /* Figures worth reading at a glance: the queue, the day, the seats. */
+      .stat-row { display: flex; gap: 22px; flex-wrap: wrap; }
+      .stat { display: grid; gap: 2px; }
+      .stat b { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+      .stat span { font-size: 12px; color: var(--dim); }
+      @media (max-width: 640px) {
+        .wrap { padding-inline: 14px; }
+        main { padding-block: 16px 48px; }
+        td, th { padding: 7px 6px; }
+        h1 { margin-right: 0; }
+      }
     </style>
   </head>
   <body>
     <header>
-      <h1>VelvetDesk — шлюз</h1>
+      <div class="wrap">
+      <h1><span class="dot"></span>VelvetDesk — шлюз</h1>
       <nav>
         <button data-tab="upstreams" class="on">Провайдеры</button>
         <button data-tab="models">Модели</button>
@@ -116,16 +185,18 @@
         <button data-tab="stats">Расход</button>
       </nav>
       <div class="row" style="margin-left:auto">
-        <input id="token" type="password" placeholder="admin-токен" style="width:220px" />
+        <input id="token" type="password" placeholder="admin-токен" style="width:220px"
+               autocomplete="off" autocapitalize="off" spellcheck="false" />
         <button class="ghost" id="save-token">Войти</button>
+      </div>
       </div>
     </header>
 
-    <main>
+    <main class="wrap">
       <section id="upstreams" class="on">
         <div class="card">
           <h2>Очередь</h2>
-          <p class="muted" id="queue-line">Загружаю…</p>
+          <div class="stat-row" id="queue-line"><span class="muted">Загружаю…</span></div>
           <p class="muted">
             Одновременных вызовов к провайдерам — ограничено, остальные ждут в очереди;
             на одну лицензию своя доля, чтобы пачка запросов одного оператора не заняла
@@ -177,6 +248,15 @@
         </div>
         <div class="card">
           <h2>Добавить модель</h2>
+          <p class="muted">
+            Выберите провайдера и нажмите «загрузить список» — модели и цены придут
+            от самого провайдера (OpenRouter публикует и то и другое). Выбор модели
+            заполняет поля ниже; править их всё равно можно.
+          </p>
+          <div class="row" style="margin-bottom:10px">
+            <select id="m-catalog" style="flex:1 1 320px"><option value="">список не загружен</option></select>
+            <button class="ghost" id="m-fetch">загрузить список</button>
+          </div>
           <div class="grid">
             <input id="m-name" placeholder="имя для клиента" />
             <select id="m-upstream"></select>
@@ -233,6 +313,13 @@
         </div>
         <div class="card">
           <h2>Выданные</h2>
+          <p class="muted">
+            «Устройств» — сколько машин покрывает ключ; правится здесь, и решает именно
+            это число, а не то, что зашито в самом ключе. Место занимает первая машина,
+            вошедшая с этим ключом, и держит его: освободить может только админ —
+            «устройства» → «отвязать». Сам пользователь не может, иначе десять мест по
+            очереди использовал бы целый этаж.
+          </p>
           <div id="license-list" class="muted">Загружаю…</div>
         </div>
       </section>
@@ -279,6 +366,15 @@
           },
         });
         const body = await response.json().catch(() => ({}));
+        if (response.status === 401 || response.status === 403) {
+          sessionStorage.removeItem("vd-admin");
+          token = "";
+          $("token").value = "";
+          $("token").focus();
+          throw new Error(
+            (body?.error?.message || "не тот токен") + " — введите admin-токен заново",
+          );
+        }
         if (!response.ok) throw new Error(body?.error?.message || response.statusText);
         return body;
       }
@@ -302,10 +398,17 @@
         });
       });
 
-      $("save-token").addEventListener("click", () => {
+      function signIn() {
         token = $("token").value.trim();
         sessionStorage.setItem("vd-admin", token);
         load();
+      }
+
+      $("save-token").addEventListener("click", signIn);
+      // Typing a token and pressing Enter is what everyone does, and doing
+      // nothing in response looked exactly like a rejected token.
+      $("token").addEventListener("keydown", (event) => {
+        if (event.key === "Enter") signIn();
       });
 
       // -------------------------------------------------------- upstreams
@@ -313,9 +416,10 @@
         const data = await call("/admin/overview");
         $("credit-usd").textContent = "$" + data.credit_usd;
         const q = data.queue;
-        $("queue-line").textContent =
-          `В работе ${q.inflight} из ${q.max_inflight} · ждут ${q.queued} из ${q.max_queued} · ` +
-          `на лицензию не больше ${q.max_per_license}`;
+        $("queue-line").innerHTML = `
+          <div class="stat"><b>${q.inflight} / ${q.max_inflight}</b><span>в работе</span></div>
+          <div class="stat"><b>${q.queued} / ${q.max_queued}</b><span>ждут очереди</span></div>
+          <div class="stat"><b>${q.max_per_license}</b><span>на лицензию</span></div>`;
         const rows = await Promise.all(
           data.upstreams.map(async (up) => {
             const keys = await call(`/admin/upstreams/${encodeURIComponent(up.id)}/keys`);
@@ -493,6 +597,48 @@
         });
       }
 
+      // The provider's own catalogue, with the prices it publishes.
+      let catalogue = [];
+
+      $("m-fetch").addEventListener("click", async () => {
+        const upstream = $("m-upstream").value;
+        if (!upstream) return toast("Сначала добавьте провайдера", true);
+        $("m-fetch").disabled = true;
+        try {
+          const data = await call(`/admin/upstreams/${encodeURIComponent(upstream)}/catalog`);
+          catalogue = data.models || [];
+          $("m-catalog").innerHTML =
+            `<option value="">— выберите модель (${catalogue.length}) —</option>` +
+            catalogue
+              .map((m, index) => {
+                const priced = m.price_in != null ? ` · $${m.price_in}/$${m.price_out ?? 0}` : "";
+                return `<option value="${index}">${esc(m.label || m.id)}${priced}</option>`;
+              })
+              .join("");
+          toast(`Загружено моделей: ${catalogue.length}`);
+        } catch (error) {
+          toast(error.message, true);
+        } finally {
+          $("m-fetch").disabled = false;
+        }
+      });
+
+      $("m-catalog").addEventListener("change", () => {
+        const picked = catalogue[Number($("m-catalog").value)];
+        if (!picked) return;
+        // The name the client asks for is the short one; the upstream name is
+        // what the provider calls it, and they differ on gateways that
+        // namespace by vendor.
+        const short = picked.id.includes("/") ? picked.id.split("/").pop() : picked.id;
+        $("m-name").value = short;
+        $("m-upstream-name").value = picked.id === short ? "" : picked.id;
+        $("m-in").value = picked.price_in ?? "";
+        $("m-cached").value = picked.price_cached ?? "";
+        $("m-out").value = picked.price_out ?? "";
+        $("m-ctx").value = picked.context_tokens ?? "";
+        $("m-voice").checked = !!picked.audio && !picked.chat;
+      });
+
       $("m-add").addEventListener("click", async () => {
         try {
           await call("/admin/models", {
@@ -581,11 +727,13 @@
                   <button class="ghost" data-save-peers="${esc(row.license_id)}">ок</button>
                 </td>
                 <td class="muted">${esc(row.note)}</td>
-                <td style="text-align:right">
+                <td style="text-align:right" class="row" style="justify-content:flex-end">
+                  <button class="ghost" data-devices="${esc(row.license_id)}">устройства</button>
                   <button class="ghost ${row.revoked ? "" : "danger"}" data-revoke="${esc(row.license_id)}" data-on="${row.revoked}">
                     ${row.revoked ? "вернуть" : "отозвать"}
                   </button>
-                </td></tr>`,
+                </td></tr>
+                <tr><td colspan="6" class="table-scroll" data-devices-for="${esc(row.license_id)}" data-open="0"></td></tr>`,
             )
             .join("")}
         </tbody></table>`;
@@ -604,6 +752,61 @@
               toast("Сохранено");
               drawLicenses();
             } catch (error) {
+              toast(error.message, true);
+            }
+          });
+        });
+
+        // Seats, and the only way to free one. An operator cannot release
+        // their own: a licence for ten would otherwise be a licence for a
+        // whole floor taking turns.
+        document.querySelectorAll("[data-devices]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            const id = button.dataset.devices;
+            const box = document.querySelector(`[data-devices-for="${CSS.escape(id)}"]`);
+            if (box.dataset.open === "1") {
+              box.dataset.open = "0";
+              box.innerHTML = "";
+              return;
+            }
+            box.dataset.open = "1";
+            box.innerHTML = '<span class="muted">Загружаю…</span>';
+            try {
+              const list = await call(`/admin/licenses/${encodeURIComponent(id)}/devices`);
+              box.innerHTML = list.length
+                ? `<table><thead><tr><th>устройство</th><th>привязано</th><th>последний раз</th><th></th></tr></thead>
+                   <tbody>${list
+                     .map(
+                       (d) => `<tr>
+                       <td><code>${esc(d.device_id)}</code></td>
+                       <td class="muted">${new Date(d.first_seen * 1000).toLocaleString()}</td>
+                       <td class="muted">${new Date(d.last_seen * 1000).toLocaleString()}</td>
+                       <td style="text-align:right">
+                         <button class="ghost danger" data-free="${esc(id)}|${esc(d.device_id)}">отвязать</button>
+                       </td></tr>`,
+                     )
+                     .join("")}</tbody></table>`
+                : '<span class="muted">Ни одного устройства ещё не заходило</span>';
+
+              box.querySelectorAll("[data-free]").forEach((free) => {
+                free.addEventListener("click", async () => {
+                  const [license, device] = free.dataset.free.split("|");
+                  try {
+                    await call(
+                      `/admin/licenses/${encodeURIComponent(license)}/devices/${encodeURIComponent(device)}`,
+                      { method: "DELETE" },
+                    );
+                    toast("Устройство отвязано — место освободилось");
+                    button.click();
+                    button.click();
+                  } catch (error) {
+                    toast(error.message, true);
+                  }
+                });
+              });
+            } catch (error) {
+              box.innerHTML = "";
+              box.dataset.open = "0";
               toast(error.message, true);
             }
           });
@@ -685,7 +888,8 @@
       // ------------------------------------------------------------- load
       async function load() {
         if (!token) {
-          toast("Введите admin-токен", true);
+          toast("Введите admin-токен и нажмите «Войти»", true);
+          $("token").focus();
           return;
         }
         const tab = document.querySelector("nav button.on").dataset.tab;

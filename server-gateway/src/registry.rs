@@ -278,6 +278,27 @@ impl Registry {
     }
 }
 
+/// One machine a licence is used from.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceRow {
+    pub device_id: String,
+    pub first_seen: i64,
+    pub last_seen: i64,
+    #[serde(default)]
+    pub note: String,
+}
+
+/// What the gateway decided about a device asking to be let in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceVerdict {
+    /// Already on the list.
+    Known,
+    /// Took a free seat just now.
+    Admitted { taken: u32 },
+    /// Every seat is taken by another machine.
+    NoSeats { taken: u32 },
+}
+
 /// The provider shape `vd-llm` calls with, for one model of one upstream.
 pub fn provider_for(upstream: &UpstreamRow, model: &ModelRow) -> ProviderConfig {
     ProviderConfig {

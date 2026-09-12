@@ -30,6 +30,17 @@ pub struct ModelInfo {
     pub context_tokens: Option<u32>,
     #[serde(default)]
     pub max_output_tokens: Option<u32>,
+    /// Dollars per million tokens, when the endpoint publishes them.
+    ///
+    /// OpenRouter prices every model in its catalogue, per token; a gateway
+    /// that copies its shape does the same. Carrying the numbers here means
+    /// nobody has to retype them into a pricing table and get one wrong.
+    #[serde(default)]
+    pub price_in: Option<f64>,
+    #[serde(default)]
+    pub price_out: Option<f64>,
+    #[serde(default)]
+    pub price_cached: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -140,6 +151,11 @@ fn parse_gemini_models(value: &Value) -> Vec<ModelInfo> {
                 free: false,
                 context_tokens: limit(entry, "inputTokenLimit"),
                 max_output_tokens: limit(entry, "outputTokenLimit"),
+                // Google's list carries no prices at all; they live in a
+                // published table nobody serves as JSON.
+                price_in: None,
+                price_out: None,
+                price_cached: None,
             })
         })
         .collect();
@@ -301,6 +317,9 @@ fn parse_openai_models(value: &Value) -> Vec<ModelInfo> {
                         .and_then(|t| limit(t, "context_length"))
                 }),
                 max_output_tokens: ceiling,
+                price_in: price(entry, "prompt"),
+                price_out: price(entry, "completion"),
+                price_cached: price(entry, "input_cache_read"),
                 id,
                 label,
                 chat: true,
@@ -313,6 +332,21 @@ fn parse_openai_models(value: &Value) -> Vec<ModelInfo> {
     // operator without a budget is looking for.
     out.sort_by(|a, b| b.free.cmp(&a.free).then_with(|| a.id.cmp(&b.id)));
     out
+}
+
+/// One published price, in dollars per million tokens.
+///
+/// The catalogue quotes dollars per single token, usually as a string —
+/// "0.00000028" — which is unreadable and unusable as it stands. A model
+/// with no price for the field simply has none here; zero is a real answer
+/// and means free.
+fn price(entry: &Value, field: &str) -> Option<f64> {
+    let per_token = match entry.get("pricing")?.get(field)? {
+        Value::String(text) => text.trim().parse::<f64>().ok()?,
+        Value::Number(number) => number.as_f64()?,
+        _ => return None,
+    };
+    (per_token >= 0.0).then_some(per_token * 1_000_000.0)
 }
 
 /// OpenRouter and the gateways that copy it publish per-token prices and mark
