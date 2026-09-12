@@ -685,6 +685,10 @@ pub fn plan_mutation(scope: &Scope, tool: &str, args: &Value) -> Result<Mutation
             if scope.man_file(&id)?.exists() {
                 return Err(AppError::Invalid(format!("dossier {id} already exists")));
             }
+            // The agent is not a way around the plan: the eleventh dossier is
+            // refused here, where every route to one passes — the operator's
+            // button and the model's tool call alike.
+            crate::entitlement::check_men(scope.read_all_men()?.len())?;
             let mut man = Man::new(scope.model_id.clone(), id.clone(), name.clone());
             man.age = arg_u32(args, "age");
             man.location = arg_str(args, "location").unwrap_or_default();

@@ -86,6 +86,51 @@ pub fn room_for(secret: &[u8; 32]) -> String {
     B64.encode(&hash.finalize()[..16])
 }
 
+/// The pairing a licence implies.
+///
+/// Two machines running the same subscription should find each other without
+/// anybody reading a code down the phone, so the secret is derived from the
+/// licence itself: same licence, same key, same room, on every device the
+/// operator installs.
+///
+/// What this costs, stated plainly: the gateway is handed the licence token
+/// to check its signature, so a gateway that chose to misbehave could derive
+/// this key and read what passes through it. It never stores the token — only
+/// the id inside it — and the payloads stay sealed from everyone else. An
+/// operator who would rather not extend even that much trust can pair by
+/// invite instead, with a key the server has never seen.
+pub fn secret_from_license(token: &str) -> [u8; 32] {
+    let mut hash = Sha256::new();
+    hash.update(b"velvetdesk-sync-secret/v1");
+    hash.update(token.trim().as_bytes());
+    hash.finalize().into()
+}
+
+/// Pair this device off the licence, keeping the identity it already has.
+///
+/// Re-running this is harmless: the key and room are a function of the
+/// licence, and the device id is only regenerated when there was none.
+pub fn from_license(paths: &Paths, token: &str, relay: &str) -> Result<Pairing> {
+    if token.trim().is_empty() {
+        return Err(AppError::message("sync.noLicense", serde_json::json!({})));
+    }
+    let secret = secret_from_license(token);
+    let existing = Pairing::load(paths)?;
+    let pairing = Pairing {
+        device_id: existing
+            .as_ref()
+            .map(|p| p.device_id.clone())
+            .filter(|id| !id.is_empty())
+            .unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string()),
+        key: B64.encode(secret),
+        room: room_for(&secret),
+        relay: relay.trim_end_matches('/').to_string(),
+        auto: existing.map(|p| p.auto).unwrap_or(true),
+    };
+    pairing.save(paths)?;
+    Ok(pairing)
+}
+
 /// Start a pairing on this device and hand back the invite.
 pub fn create(paths: &Paths, relay: &str) -> Result<Pairing> {
     use rand::RngCore;
@@ -177,6 +222,19 @@ mod tests {
         assert_eq!(B64.decode(key).unwrap(), [3u8; 32]);
         let relay = String::from_utf8(B64.decode(parts.next().unwrap()).unwrap()).unwrap();
         assert_eq!(relay, "https://cloud.velvetdesk.ai");
+    }
+
+    /// The same licence has to land two machines in the same room, and a
+    /// different licence must not come anywhere near it.
+    #[test]
+    fn a_licence_pairs_the_devices_that_share_it() {
+        let mine = secret_from_license("VD.payload.signature");
+        assert_eq!(mine, secret_from_license("  VD.payload.signature  "));
+        assert_ne!(mine, secret_from_license("VD.someone.else"));
+        assert_eq!(
+            room_for(&mine),
+            room_for(&secret_from_license("VD.payload.signature"))
+        );
     }
 
     #[test]

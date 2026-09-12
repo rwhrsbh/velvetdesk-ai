@@ -227,7 +227,11 @@ impl Default for Settings {
                     key_count: 0,
                 },
             ],
-            active_provider: Some("gemini".into()),
+            // The subscription is the way in: a new install opens on the
+            // provider that needs no keys, no model name and no reading up on
+            // which endpoint serves what. Everything else is still there for
+            // anyone who brings their own keys.
+            active_provider: Some("velvetdesk-cloud".into()),
             agent_mode: AgentMode::Auto,
             security_level: SecurityLevel::Safe,
             active_model_id: None,

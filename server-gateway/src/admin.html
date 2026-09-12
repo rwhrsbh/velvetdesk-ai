@@ -176,7 +176,16 @@
             <input id="m-out" placeholder="цена выхода" inputmode="decimal" />
             <input id="m-ctx" placeholder="контекст, токенов" inputmode="numeric" />
             <input id="m-pos" placeholder="порядок" inputmode="numeric" />
+            <input id="m-req" placeholder="цена за клип, $" inputmode="decimal" />
+            <label class="row" style="gap:6px;align-items:center">
+              <input id="m-voice" type="checkbox" /> голос (диктовка)
+            </label>
           </div>
+          <p class="muted">
+            Голосовая модель не отдаётся в чат: на неё уходят только клипы диктовки,
+            по своей цепочке падения. Токенов в ответе нет, поэтому клип считается
+            по цене за клип.
+          </p>
           <div class="row" style="margin-top:10px"><button class="act" id="m-add">Сохранить</button></div>
         </div>
       </section>
@@ -423,16 +432,17 @@
         const models = await call("/admin/models");
         $("model-list").innerHTML = `<table><thead><tr>
             <th>модель</th><th>провайдер</th><th>имя у провайдера</th>
-            <th>вход</th><th>кеш</th><th>выход</th><th>порядок</th><th></th></tr></thead><tbody>
+            <th>вход</th><th>кеш</th><th>выход</th><th>клип</th><th>порядок</th><th></th></tr></thead><tbody>
           ${models
             .map(
               (model) => `<tr>
-                <td><code>${esc(model.name)}</code></td>
+                <td><code>${esc(model.name)}</code>${model.voice ? ' <span class="pill on">голос</span>' : ""}</td>
                 <td class="muted">${esc(model.upstream_id)}</td>
                 <td class="muted">${esc(model.upstream_name || model.name)}</td>
                 <td>${model.price_in}</td>
                 <td>${model.price_cached ?? "—"}</td>
                 <td>${model.price_out}</td>
+                <td>${model.price_request || "—"}</td>
                 <td>${model.position}</td>
                 <td style="text-align:right" class="row" style="justify-content:flex-end">
                   <button class="ghost" data-toggle-model="${esc(model.name)}">${model.enabled ? "выключить" : "включить"}</button>
@@ -483,6 +493,8 @@
               context_tokens: maybe($("m-ctx").value),
               enabled: true,
               position: num($("m-pos").value),
+              voice: $("m-voice").checked,
+              price_request: num($("m-req").value),
             }),
           });
           toast("Сохранено");

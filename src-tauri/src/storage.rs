@@ -123,6 +123,12 @@ impl Paths {
         self.root.join("global_index.json")
     }
 
+    /// The free plan's day meter. Not part of settings on purpose: settings
+    /// are the operator's to edit, and this is a count of what was used.
+    pub fn meter_file(&self) -> PathBuf {
+        self.root.join("usage_meter.json")
+    }
+
     pub fn profiles_dir(&self) -> PathBuf {
         self.root.join("profiles")
     }

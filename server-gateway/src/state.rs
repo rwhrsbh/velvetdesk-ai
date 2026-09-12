@@ -102,6 +102,74 @@ impl AppState {
         self.registry.read().model_names()
     }
 
+    /// Turn a dictated clip into text, trying each voice model in turn.
+    ///
+    /// The client asks for no model here and is told none back: dictation is
+    /// a thing the subscription does, and which of the gateway's keys did it
+    /// is the gateway's business. Returns the model that answered and what a
+    /// clip on it costs, so the caller can bill it.
+    pub async fn transcribe(
+        &self,
+        audio_base64: &str,
+        mime: &str,
+    ) -> Result<(String, f64, String), LlmError> {
+        let attempts: Vec<(String, f64, ProviderConfig)> = {
+            let registry = self.registry.read();
+            registry
+                .voice_chain()
+                .into_iter()
+                .map(|(upstream, entry)| {
+                    let mut provider = provider_for(upstream, entry);
+                    // For voice the model name belongs in the speech slot:
+                    // the chat field is what a transcription ignores.
+                    provider.transcribe_model = entry.upstream_name().to_string();
+                    (entry.name.clone(), entry.price_request, provider)
+                })
+                .collect()
+        };
+        if attempts.is_empty() {
+            return Err(LlmError::Provider(
+                "the gateway has no voice model switched on".into(),
+            ));
+        }
+
+        let mut last = LlmError::Provider("no voice model was tried".into());
+        for (index, (model_name, price, provider)) in attempts.into_iter().enumerate() {
+            let Some(pool) = self.registry.read().pool(&provider.id) else {
+                continue;
+            };
+            if pool.is_empty() {
+                continue;
+            }
+            if index > 0 {
+                pool.clear_cooldowns();
+            }
+            let Some(lease) = pool.acquire() else {
+                continue;
+            };
+            match vd_llm::catalog::transcribe(
+                &self.llm.http,
+                &provider,
+                &lease.key,
+                audio_base64,
+                mime,
+            )
+            .await
+            {
+                Ok(text) => {
+                    pool.report_success(lease.index);
+                    return Ok((model_name, price, text));
+                }
+                Err(err) => {
+                    pool.report_failure(lease.index, err.verdict());
+                    log::warn!("{model_name} could not transcribe: {}", err.message());
+                    last = LlmError::Provider(err.message());
+                }
+            }
+        }
+        Err(last)
+    }
+
     /// Send the request, walking down the chain from the model that was asked
     /// for until one answers.
     ///

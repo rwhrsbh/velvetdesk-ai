@@ -84,6 +84,7 @@ impl AppState {
         next.save(&self.paths)?;
         *self.settings.write() = next;
         self.reload_pools();
+        self.refresh_entitlement();
         Ok(())
     }
 
@@ -91,7 +92,26 @@ impl AppState {
         next.save(&self.paths)?;
         *self.secrets.write() = next;
         self.reload_pools();
+        self.refresh_entitlement();
         Ok(())
+    }
+
+    /// Re-read the licence and publish what it allows.
+    ///
+    /// Called wherever the licence can change — startup, a saved key, a saved
+    /// settings file — so the caps the agent's tools consult are never a
+    /// version behind the token the operator just pasted in.
+    pub fn refresh_entitlement(&self) -> crate::entitlement::Entitlement {
+        let token = self
+            .secrets
+            .read()
+            .for_provider(crate::entitlement::CLOUD_PROVIDER)
+            .first()
+            .cloned()
+            .unwrap_or_default();
+        let entitlement = crate::entitlement::read(&token);
+        crate::entitlement::set_limits(entitlement.limits);
+        entitlement
     }
 
     pub fn reload_pools(&self) {

@@ -60,6 +60,14 @@ pub struct ModelRow {
     pub enabled: bool,
     #[serde(default)]
     pub position: i64,
+    /// Serves dictation instead of chat: it is tried for transcription and
+    /// never offered as a chat model.
+    #[serde(default)]
+    pub voice: bool,
+    /// Dollars per clip, for voice models. A transcription answers with text
+    /// and no token count, so there is nothing else to bill it by.
+    #[serde(default)]
+    pub price_request: f64,
 }
 
 /// One key, as the admin page is allowed to see it.
@@ -184,6 +192,8 @@ impl Registry {
                     context_tokens: model.context_tokens,
                     enabled: true,
                     position: place as i64,
+                    voice: model.voice,
+                    price_request: model.price_request,
                 })?;
             }
         }
@@ -223,7 +233,7 @@ impl Registry {
     pub fn chain_from(&self, name: &str) -> Vec<(&UpstreamRow, &ModelRow)> {
         let mut all: Vec<(&UpstreamRow, &ModelRow)> = vec![];
         for model in &self.models {
-            if !model.enabled {
+            if !model.enabled || model.voice {
                 continue;
             }
             if let Some(upstream) = self
@@ -238,6 +248,25 @@ impl Registry {
             all.rotate_left(start);
         }
         all
+    }
+
+    /// The dictation models, in the order they should be tried.
+    ///
+    /// Separate from the chat chain because the two fail for different
+    /// reasons and a text model asked to transcribe simply cannot: a clip
+    /// goes to whichever voice model answers, and the client never has to
+    /// know which one that was.
+    pub fn voice_chain(&self) -> Vec<(&UpstreamRow, &ModelRow)> {
+        self.models
+            .iter()
+            .filter(|model| model.enabled && model.voice)
+            .filter_map(|model| {
+                self.upstreams
+                    .iter()
+                    .find(|up| up.id == model.upstream_id && up.enabled)
+                    .map(|upstream| (upstream, model))
+            })
+            .collect()
     }
 
     /// Every model a client may ask for.
@@ -311,6 +340,8 @@ mod tests {
             context_tokens: None,
             enabled,
             position: 0,
+            voice: false,
+            price_request: 0.0,
         }
     }
 

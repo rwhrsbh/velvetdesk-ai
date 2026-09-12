@@ -2,6 +2,7 @@ pub mod agent;
 pub mod commands;
 pub mod config;
 pub mod doctor;
+pub mod entitlement;
 pub mod error;
 pub mod llm;
 pub mod models;
@@ -107,6 +108,10 @@ pub fn run() {
             // Warm the index so the first render is instant.
             let _ = storage::rebuild_index(&paths);
             let state = AppState::new(paths).map_err(|e| e.to_string())?;
+            // What the licence allows, before the first window is drawn: the
+            // caps are consulted from inside tool calls, and a free copy must
+            // not spend its first minute behaving like a paid one.
+            state.refresh_entitlement();
             let sync_paths = state.paths.clone();
             app.manage(state);
 
@@ -199,6 +204,7 @@ pub fn run() {
             commands::get_settings,
             commands::save_settings,
             commands::cloud_status,
+            commands::plan_state,
             commands::sync_state,
             commands::sync_create_invite,
             commands::sync_join,

@@ -20,7 +20,7 @@ log.workspace = true
 base64.workspace = true
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
-axum = { version = "0.8", features = ["ws"] }
+axum = { version = "0.8", features = ["ws", "multipart"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 rand = "0.8"

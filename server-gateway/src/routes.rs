@@ -17,7 +17,7 @@ use tokio::sync::broadcast;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::config::Tier;
-use crate::quota::{allowance, charge, Allowance, Bill};
+use crate::quota::{allowance, charge, charge_flat, request_credits, Allowance, Bill};
 use crate::state::AppState;
 use crate::translate;
 use vd_license::{verify, License, LicenseError};
@@ -28,6 +28,9 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/models", get(models))
         .route("/v1/usage", get(usage))
         .route("/v1/chat/completions", post(chat_completions))
+        // Dictation, in the shape every OpenAI client already speaks, so the
+        // desktop needs no special case for it.
+        .route("/v1/audio/transcriptions", post(transcriptions))
         // Gemini puts the action after a colon, which is not a path segment,
         // so the whole tail is taken and split here.
         .route("/v1beta/models/{*tail}", post(gemini_generate))
@@ -313,6 +316,81 @@ async fn chat_completions(
 
     let stream = UnboundedReceiverStream::new(rx).map(Ok::<Event, Infallible>);
     Ok((credit_headers(&before), Sse::new(stream)).into_response())
+}
+
+/// The biggest clip the gateway will take: about ten minutes of speech at the
+/// bitrate the app records at, and small enough that a stuck upload cannot
+/// hold a connection open all day.
+const MAX_CLIP: usize = 24 * 1024 * 1024;
+
+/// Turn a dictated clip into text.
+///
+/// The request is the OpenAI one — multipart, a `file` part, a `model` name
+/// that this gateway ignores — because the subscription decides which voice
+/// model runs, the same way it decides which chat model does.
+async fn transcriptions(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<HashMap<String, String>>,
+    mut form: axum::extract::Multipart,
+) -> Result<Response, ApiError> {
+    let caller = authenticate(&state, &headers, &query)?;
+    let before = allowance(&state.db, &caller.license.license_id, caller.tier, now())?;
+    if before.exhausted() {
+        return Err(ApiError::OutOfCredits(before));
+    }
+
+    let mut clip: Vec<u8> = vec![];
+    let mut mime = String::new();
+    while let Some(field) = form
+        .next_field()
+        .await
+        .map_err(|err| ApiError::BadRequest(format!("cannot read the upload: {err}")))?
+    {
+        if field.name() != Some("file") {
+            continue;
+        }
+        mime = field
+            .content_type()
+            .unwrap_or("audio/webm")
+            .split(';')
+            .next()
+            .unwrap_or("audio/webm")
+            .trim()
+            .to_string();
+        let bytes = field
+            .bytes()
+            .await
+            .map_err(|err| ApiError::BadRequest(format!("cannot read the clip: {err}")))?;
+        clip = bytes.to_vec();
+        break;
+    }
+    if clip.is_empty() {
+        return Err(ApiError::BadRequest("the upload had no audio in it".into()));
+    }
+    if clip.len() > MAX_CLIP {
+        return Err(ApiError::BadRequest(format!(
+            "the clip is {} MB; {} MB is the limit",
+            clip.len() / (1024 * 1024),
+            MAX_CLIP / (1024 * 1024)
+        )));
+    }
+
+    use base64::Engine;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&clip);
+    let (model, price, text) = state
+        .transcribe(&encoded, &mime)
+        .await
+        .map_err(|err| ApiError::Upstream(err.to_string()))?;
+    let after = charge_flat(
+        &state.db,
+        &caller.license.license_id,
+        caller.tier,
+        &model,
+        request_credits(price, state.cfg.credit_usd),
+        now(),
+    )?;
+    Ok((credit_headers(&after), Json(json!({ "text": text }))).into_response())
 }
 
 async fn gemini_generate(

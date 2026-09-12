@@ -263,7 +263,10 @@ impl CallError {
         }
     }
 
-    fn verdict(&self) -> KeyVerdict {
+    /// How a key should be treated after this failure. Public because the
+    /// gateway rotates keys for calls that are not chat — transcription —
+    /// and has to park a refused key the same way.
+    pub fn verdict(&self) -> KeyVerdict {
         match self {
             CallError::Status { code, .. } => match code {
                 429 => KeyVerdict::RateLimited,

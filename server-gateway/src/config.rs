@@ -78,6 +78,12 @@ pub struct Model {
     pub price_out: f64,
     #[serde(default)]
     pub context_tokens: Option<u32>,
+    /// Takes dictation rather than chat.
+    #[serde(default)]
+    pub voice: bool,
+    /// Dollars per clip, for voice models.
+    #[serde(default)]
+    pub price_request: f64,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]

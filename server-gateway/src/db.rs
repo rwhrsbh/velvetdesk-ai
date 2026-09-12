@@ -103,7 +103,11 @@ impl Db {
                  price_out REAL NOT NULL DEFAULT 0,
                  context_tokens INTEGER,
                  enabled INTEGER NOT NULL DEFAULT 1,
-                 position INTEGER NOT NULL DEFAULT 0
+                 position INTEGER NOT NULL DEFAULT 0,
+                 -- Takes dictation rather than chat. Voice is billed per clip
+                 -- because a transcription reports no tokens to count.
+                 voice INTEGER NOT NULL DEFAULT 0,
+                 price_request REAL NOT NULL DEFAULT 0
              );
              CREATE TABLE IF NOT EXISTS tier (
                  name TEXT PRIMARY KEY,
@@ -122,7 +126,23 @@ impl Db {
                  issued_at INTEGER NOT NULL,
                  note TEXT NOT NULL DEFAULT ''
              );",
-        )
+        )?;
+        Db::add_column(conn, "model", "voice", "INTEGER NOT NULL DEFAULT 0");
+        Db::add_column(conn, "model", "price_request", "REAL NOT NULL DEFAULT 0");
+        Ok(())
+    }
+
+    /// Add a column a older database does not have yet.
+    ///
+    /// The gateway upgrades in place — the database on the VPS predates the
+    /// columns a new build wants — and sqlite has no `ADD COLUMN IF NOT
+    /// EXISTS`, so a duplicate-column error is the expected answer and not a
+    /// failure to start.
+    fn add_column(conn: &Connection, table: &str, column: &str, definition: &str) {
+        let _ = conn.execute(
+            &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
+            [],
+        );
     }
 
     pub fn record(&self, spend: &Spend, now: i64) -> rusqlite::Result<()> {
@@ -334,7 +354,7 @@ impl Db {
         let conn = self.conn.lock();
         let mut statement = conn.prepare(
             "SELECT name, upstream_id, upstream_name, price_in, price_cached, price_out,
-                    context_tokens, enabled, position
+                    context_tokens, enabled, position, voice, price_request
              FROM model ORDER BY position, name",
         )?;
         let rows = statement
@@ -349,6 +369,8 @@ impl Db {
                     context_tokens: row.get::<_, Option<i64>>(6)?.map(|n| n as u32),
                     enabled: row.get::<_, i64>(7)? != 0,
                     position: row.get(8)?,
+                    voice: row.get::<_, i64>(9)? != 0,
+                    price_request: row.get(10)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -358,8 +380,9 @@ impl Db {
     pub fn save_model(&self, model: &ModelRow) -> rusqlite::Result<()> {
         self.conn.lock().execute(
             "INSERT INTO model (name, upstream_id, upstream_name, price_in, price_cached,
-                                price_out, context_tokens, enabled, position)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                                price_out, context_tokens, enabled, position, voice,
+                                price_request)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
              ON CONFLICT(name) DO UPDATE SET
                  upstream_id = excluded.upstream_id,
                  upstream_name = excluded.upstream_name,
@@ -368,7 +391,9 @@ impl Db {
                  price_out = excluded.price_out,
                  context_tokens = excluded.context_tokens,
                  enabled = excluded.enabled,
-                 position = excluded.position",
+                 position = excluded.position,
+                 voice = excluded.voice,
+                 price_request = excluded.price_request",
             rusqlite::params![
                 model.name,
                 model.upstream_id,
@@ -379,6 +404,8 @@ impl Db {
                 model.context_tokens.map(|n| n as i64),
                 model.enabled as i64,
                 model.position,
+                model.voice as i64,
+                model.price_request,
             ],
         )?;
         Ok(())

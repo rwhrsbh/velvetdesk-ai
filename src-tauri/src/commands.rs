@@ -6,6 +6,7 @@ use crate::agent::tools::{self, PendingAction};
 use crate::agent::{self, AgentDeps, RunInput, RunOutput};
 use crate::config::Settings;
 use crate::doctor::{self, DoctorReport};
+use crate::entitlement;
 use crate::error::{AppError, Result};
 use crate::llm::keypool::KeyStatus;
 use crate::models::*;
@@ -187,6 +188,7 @@ pub fn create_profile(state: State<'_, AppState>, input: NewProfile) -> Result<P
         Some(id) => id,
         None => new_numeric_id(),
     };
+    entitlement::check_profiles(storage::load_index(&state.paths)?.models.len())?;
     let scope = state.paths.scope(&id)?;
     if scope.profile_file().exists() {
         return Err(AppError::message(
@@ -474,6 +476,7 @@ pub async fn digest_chat(
     man_id: String,
     keep_last: Option<usize>,
 ) -> Result<agent::DigestPreview> {
+    entitlement::charge(&state.paths)?;
     let settings = state.settings_view();
     let provider = state.active_provider()?;
     let pool = state.pool(&provider.id);
@@ -594,6 +597,7 @@ pub async fn run_agent(
     state: State<'_, AppState>,
     input: RunInput,
 ) -> Result<RunOutput> {
+    entitlement::charge(&state.paths)?;
     let settings = state.settings_view();
     let provider = state.active_provider()?;
     let pool = state.pool(&provider.id);
@@ -702,6 +706,7 @@ pub async fn compact_chat(
     model_id: String,
     man_id: Option<String>,
 ) -> Result<AgentLog> {
+    entitlement::charge(&state.paths)?;
     let settings = state.settings_view();
     let provider = state.active_provider()?;
     let pool = state.pool(&provider.id);
@@ -785,6 +790,7 @@ pub async fn master_chat(
     state: State<'_, AppState>,
     input: agent::master::MasterInput,
 ) -> Result<agent::master::MasterOutput> {
+    entitlement::charge(&state.paths)?;
     let settings = state.settings_view();
     let provider = state.active_provider()?;
     let pool = state.pool(&provider.id);
@@ -1064,6 +1070,13 @@ pub struct SyncState {
     pub relay: String,
     pub auto: bool,
     pub last: Option<crate::sync::Report>,
+    /// True when the plan includes sync at all.
+    pub allowed: bool,
+    /// How many machines this licence covers.
+    pub devices: u32,
+    /// True when the pairing came from the licence rather than an invite:
+    /// nothing was typed in, and nothing has to be.
+    pub from_license: bool,
 }
 
 /// The relay to meet at: the cloud provider's address, minus its API path.
@@ -1091,9 +1104,32 @@ fn license_key(state: &AppState) -> String {
         .unwrap_or_default()
 }
 
+/// Where sync stands, pairing this device off the licence if it has not been
+/// paired yet.
+///
+/// The operator with a subscription never sees a pairing step: installing the
+/// app on the second machine and pasting the same licence is the whole
+/// procedure. Devices beyond what the licence covers are turned away by the
+/// gateway, which is the only party that can count them.
 #[tauri::command]
 pub fn sync_state(state: State<'_, AppState>) -> Result<SyncState> {
-    let pairing = crate::sync::pair::Pairing::load(&state.paths)?;
+    let limits = crate::entitlement::limits();
+    let license = license_key(&state);
+    let mut pairing = crate::sync::pair::Pairing::load(&state.paths)?;
+    if pairing.is_none() && limits.sync && !license.trim().is_empty() {
+        let relay = relay_base(&state);
+        if !relay.is_empty() {
+            pairing = crate::sync::pair::from_license(&state.paths, &license, &relay).ok();
+        }
+    }
+    let from_license = pairing.as_ref().is_some_and(|p| {
+        !license.trim().is_empty()
+            && p.key
+                == base64::Engine::encode(
+                    &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+                    crate::sync::pair::secret_from_license(&license),
+                )
+    });
     let last = crate::sync::read_report(&state.paths)?;
     Ok(match pairing {
         Some(pairing) => SyncState {
@@ -1103,6 +1139,9 @@ pub fn sync_state(state: State<'_, AppState>) -> Result<SyncState> {
             relay: pairing.relay.clone(),
             auto: pairing.auto,
             last,
+            allowed: limits.sync,
+            devices: limits.devices,
+            from_license,
         },
         None => SyncState {
             paired: false,
@@ -1111,6 +1150,9 @@ pub fn sync_state(state: State<'_, AppState>) -> Result<SyncState> {
             relay: relay_base(&state),
             auto: false,
             last,
+            allowed: limits.sync,
+            devices: limits.devices,
+            from_license: false,
         },
     })
 }
@@ -1153,10 +1195,24 @@ pub fn sync_set_auto(state: State<'_, AppState>, auto: bool) -> Result<SyncState
 /// One round, now, because the operator pressed the button.
 #[tauri::command]
 pub async fn sync_now(state: State<'_, AppState>) -> Result<crate::sync::Report> {
+    if !crate::entitlement::limits().sync {
+        return Err(AppError::message("limit.sync", json!({})));
+    }
     let pairing = crate::sync::pair::Pairing::load(&state.paths)?
         .ok_or_else(|| AppError::message("sync.notPaired", json!({})))?;
     let license = license_key(&state);
     crate::sync::transport::run_round(&state.paths, &pairing, &license).await
+}
+
+/// The plan, the day's meter and what is left of both.
+///
+/// Cheap and synchronous on purpose: the UI asks for it on every screen that
+/// has a limit to show, and nothing here touches the network.
+#[tauri::command]
+pub fn plan_state(state: State<'_, AppState>) -> Result<entitlement::PlanState> {
+    let token = license_key(&state);
+    let profiles = storage::load_index(&state.paths)?.models.len();
+    Ok(entitlement::plan_state(&state.paths, &token, profiles))
 }
 
 #[tauri::command]
@@ -1191,10 +1247,15 @@ pub async fn cloud_status(state: State<'_, AppState>) -> Result<CloudStatus> {
         return Ok(status);
     }
 
-    // Without a public key there is nothing to check against, and pretending
-    // otherwise would be the one lie this whole design exists to avoid: the
-    // gateway still decides, the app just cannot say so in advance.
-    match vd_license::public_key_from_base64(&settings.cloud_public_key) {
+    // The key the signature is checked against is baked into the binary, so
+    // there is nothing here for the operator to configure or to get wrong. A
+    // build made without one verifies nothing and says so.
+    let public_key = if settings.cloud_public_key.trim().is_empty() {
+        entitlement::PUBLIC_KEY.to_string()
+    } else {
+        settings.cloud_public_key.clone()
+    };
+    match vd_license::public_key_from_base64(&public_key) {
         Some(public_key) => match vd_license::verify(&token, &public_key) {
             Ok(license) => {
                 let now = chrono::Utc::now().timestamp();
@@ -1440,6 +1501,8 @@ pub async fn transcribe(
     if audio_base64.trim().is_empty() {
         return Err(AppError::message("error.emptyRecording", json!({})));
     }
+    // Dictation is a model call like any other, and costs the free plan one.
+    entitlement::charge(&state.paths)?;
     let provider = {
         let settings = state.settings.read();
         settings

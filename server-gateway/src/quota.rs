@@ -32,6 +32,40 @@ pub fn credits(model: &ModelRow, usage: &Usage, credit_usd: f64) -> f64 {
     dollars / credit_usd
 }
 
+/// What one dictated clip costs, in credits.
+///
+/// A transcription comes back as text with no token count, so it is priced
+/// per clip: the model row carries the dollars, and this turns them into the
+/// same credits everything else is measured in.
+pub fn request_credits(dollars: f64, credit_usd: f64) -> f64 {
+    if credit_usd <= 0.0 {
+        return 0.0;
+    }
+    (dollars / credit_usd).max(0.0)
+}
+
+/// Record a flat-rate call — one with no tokens to count — and say what is
+/// left afterwards.
+pub fn charge_flat(
+    db: &Db,
+    license_id: &str,
+    tier: Tier,
+    model: &str,
+    credits: f64,
+    now: i64,
+) -> rusqlite::Result<Allowance> {
+    db.record(
+        &crate::db::Spend {
+            license_id: license_id.to_string(),
+            model: model.to_string(),
+            credits,
+            usage: Usage::default(),
+        },
+        now,
+    )?;
+    allowance(db, license_id, tier, now)
+}
+
 /// What the two windows have left, and when the tighter one reopens.
 #[derive(Debug, Clone, Copy)]
 pub struct Allowance {
@@ -139,6 +173,8 @@ mod tests {
             context_tokens: None,
             enabled: true,
             position: 0,
+            voice: false,
+            price_request: 0.0,
         }
     }
 
