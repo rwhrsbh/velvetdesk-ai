@@ -59,6 +59,7 @@ import {
   renderScope,
   renderTopbar,
   setIndexCounts,
+  toggleFolder,
 } from "./views";
 
 // ---------------------------------------------------------------------------
@@ -1445,6 +1446,76 @@ function openTour() {
 /** Set when a drag has just ended, so the click it produces is ignored. */
 let swallowNextClick = false;
 
+/** Put a card into a folder, or back out to the top level with "". */
+function file(rail: "profile" | "man", id: string, folder: string) {
+  if (rail === "profile") {
+    void api
+      .setProfileFolder(id, folder)
+      .then((profiles) => {
+        store.profiles = profiles;
+        renderProfiles();
+      })
+      .catch((error) => toast(errorText(error), "error"));
+    return;
+  }
+  if (!store.activeModelId) return;
+  void api
+    .setManFolder(store.activeModelId, id, folder)
+    .then((men) => {
+      store.men = men;
+      renderMen();
+    })
+    .catch((error) => toast(errorText(error), "error"));
+}
+
+/**
+ * Make a folder, rename it, or take it apart.
+ *
+ * Taking one apart does not take its cards with it — they come back to the
+ * top level — so there is nothing here worth confirming twice.
+ */
+async function folderAction(rail: "profile" | "man", name: string, renameTo: string | null) {
+  try {
+    if (rail === "profile") {
+      store.settings = await api.saveProfileFolder(name, renameTo);
+      store.profiles = await api.listProfiles();
+      renderProfiles();
+      return;
+    }
+    if (!store.activeModelId) return;
+    await api.saveManFolder(store.activeModelId, name, renameTo);
+    store.men = await api.listMen(store.activeModelId);
+    const profiles = await api.listProfiles();
+    store.profiles = profiles;
+    renderMen();
+  } catch (error) {
+    toast(errorText(error), "error");
+  }
+}
+
+/** The heading's own menu: rename, or take the folder apart. */
+function bindFolderHeads(listId: string, rail: "profile" | "man") {
+  $(listId).addEventListener("click", (event) => {
+    const target = event.target as HTMLElement;
+    const menu = target.closest<HTMLElement>("[data-folder-menu]");
+    if (menu) {
+      event.stopPropagation();
+      const name = menu.dataset.folderMenu ?? "";
+      const renamed = prompt(t("folder.renamePrompt", { name }), name);
+      if (renamed === null) return;
+      // An empty name means "take it apart": the cards come back out, and
+      // saying so in a prompt is clearer than a second button nobody reads.
+      void folderAction(rail, name, renamed.trim());
+      return;
+    }
+    const head = target.closest<HTMLElement>(".folder-head");
+    if (!head?.dataset.folder) return;
+    toggleFolder(rail, head.dataset.folder);
+    if (rail === "profile") renderProfiles();
+    else renderMen();
+  });
+}
+
 function bindReordering(listId: string, attribute: "profile" | "man", save: (ids: string[]) => void) {
   const list = $(listId);
   const THRESHOLD = 5;
@@ -1455,6 +1526,8 @@ function bindReordering(listId: string, attribute: "profile" | "man", save: (ids
   let startX = 0;
   let grabY = 0;
   let moved = false;
+  /** The folder under the pointer, when the card is over one. */
+  let overFolder: string | null = null;
 
   const cards = () => Array.from(list.querySelectorAll<HTMLElement>(`[data-${attribute}]`));
 
@@ -1464,6 +1537,10 @@ function bindReordering(listId: string, attribute: "profile" | "man", save: (ids
     card?.classList.remove("dragging");
     card = null;
     moved = false;
+    overFolder = null;
+    for (const head of list.querySelectorAll<HTMLElement>(".folder-head.taking")) {
+      head.classList.remove("taking");
+    }
     setDragging(false);
   };
 
@@ -1504,6 +1581,21 @@ function bindReordering(listId: string, attribute: "profile" | "man", save: (ids
 
     if (ghost) ghost.style.top = `${event.clientY - grabY}px`;
 
+    // A folder heading under the pointer is an invitation to file the card
+    // into it, and it lights up rather than opening a gap.
+    const head = document
+      .elementFromPoint(event.clientX, event.clientY)
+      ?.closest<HTMLElement>(".folder-head");
+    for (const other of list.querySelectorAll<HTMLElement>(".folder-head.taking")) {
+      if (other !== head) other.classList.remove("taking");
+    }
+    overFolder = head && list.contains(head) ? (head.dataset.folder ?? null) : null;
+    if (head && list.contains(head)) {
+      head.classList.add("taking");
+      event.preventDefault();
+      return;
+    }
+
     // Where it would land: the first card whose middle is below the pointer.
     const others = cards().filter((item) => item !== card);
     let before: HTMLElement | null = null;
@@ -1525,6 +1617,8 @@ function bindReordering(listId: string, attribute: "profile" | "man", save: (ids
   window.addEventListener("pointerup", () => {
     if (!card) return;
     const wasDragged = moved;
+    const dropped = card.dataset[attribute] ?? "";
+    const folder = overFolder;
     const ids = cards()
       .map((item) => item.dataset[attribute] ?? "")
       .filter(Boolean);
@@ -1533,6 +1627,10 @@ function bindReordering(listId: string, attribute: "profile" | "man", save: (ids
     // The click that follows the release belongs to the drag, not to the
     // card it landed on: without this, moving a dossier also opens it.
     swallowNextClick = true;
+    if (folder !== null && dropped) {
+      file(attribute, dropped, folder);
+      return;
+    }
     save(ids);
   });
 
@@ -1569,6 +1667,23 @@ function bindPanels() {
     } else {
       void selectProfile(card.dataset.profile);
     }
+  });
+
+  bindFolderHeads("profileList", "profile");
+  bindFolderHeads("menList", "man");
+
+  $("btnAddProfileFolder").addEventListener("click", () => {
+    const name = prompt(t("folder.newPrompt"), t("folder.newDefault"));
+    if (name?.trim()) void folderAction("profile", name.trim(), null);
+  });
+
+  $("btnAddManFolder").addEventListener("click", () => {
+    if (!store.activeModelId) {
+      toast(t("toast.pickProfile"), "error");
+      return;
+    }
+    const name = prompt(t("folder.newPrompt"), t("folder.newDefault"));
+    if (name?.trim()) void folderAction("man", name.trim(), null);
   });
 
   bindReordering("profileList", "profile", (ids) => {

@@ -113,6 +113,17 @@ pub struct Profile {
     /// exactly as it always did.
     #[serde(default)]
     pub sort_order: i32,
+    /// Which folder this profile is filed under in the rail. Empty means the
+    /// top level, which is where everything starts.
+    #[serde(default)]
+    pub folder: String,
+    /// Folders this profile offers for its own men.
+    ///
+    /// Kept on the profile rather than in settings because they belong to
+    /// the workspace and travel with it: a folder made on the laptop is
+    /// there on the desktop after the next sync, empty or not.
+    #[serde(default)]
+    pub man_folders: Vec<String>,
     #[serde(default = "now")]
     pub created_at: DateTime<Utc>,
     #[serde(default = "now")]
@@ -133,6 +144,8 @@ impl Profile {
         Profile {
             id,
             name,
+            folder: String::new(),
+            man_folders: vec![],
             age: None,
             site: String::new(),
             avatar: String::new(),
@@ -207,6 +220,10 @@ pub struct Man {
     pub id: String,
     pub model_id: String,
     pub name: String,
+    /// Which of the profile's folders this dossier is filed under. Empty
+    /// means the top level.
+    #[serde(default)]
+    pub folder: String,
     #[serde(default)]
     pub age: Option<u32>,
     #[serde(default)]
@@ -263,6 +280,7 @@ impl Man {
             id,
             model_id,
             name,
+            folder: String::new(),
             age: None,
             location: String::new(),
             country: String::new(),

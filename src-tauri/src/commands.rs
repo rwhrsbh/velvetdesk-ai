@@ -179,6 +179,157 @@ pub struct NewProfile {
     pub banned_phrases: Option<Vec<String>>,
 }
 
+/// Make, rename or remove a folder in the profile rail.
+///
+/// Removing one does not remove what is in it: the profiles come back to the
+/// top level, because a folder is a place to put a card and not a thing that
+/// owns it. The same rule applies to a profile's own folders below.
+#[tauri::command]
+pub fn save_profile_folder(
+    state: State<'_, AppState>,
+    name: String,
+    rename_to: Option<String>,
+) -> Result<Settings> {
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err(AppError::message("folder.nameRequired", json!({})));
+    }
+    let mut settings = state.settings.read().clone();
+    let next = rename_to.map(|to| to.trim().to_string());
+
+    match next {
+        // Rename: the folder moves, and every profile filed under the old
+        // name goes with it.
+        Some(to) if !to.is_empty() => {
+            for folder in settings.profile_folders.iter_mut() {
+                if *folder == name {
+                    *folder = to.clone();
+                }
+            }
+            settings.profile_folders.dedup();
+            for id in state.paths.list_model_ids()? {
+                let scope = state.paths.scope(&id)?;
+                if let Ok(mut profile) = scope.read_profile() {
+                    if profile.folder == name {
+                        profile.folder = to.clone();
+                        scope.write_profile(&profile)?;
+                    }
+                }
+            }
+        }
+        // Remove: the cards come out to the top level.
+        Some(_) => {
+            settings.profile_folders.retain(|folder| folder != &name);
+            for id in state.paths.list_model_ids()? {
+                let scope = state.paths.scope(&id)?;
+                if let Ok(mut profile) = scope.read_profile() {
+                    if profile.folder == name {
+                        profile.folder.clear();
+                        scope.write_profile(&profile)?;
+                    }
+                }
+            }
+        }
+        // Make, if it is not there already.
+        None => {
+            if !settings
+                .profile_folders
+                .iter()
+                .any(|folder| folder == &name)
+            {
+                settings.profile_folders.push(name);
+            }
+        }
+    }
+
+    state.save_settings(settings)?;
+    storage::rebuild_index(&state.paths)?;
+    Ok(state.settings_view())
+}
+
+/// File a profile into a folder, or back out to the top level.
+#[tauri::command]
+pub fn set_profile_folder(
+    state: State<'_, AppState>,
+    model_id: String,
+    folder: String,
+) -> Result<Vec<Profile>> {
+    let scope = state.paths.scope(&model_id)?;
+    let mut profile = scope.read_profile()?;
+    profile.folder = folder.trim().to_string();
+    scope.write_profile(&profile)?;
+    storage::rebuild_index(&state.paths)?;
+    read_profiles(&state)
+}
+
+/// Make, rename or remove one of a profile's own folders for its men.
+#[tauri::command]
+pub fn save_man_folder(
+    state: State<'_, AppState>,
+    model_id: String,
+    name: String,
+    rename_to: Option<String>,
+) -> Result<Profile> {
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err(AppError::message("folder.nameRequired", json!({})));
+    }
+    let scope = state.paths.scope(&model_id)?;
+    let mut profile = scope.read_profile()?;
+    let next = rename_to.map(|to| to.trim().to_string());
+
+    match next {
+        Some(to) if !to.is_empty() => {
+            for folder in profile.man_folders.iter_mut() {
+                if *folder == name {
+                    *folder = to.clone();
+                }
+            }
+            profile.man_folders.dedup();
+            for mut man in scope.read_all_men()? {
+                if man.folder == name {
+                    man.folder = to.clone();
+                    scope.write_man(&man)?;
+                }
+            }
+        }
+        Some(_) => {
+            profile.man_folders.retain(|folder| folder != &name);
+            for mut man in scope.read_all_men()? {
+                if man.folder == name {
+                    man.folder.clear();
+                    scope.write_man(&man)?;
+                }
+            }
+        }
+        None => {
+            if !profile.man_folders.iter().any(|folder| folder == &name) {
+                profile.man_folders.push(name);
+            }
+        }
+    }
+
+    scope.write_profile(&profile)?;
+    storage::rebuild_index(&state.paths)?;
+    scope.read_profile()
+}
+
+/// File a dossier into one of the profile's folders, or back out of it.
+#[tauri::command]
+pub fn set_man_folder(
+    state: State<'_, AppState>,
+    model_id: String,
+    man_id: String,
+    folder: String,
+) -> Result<Vec<Man>> {
+    let scope = state.paths.scope(&model_id)?;
+    let mut man = scope.read_man(&man_id)?;
+    man.folder = folder.trim().to_string();
+    scope.write_man(&man)?;
+    storage::rebuild_index(&state.paths)?;
+    scope.read_all_men()
+}
+
 #[tauri::command]
 pub fn create_profile(state: State<'_, AppState>, input: NewProfile) -> Result<Profile> {
     if input.name.trim().is_empty() {

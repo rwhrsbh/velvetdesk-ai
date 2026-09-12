@@ -17,7 +17,8 @@ use vd_llm::Usage;
 
 use crate::config::Tier;
 use crate::registry::{
-    DeviceRow, DeviceVerdict, KeyRow, LicenseRow, MailDrop, MailItem, ModelRow, UpstreamRow,
+    DeviceRow, DeviceVerdict, KeyRow, LicenseRow, MailDrop, MailItem, ModelRow, Purchase,
+    UpstreamRow,
 };
 
 #[derive(Clone)]
@@ -128,6 +129,36 @@ impl Db {
                  issued_at INTEGER NOT NULL,
                  note TEXT NOT NULL DEFAULT ''
              );
+             -- Payments already credited.
+             --
+             -- The provider announces one payment several times and repeats
+             -- itself after any answer it does not like, so the only thing
+             -- keeping a top-up from being paid for twice is this table.
+             CREATE TABLE IF NOT EXISTS payment (
+                 payment_id TEXT PRIMARY KEY,
+                 license_id TEXT NOT NULL,
+                 credits REAL NOT NULL,
+                 at INTEGER NOT NULL
+             );
+
+             -- Subscriptions being bought right now.
+             --
+             -- A buyer has no licence yet, so there is nothing to
+             -- authenticate them by: the order number is the claim ticket.
+             -- It is theirs alone, it is unguessable, and it is the only
+             -- thing that will hand over the key once the money lands.
+             CREATE TABLE IF NOT EXISTS purchase (
+                 order_id TEXT PRIMARY KEY,
+                 tier TEXT NOT NULL,
+                 months INTEGER NOT NULL,
+                 devices INTEGER NOT NULL DEFAULT 0,
+                 note TEXT NOT NULL DEFAULT '',
+                 license_id TEXT NOT NULL DEFAULT '',
+                 license TEXT NOT NULL DEFAULT '',
+                 paid_at INTEGER NOT NULL DEFAULT 0,
+                 created_at INTEGER NOT NULL
+             );
+
              -- Credits bought on top of a plan.
              --
              -- A plan's windows refill on their own; this does not. It is
@@ -266,6 +297,93 @@ impl Db {
             )
             .optional()?;
         Ok(found.filter(|peers| *peers > 0).map(|peers| peers as u32))
+    }
+
+    // ------------------------------------------------------------- purchases
+
+    pub fn open_purchase(&self, order: &Purchase) -> rusqlite::Result<()> {
+        self.conn.lock().execute(
+            "INSERT INTO purchase (order_id, tier, months, devices, note, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                order.order_id,
+                order.tier,
+                order.months,
+                order.devices,
+                order.note,
+                order.created_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn purchase(&self, order_id: &str) -> rusqlite::Result<Option<Purchase>> {
+        let conn = self.conn.lock();
+        conn.query_row(
+            "SELECT order_id, tier, months, devices, note, license_id, license, paid_at, created_at
+             FROM purchase WHERE order_id = ?1",
+            [order_id],
+            |row| {
+                Ok(Purchase {
+                    order_id: row.get(0)?,
+                    tier: row.get(1)?,
+                    months: row.get(2)?,
+                    devices: row.get(3)?,
+                    note: row.get(4)?,
+                    license_id: row.get(5)?,
+                    license: row.get(6)?,
+                    paid_at: row.get(7)?,
+                    created_at: row.get(8)?,
+                })
+            },
+        )
+        .optional()
+    }
+
+    /// Write the key a paid purchase earned, once.
+    pub fn deliver_purchase(
+        &self,
+        order_id: &str,
+        license_id: &str,
+        license: &str,
+        now: i64,
+    ) -> rusqlite::Result<()> {
+        self.conn.lock().execute(
+            "UPDATE purchase SET license_id = ?2, license = ?3, paid_at = ?4
+             WHERE order_id = ?1 AND paid_at = 0",
+            rusqlite::params![order_id, license_id, license, now],
+        )?;
+        Ok(())
+    }
+
+    // -------------------------------------------------------------- payments
+
+    pub fn payment_seen(&self, payment_id: &str) -> rusqlite::Result<bool> {
+        let found: Option<i64> = self
+            .conn
+            .lock()
+            .query_row(
+                "SELECT 1 FROM payment WHERE payment_id = ?1",
+                [payment_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(found.is_some())
+    }
+
+    pub fn note_payment(
+        &self,
+        payment_id: &str,
+        license_id: &str,
+        credits: f64,
+        now: i64,
+    ) -> rusqlite::Result<()> {
+        self.conn.lock().execute(
+            "INSERT OR IGNORE INTO payment (payment_id, license_id, credits, at)
+             VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![payment_id, license_id, credits, now],
+        )?;
+        Ok(())
     }
 
     // --------------------------------------------------------------- wallet

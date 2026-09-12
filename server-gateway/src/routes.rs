@@ -41,6 +41,17 @@ pub fn router(state: AppState) -> Router {
         // leaves sealed records, the other collects them whenever it starts.
         .route("/sync/push", post(sync_push))
         .route("/sync/pull", get(sync_pull))
+        // Buying more credits, and hearing that the money arrived.
+        .route("/pay/checkout", post(checkout))
+        // Buying a plan. Open: the buyer has no licence yet, which is what
+        // they are here to get.
+        .route("/pay/plans", get(plans))
+        .route("/pay/coins", get(coins))
+        .route("/pay/subscribe", post(subscribe))
+        .route("/pay/order/{order}", get(order_status))
+        // Payment notifications. Open by necessity — the provider posts here
+        // with no credentials of ours — and trusted only by signature.
+        .route("/pay/ipn", post(payment_notice))
         .merge(crate::admin::router())
         .with_state(state)
 }
@@ -844,6 +855,522 @@ async fn sync_pull(
     })))
 }
 
+/// What is on sale, and for how much.
+async fn plans(State(state): State<AppState>) -> Json<Value> {
+    let mut sold: Vec<Value> = state
+        .cfg
+        .plan_prices
+        .iter()
+        .filter_map(|(key, price)| {
+            let (tier, months) = key.split_once(':')?;
+            let months: i64 = months.parse().ok()?;
+            let allowance = state.registry.read().tier(tier);
+            Some(json!({
+                "tier": tier,
+                "months": months,
+                "price_usd": price,
+                "devices": allowance.max_peers,
+                "credits_week": allowance.credits_week,
+                "credits_5h": allowance.credits_5h,
+            }))
+        })
+        .collect();
+    // Cheapest first, and a tier's month before its year.
+    sold.sort_by(|a, b| {
+        a["price_usd"]
+            .as_f64()
+            .unwrap_or(0.0)
+            .total_cmp(&b["price_usd"].as_f64().unwrap_or(0.0))
+    });
+    Json(json!({
+        "plans": sold,
+        "credit_price_usd": state.cfg.credit_price_usd,
+        "selling": !state.cfg.nowpayments_key.trim().is_empty()
+            && !state.cfg.public_url.trim().is_empty(),
+    }))
+}
+
+/// The coins the provider will take, with the icons it publishes for them.
+///
+/// Asked of the provider rather than kept in a list here: they add and
+/// suspend coins constantly, and a list of our own would send somebody to pay
+/// in something that is not being accepted this week.
+async fn coins(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
+    if state.cfg.nowpayments_key.trim().is_empty() {
+        return Err(ApiError::Forbidden("this gateway sells nothing".into()));
+    }
+    let response = state
+        .llm
+        .http
+        .get("https://api.nowpayments.io/v1/full-currencies")
+        .header("x-api-key", state.cfg.nowpayments_key.trim())
+        .send()
+        .await
+        .map_err(|err| ApiError::Upstream(format!("the payment provider: {err}")))?;
+    let body: Value = response
+        .json()
+        .await
+        .map_err(|err| ApiError::Upstream(format!("the payment provider: {err}")))?;
+
+    let empty = vec![];
+    let list = body
+        .get("currencies")
+        .and_then(Value::as_array)
+        .unwrap_or(&empty);
+    let coins: Vec<Value> = list
+        .iter()
+        .filter(|coin| coin.get("enable").and_then(Value::as_bool).unwrap_or(true))
+        .filter_map(|coin| {
+            let code = coin
+                .get("code")
+                .or_else(|| coin.get("currency"))
+                .or_else(|| coin.get("ticker"))
+                .and_then(Value::as_str)?
+                .to_lowercase();
+            if code.is_empty() {
+                return None;
+            }
+            // The logo comes back as a path on their site as often as a URL.
+            let logo = coin
+                .get("logo_url")
+                .or_else(|| coin.get("logoUrl"))
+                .or_else(|| coin.get("image"))
+                .and_then(Value::as_str)
+                .map(|url| {
+                    if url.starts_with("http") {
+                        url.to_string()
+                    } else {
+                        format!(
+                            "https://nowpayments.io{}{}",
+                            if url.starts_with('/') { "" } else { "/" },
+                            url
+                        )
+                    }
+                });
+            Some(json!({
+                "code": code,
+                "name": coin.get("name").and_then(Value::as_str).unwrap_or(&code),
+                "logo": logo,
+                "network": coin.get("network").and_then(Value::as_str),
+            }))
+        })
+        .collect();
+    Ok(Json(json!({ "coins": coins })))
+}
+
+#[derive(serde::Deserialize)]
+struct SubscribeBody {
+    tier: String,
+    months: i64,
+    pay_currency: String,
+    /// Whatever the buyer wants written on the licence — a company, a
+    /// nickname, an email. Kept for support and nothing else.
+    #[serde(default)]
+    note: String,
+}
+
+/// Start buying a plan.
+///
+/// Nobody is authenticated here: the whole point is that the buyer has no
+/// licence yet. What comes back is an address to pay to and an order number,
+/// and that number is the claim ticket — unguessable, theirs alone, and the
+/// only thing that will hand over the key afterwards.
+async fn subscribe(
+    State(state): State<AppState>,
+    Json(body): Json<SubscribeBody>,
+) -> Result<Json<Value>, ApiError> {
+    if state.cfg.nowpayments_key.trim().is_empty() || state.cfg.public_url.trim().is_empty() {
+        return Err(ApiError::Forbidden("this gateway sells nothing".into()));
+    }
+    let tier = body.tier.trim().to_lowercase();
+    let key = format!("{tier}:{}", body.months);
+    let Some(price) = state.cfg.plan_prices.get(&key).copied() else {
+        return Err(ApiError::BadRequest(format!("{key} is not on sale")));
+    };
+
+    // The order number is the credential, so it is made the way a credential
+    // is: from the system's randomness, long enough that guessing one is not
+    // a thing anybody tries twice.
+    let order_id = format!("sub-{}", uuid::Uuid::new_v4().simple());
+    state.db.open_purchase(&crate::registry::Purchase {
+        order_id: order_id.clone(),
+        tier: tier.clone(),
+        months: body.months,
+        devices: 0,
+        note: body.note.chars().take(200).collect(),
+        license_id: String::new(),
+        license: String::new(),
+        paid_at: 0,
+        created_at: now(),
+    })?;
+
+    let callback = format!("{}/pay/ipn", state.cfg.public_url.trim_end_matches('/'));
+    let response = state
+        .llm
+        .http
+        .post("https://api.nowpayments.io/v1/payment")
+        .header("x-api-key", state.cfg.nowpayments_key.trim())
+        .json(&json!({
+            "price_amount": price,
+            "price_currency": "usd",
+            "pay_currency": body.pay_currency.to_lowercase(),
+            "order_id": order_id,
+            "order_description": format!("VelvetDesk {tier}, {} month(s)", body.months),
+            "ipn_callback_url": callback,
+            "is_fee_paid_by_user": true,
+        }))
+        .send()
+        .await
+        .map_err(|err| ApiError::Upstream(format!("the payment provider: {err}")))?;
+
+    let status = response.status();
+    let answer: Value = response.json().await.unwrap_or_else(|_| json!({}));
+    if !status.is_success() {
+        let said = answer
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("the payment provider refused the request");
+        log::warn!("subscribe refused: {status} {answer}");
+        return Err(ApiError::BadRequest(said.to_string()));
+    }
+
+    Ok(Json(json!({
+        "order_id": order_id,
+        "payment_id": answer.get("payment_id"),
+        "pay_address": answer.get("pay_address"),
+        "pay_amount": answer.get("pay_amount"),
+        "pay_currency": answer.get("pay_currency"),
+        "network": answer.get("network"),
+        "price_usd": price,
+        "tier": tier,
+        "months": body.months,
+    })))
+}
+
+/// Has it been paid, and what is the key?
+///
+/// The app asks this every few seconds while the operator is looking at the
+/// payment screen. Until the money lands it says "waiting" and nothing else;
+/// afterwards it hands over the licence, as many times as it is asked, to
+/// whoever has the order number.
+async fn order_status(
+    State(state): State<AppState>,
+    Path(order): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let found = state
+        .db
+        .purchase(&order)?
+        .ok_or_else(|| ApiError::BadRequest("no such order".into()))?;
+    Ok(Json(json!({
+        "order_id": found.order_id,
+        "tier": found.tier,
+        "months": found.months,
+        "paid": found.paid_at > 0,
+        "license": found.license,
+        "license_id": found.license_id,
+    })))
+}
+
+#[derive(serde::Deserialize)]
+struct CheckoutBody {
+    /// How many credits to buy.
+    credits: f64,
+    /// Which coin to pay in — the provider's own code, `usdttrc20` and the
+    /// like. The app gets the list from the provider, so this is passed
+    /// through rather than checked against anything here.
+    pay_currency: String,
+}
+
+/// Open a payment for more credits.
+///
+/// The licence is the identity: whoever holds it is who gets the credits, so
+/// there is no account to make and nothing to log into. The order carries the
+/// licence id and the number of credits, and comes back untouched in the
+/// notice — which is how the money finds its way to the right wallet.
+///
+/// The callback address is set per payment rather than in the provider's
+/// dashboard. That is what lets several products share one payment account:
+/// each tells the provider where its own notices go.
+async fn checkout(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<HashMap<String, String>>,
+    Json(body): Json<CheckoutBody>,
+) -> Result<Json<Value>, ApiError> {
+    let caller = authenticate(&state, &headers, &query)?;
+    if !caller.license.tier.eq_ignore_ascii_case("business") {
+        return Err(ApiError::Forbidden(
+            "credits are sold on business licences".into(),
+        ));
+    }
+    if state.cfg.nowpayments_key.trim().is_empty() || state.cfg.public_url.trim().is_empty() {
+        return Err(ApiError::Forbidden(
+            "this gateway is not set up to sell credits".into(),
+        ));
+    }
+    if !body.credits.is_finite() || body.credits < 100.0 || body.credits > 1_000_000.0 {
+        return Err(ApiError::BadRequest(
+            "credits must be between 100 and 1 000 000".into(),
+        ));
+    }
+
+    let dollars = (body.credits * state.cfg.credit_price_usd * 100.0).round() / 100.0;
+    let order = format!("{}:{}", caller.license.license_id, body.credits.round());
+    let callback = format!("{}/pay/ipn", state.cfg.public_url.trim_end_matches('/'));
+
+    let response = state
+        .llm
+        .http
+        .post("https://api.nowpayments.io/v1/payment")
+        .header("x-api-key", state.cfg.nowpayments_key.trim())
+        .json(&json!({
+            "price_amount": dollars,
+            "price_currency": "usd",
+            "pay_currency": body.pay_currency.to_lowercase(),
+            "order_id": order,
+            "order_description": format!("VelvetDesk {} credits", body.credits.round()),
+            "ipn_callback_url": callback,
+            "is_fee_paid_by_user": true,
+        }))
+        .send()
+        .await
+        .map_err(|err| ApiError::Upstream(format!("the payment provider: {err}")))?;
+
+    let status = response.status();
+    let answer: Value = response.json().await.unwrap_or_else(|_| json!({}));
+    if !status.is_success() {
+        let said = answer
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("the payment provider refused the request");
+        log::warn!("checkout refused: {status} {answer}");
+        return Err(ApiError::BadRequest(said.to_string()));
+    }
+
+    Ok(Json(json!({
+        "payment_id": answer.get("payment_id"),
+        "pay_address": answer.get("pay_address"),
+        "pay_amount": answer.get("pay_amount"),
+        "pay_currency": answer.get("pay_currency"),
+        "network": answer.get("network"),
+        "price_usd": dollars,
+        "credits": body.credits.round(),
+    })))
+}
+
+/// A payment cleared: put the credits it bought on the licence.
+///
+/// The provider signs every notification with a shared secret, and that
+/// signature is the whole of the trust here: the endpoint has to be reachable
+/// without authentication, so anybody can post to it and only the signature
+/// separates a payment from a wish. Unsigned, mis-signed, or arriving at a
+/// gateway with no secret configured, it is refused without being read.
+///
+/// Which licence gets the credits comes from `order_id`, written when the
+/// payment is created: `<licence id>:<credits>`. The provider echoes it back
+/// untouched, and it is the only thing here we put there ourselves.
+///
+/// The same payment is announced several times as it moves through its
+/// states, and a retry storm follows any answer that is not 2xx — so a
+/// payment already credited is answered cheerfully and credited once.
+async fn payment_notice(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Result<Json<Value>, ApiError> {
+    if state.cfg.ipn_secret.trim().is_empty() {
+        return Err(ApiError::Forbidden(
+            "payment notifications are not configured on this gateway".into(),
+        ));
+    }
+    let sent = headers
+        .get("x-nowpayments-sig")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .trim()
+        .to_lowercase();
+    if sent.is_empty() {
+        return Err(ApiError::Unauthorized(
+            "the notice carried no signature".into(),
+        ));
+    }
+
+    let parsed: Value = serde_json::from_slice(&body)
+        .map_err(|err| ApiError::BadRequest(format!("cannot read the notice: {err}")))?;
+    if !signature_matches(&parsed, &state.cfg.ipn_secret, &sent) {
+        log::warn!("payment notice with a signature that does not match");
+        return Err(ApiError::Unauthorized(
+            "the signature does not match".into(),
+        ));
+    }
+
+    let status = parsed
+        .get("payment_status")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_lowercase();
+    // Only a payment that finished buys anything. The earlier states are
+    // announced too, and answering them 200 stops the retries.
+    if status != "finished" && status != "confirmed" {
+        return Ok(Json(json!({ "ok": true, "ignored": status })));
+    }
+
+    let order = parsed
+        .get("order_id")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+
+    // A subscription being bought: mint the licence it paid for and leave it
+    // where the buyer's order number will find it.
+    if order.starts_with("sub-") {
+        return deliver_subscription(&state, &order).await;
+    }
+
+    let (license_id, credits) = match order.split_once(':') {
+        Some((id, credits)) => (id.trim().to_string(), credits.trim().parse::<f64>().ok()),
+        None => (String::new(), None),
+    };
+    let Some(credits) = credits.filter(|amount| *amount > 0.0) else {
+        log::warn!("payment {order} names no licence and amount to credit");
+        return Ok(Json(json!({ "ok": true, "ignored": "order_id" })));
+    };
+    if license_id.is_empty() {
+        return Ok(Json(json!({ "ok": true, "ignored": "order_id" })));
+    }
+
+    let payment = parsed
+        .get("payment_id")
+        .map(|id| id.to_string())
+        .unwrap_or_else(|| order.clone());
+    if state.db.payment_seen(&payment)? {
+        // Already credited: the provider is repeating itself, which it does
+        // by design, and paying twice for one payment is the one outcome
+        // worth being careful about.
+        return Ok(Json(json!({ "ok": true, "already": true })));
+    }
+
+    let left = state
+        .db
+        .wallet_add(&license_id, credits, now())
+        .map_err(|err| ApiError::Upstream(err.to_string()))?;
+    state
+        .db
+        .note_payment(&payment, &license_id, credits, now())?;
+    log::info!("payment {payment}: {credits} credits to {license_id}, {left} left");
+    Ok(Json(json!({ "ok": true, "credits_left": left })))
+}
+
+/// Mint the licence a paid subscription earned, and file it under the order.
+///
+/// Minting needs the private half of the signing key, which lives beside the
+/// gateway because the admin page already mints with it. Nothing else in the
+/// process reads it, and it never leaves the machine.
+///
+/// Called only from a notice whose signature has already been checked, and
+/// only once: a purchase that already has a licence keeps the one it has,
+/// however many times the provider repeats itself.
+async fn deliver_subscription(state: &AppState, order: &str) -> Result<Json<Value>, ApiError> {
+    let Some(purchase) = state.db.purchase(order)? else {
+        log::warn!("payment for an order nobody opened: {order}");
+        return Ok(Json(json!({ "ok": true, "ignored": "order" })));
+    };
+    if purchase.paid_at > 0 {
+        return Ok(Json(json!({ "ok": true, "already": true })));
+    }
+
+    let path =
+        std::env::var("VD_LICENSE_KEY_FILE").unwrap_or_else(|_| "license-signing.key".to_string());
+    let text = std::fs::read_to_string(&path)
+        .map_err(|err| ApiError::Upstream(format!("cannot read the signing key: {err}")))?;
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(text.trim())
+        .ok()
+        .and_then(|raw| <[u8; 32]>::try_from(raw).ok())
+        .ok_or_else(|| ApiError::Upstream("the signing key file does not hold a key".into()))?;
+    let signer = ed25519_dalek::SigningKey::from_bytes(&bytes);
+
+    let devices = if purchase.devices > 0 {
+        purchase.devices as u32
+    } else {
+        state.registry.read().tier(&purchase.tier).max_peers
+    };
+    // A licence id somebody could guess is a licence somebody could ask us to
+    // extend, so it is random rather than sequential.
+    let license_id = format!("VD-{}", uuid::Uuid::new_v4().simple());
+    let license = vd_license::License {
+        license_id: license_id.clone(),
+        tier: purchase.tier.clone(),
+        expires_at: now() + purchase.months.max(1) * 30 * 24 * 3600,
+        max_peers: devices,
+    };
+    let token = vd_license::mint(&signer, &license);
+
+    state.db.record_license(
+        &license.license_id,
+        &license.tier,
+        license.expires_at,
+        license.max_peers,
+        &format!("bought {order}: {}", purchase.note),
+        now(),
+    )?;
+    state
+        .db
+        .deliver_purchase(order, &license.license_id, &token, now())?;
+    log::info!(
+        "order {order} paid: {} for {} month(s), {} device(s)",
+        license.tier,
+        purchase.months,
+        devices
+    );
+    Ok(Json(json!({ "ok": true, "issued": license.license_id })))
+}
+
+/// The provider's signature: HMAC-SHA512 over the JSON with its keys sorted,
+/// nested objects included, compared as hex.
+fn signature_matches(body: &Value, secret: &str, sent: &str) -> bool {
+    use hmac::{Hmac, Mac};
+    use sha2::Sha512;
+
+    fn sorted(value: &Value) -> Value {
+        match value {
+            Value::Object(map) => {
+                let mut keys: Vec<&String> = map.keys().collect();
+                keys.sort();
+                let mut out = serde_json::Map::new();
+                for key in keys {
+                    out.insert(key.clone(), sorted(&map[key]));
+                }
+                Value::Object(out)
+            }
+            Value::Array(items) => Value::Array(items.iter().map(sorted).collect()),
+            other => other.clone(),
+        }
+    }
+
+    let Ok(mut mac) = Hmac::<Sha512>::new_from_slice(secret.trim().as_bytes()) else {
+        return false;
+    };
+    let Ok(canonical) = serde_json::to_string(&sorted(body)) else {
+        return false;
+    };
+    mac.update(canonical.as_bytes());
+    let mine = mac
+        .finalize()
+        .into_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    // Compared in full, so the answer takes the same time whatever was sent.
+    mine.len() == sent.len()
+        && mine
+            .bytes()
+            .zip(sent.bytes())
+            .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+            == 0
+}
+
 async fn sync_ws(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -956,6 +1483,58 @@ mod tests {
         assert_eq!(
             token(&headers(&[("authorization", "VD.a.b")]), &HashMap::new()).as_deref(),
             Some("VD.a.b")
+        );
+    }
+
+    /// The provider's own example, signed with a known secret: the body is
+    /// sorted by key — nested objects included — before it is hashed, and a
+    /// body that has been tampered with does not match.
+    #[test]
+    fn a_payment_notice_is_trusted_only_when_it_is_signed() {
+        use hmac::{Hmac, Mac};
+        use sha2::Sha512;
+
+        let secret = "ipn-secret";
+        let body: Value = serde_json::json!({
+            "payment_status": "finished",
+            "order_id": "acme-1:5000",
+            "payment_id": 123456789u64,
+            "fee": { "serviceFee": 0.1, "currency": "btc" },
+        });
+
+        let mut sorted = serde_json::Map::new();
+        sorted.insert(
+            "fee".into(),
+            serde_json::json!({ "currency": "btc", "serviceFee": 0.1 }),
+        );
+        sorted.insert("order_id".into(), serde_json::json!("acme-1:5000"));
+        sorted.insert("payment_id".into(), serde_json::json!(123456789u64));
+        sorted.insert("payment_status".into(), serde_json::json!("finished"));
+        let mut mac = Hmac::<Sha512>::new_from_slice(secret.as_bytes()).unwrap();
+        mac.update(
+            serde_json::to_string(&Value::Object(sorted))
+                .unwrap()
+                .as_bytes(),
+        );
+        let expected = mac
+            .finalize()
+            .into_bytes()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+
+        assert!(signature_matches(&body, secret, &expected));
+        assert!(!signature_matches(&body, "another-secret", &expected));
+
+        let tampered: Value = serde_json::json!({
+            "payment_status": "finished",
+            "order_id": "acme-1:500000",
+            "payment_id": 123456789u64,
+            "fee": { "serviceFee": 0.1, "currency": "btc" },
+        });
+        assert!(
+            !signature_matches(&tampered, secret, &expected),
+            "an order rewritten in flight must not pass"
         );
     }
 

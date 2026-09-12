@@ -152,6 +152,16 @@ export const api = {
   /** Licence and credits for the cloud provider, checked locally then asked of the gateway. */
   cloudStatus: () => invoke<CloudStatus>("cloud_status"),
 
+  /** Make a folder in the profile rail; pass renameTo to rename, "" to remove. */
+  saveProfileFolder: (name: string, renameTo?: string | null) =>
+    invoke<Settings>("save_profile_folder", { name, renameTo: renameTo ?? null }),
+  setProfileFolder: (modelId: string, folder: string) =>
+    invoke<Profile[]>("set_profile_folder", { modelId, folder }),
+  saveManFolder: (modelId: string, name: string, renameTo?: string | null) =>
+    invoke<Profile>("save_man_folder", { modelId, name, renameTo: renameTo ?? null }),
+  setManFolder: (modelId: string, manId: string, folder: string) =>
+    invoke<Man[]>("set_man_folder", { modelId, manId, folder }),
+
   /** What this copy may do, and how much of today's free allowance is left. */
   planState: () => invoke<PlanState>("plan_state"),
 

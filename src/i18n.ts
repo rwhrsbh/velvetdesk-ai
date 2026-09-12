@@ -5,6 +5,12 @@ export type Lang = "ru" | "en";
 type Dict = Record<string, string>;
 
 const ru: Dict = {
+  "rail.newFolder": "Новая папка",
+  "folder.menu": "переименовать или убрать папку",
+  "folder.newPrompt": "Название папки",
+  "folder.newDefault": "Новая папка",
+  "folder.renamePrompt": "Новое название для «{name}». Пустое — убрать папку, карточки вернутся наверх.",
+  "folder.nameRequired": "У папки должно быть название",
   "plan.activatedAs": "Подписка {tier} включена",
   "plan.stillFree": "Ключ сохранён, но подписка не включилась — проверьте его в админке шлюза",
   "license.empty": "Вставьте ключ лицензии",
@@ -645,6 +651,12 @@ const ru: Dict = {
 };
 
 const en: Dict = {
+  "rail.newFolder": "New folder",
+  "folder.menu": "rename or remove the folder",
+  "folder.newPrompt": "Folder name",
+  "folder.newDefault": "New folder",
+  "folder.renamePrompt": "A new name for \"{name}\". Empty removes the folder and the cards come back to the top.",
+  "folder.nameRequired": "A folder needs a name",
   "plan.activatedAs": "{tier} subscription is on",
   "plan.stillFree": "The key was saved but nothing unlocked — check it in the gateway's admin page",
   "license.empty": "Paste a licence key",

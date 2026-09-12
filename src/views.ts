@@ -12,7 +12,7 @@ import {
   visibleProfiles,
 } from "./store";
 import type { Attachment } from "./store";
-import type { RunStep, Usage } from "./types";
+import type { Man, Profile, RunStep, Usage } from "./types";
 
 export function renderTopbar() {
   const settings = store.settings;
@@ -68,6 +68,73 @@ export function setIndexCounts(pairs: Array<[string, number]>) {
   pairs.forEach(([id, count]) => indexCounts.set(id, count));
 }
 
+/**
+ * Which folders are closed, by rail.
+ *
+ * Kept in the window rather than on disk: it is where the operator is
+ * looking right now, not part of the workspace, and a folder that reopened
+ * itself on the other machine after a sync would be a small daily
+ * annoyance.
+ */
+const collapsed = { profile: new Set<string>(), man: new Set<string>() };
+
+export function toggleFolder(rail: "profile" | "man", name: string) {
+  const set = collapsed[rail];
+  if (set.has(name)) set.delete(name);
+  else set.add(name);
+}
+
+/**
+ * A folder's heading: the name, how many cards are in it, and the target a
+ * dragged card is aimed at.
+ */
+function folderHead(rail: "profile" | "man", name: string, count: number): string {
+  const shut = collapsed[rail].has(name);
+  return `<div class="folder-head${shut ? " shut" : ""}" data-folder-rail="${rail}" data-folder="${escapeHtml(
+    name,
+  )}">
+    <span class="folder-caret">${shut ? "▸" : "▾"}</span>
+    <span class="folder-name">${escapeHtml(name)}</span>
+    <span class="folder-count">${count}</span>
+    <button class="btn-icon folder-edit" data-folder-menu="${escapeHtml(name)}" title="${escapeHtml(
+      t("folder.menu"),
+    )}">⋯</button>
+  </div>`;
+}
+
+/**
+ * Cards grouped under their folders, in the order the folders were made,
+ * with everything unfiled first.
+ *
+ * Unfiled first on purpose: the top level is where work arrives and where
+ * somebody who has never made a folder lives, and pushing that below a row
+ * of headings would punish them for a feature they are not using.
+ */
+function grouped<T extends { folder?: string }>(
+  rail: "profile" | "man",
+  cards: T[],
+  folders: string[],
+  draw: (card: T) => string,
+): string {
+  const loose = cards.filter((card) => !card.folder);
+  const known = new Set(folders);
+  // A folder that was deleted on another device leaves its cards behind; they
+  // are shown at the top level rather than disappearing with it.
+  const orphans = cards.filter((card) => card.folder && !known.has(card.folder));
+  let html = [...loose, ...orphans].map(draw).join("");
+
+  for (const name of folders) {
+    const inside = cards.filter((card) => card.folder === name);
+    html += folderHead(rail, name, inside.length);
+    if (!collapsed[rail].has(name)) {
+      html += `<div class="folder-body" data-folder-body="${escapeHtml(name)}">${inside
+        .map(draw)
+        .join("")}</div>`;
+    }
+  }
+  return html;
+}
+
 export function renderProfiles() {
   if (dragging) return;
   const container = $("profileList");
@@ -78,24 +145,24 @@ export function renderProfiles() {
     </div>`;
     return;
   }
-  container.innerHTML = profiles
-    .map((p) => {
-      const men = p.id === store.activeModelId ? store.men.length : (indexCounts.get(p.id) ?? 0);
-      const meta = [
-        p.site || t("common.noSite"),
-        t("profile.contacts", { n: men, word: contactWord(men) }),
-      ];
-      return `<div class="row-card ${p.id === store.activeModelId ? "active" : ""}" draggable="true" data-profile="${escapeHtml(p.id)}">
-        <div class="row-main">
-          ${avatarHtml(p.name, p.avatar)}
-          <div class="row-text">
-            <div class="row-title">${escapeHtml(p.name)}${p.age ? `, ${p.age}` : ""}</div>
-            <div class="row-sub">${escapeHtml(meta.join(" · "))}</div>
-          </div>
+  const card = (p: Profile) => {
+    const men = p.id === store.activeModelId ? store.men.length : (indexCounts.get(p.id) ?? 0);
+    const meta = [
+      p.site || t("common.noSite"),
+      t("profile.contacts", { n: men, word: contactWord(men) }),
+    ];
+    return `<div class="row-card ${p.id === store.activeModelId ? "active" : ""}" data-profile="${escapeHtml(p.id)}">
+      <div class="row-main">
+        ${avatarHtml(p.name, p.avatar)}
+        <div class="row-text">
+          <div class="row-title">${escapeHtml(p.name)}${p.age ? `, ${p.age}` : ""}</div>
+          <div class="row-sub">${escapeHtml(meta.join(" · "))}</div>
         </div>
-      </div>`;
-    })
-    .join("");
+      </div>
+    </div>`;
+  };
+
+  container.innerHTML = grouped("profile", profiles, store.settings?.profile_folders ?? [], card);
 }
 
 export function renderScope() {
@@ -133,8 +200,7 @@ export function renderMen() {
     container.innerHTML = `<div class="empty-hint">${t("empty.noMen")}<br />${t("empty.addMan")}</div>`;
     return;
   }
-  container.innerHTML = men
-    .map((m) => {
+  const card = (m: Man) => {
       const tags = m.tags
         .slice(0, 4)
         .map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`)
@@ -145,7 +211,7 @@ export function renderMen() {
       const sub = [m.location, `ID ${m.id}`, m.age ? t("man.years", { n: m.age }) : ""]
         .filter(Boolean)
         .join(" · ");
-      return `<div class="row-card ${m.id === store.activeManId ? "active" : ""}" draggable="true" data-man="${escapeHtml(m.id)}">
+    return `<div class="row-card ${m.id === store.activeManId ? "active" : ""}" data-man="${escapeHtml(m.id)}">
         <div class="row-main">
           ${avatarHtml(m.name, m.avatar)}
           <div class="row-text">
@@ -160,8 +226,9 @@ export function renderMen() {
           ${m.last_contact ? `<span class="tag">${formatDate(m.last_contact)}</span>` : ""}
         </div>
       </div>`;
-    })
-    .join("");
+  };
+
+  container.innerHTML = grouped("man", men, activeProfile()?.man_folders ?? [], card);
 }
 
 function usageLine(usage: Usage | undefined, extra: string[]): string {

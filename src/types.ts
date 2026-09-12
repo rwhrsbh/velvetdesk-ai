@@ -46,6 +46,10 @@ export interface LettersOutput {
 export interface Profile {
   id: string;
   name: string;
+  /** Which folder the card is filed under in the rail; empty is top level. */
+  folder?: string;
+  /** Folders this profile offers for its own men. */
+  man_folders?: string[];
   age: number | null;
   site: string;
   avatar: string;
@@ -65,6 +69,8 @@ export interface Man {
   id: string;
   model_id: string;
   name: string;
+  /** Which of the profile's folders this dossier sits in. */
+  folder?: string;
   age: number | null;
   location: string;
   country: string;
@@ -243,6 +249,8 @@ export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 export interface Settings {
   providers: ProviderConfig[];
   active_provider: string | null;
+  /** Folders the profile rail offers, empty ones included. */
+  profile_folders?: string[];
   agent_mode: AgentMode;
   security_level: SecurityLevel;
   active_model_id: string | null;

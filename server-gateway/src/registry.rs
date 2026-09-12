@@ -278,6 +278,23 @@ impl Registry {
     }
 }
 
+/// A subscription somebody is in the middle of buying.
+#[derive(Debug, Clone, Serialize)]
+pub struct Purchase {
+    /// The claim ticket: unguessable, and the buyer's only proof.
+    pub order_id: String,
+    pub tier: String,
+    pub months: i64,
+    /// Devices to write into the licence. Zero means the tier's own number.
+    pub devices: i64,
+    pub note: String,
+    /// Filled in when the money lands.
+    pub license_id: String,
+    pub license: String,
+    pub paid_at: i64,
+    pub created_at: i64,
+}
+
 /// A record on its way to the other devices, as the gateway holds it.
 #[derive(Debug, Clone, Serialize)]
 pub struct MailItem {

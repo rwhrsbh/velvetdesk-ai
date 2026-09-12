@@ -34,6 +34,11 @@ pub struct Settings {
     pub providers: Vec<ProviderConfig>,
     #[serde(default)]
     pub active_provider: Option<String>,
+    /// Folders the profile rail offers. A folder exists once it is made,
+    /// whether or not anything is in it yet — an empty one that vanished on
+    /// the next redraw would be useless for filing.
+    #[serde(default)]
+    pub profile_folders: Vec<String>,
     #[serde(default = "default_mode")]
     pub agent_mode: AgentMode,
     #[serde(default = "default_security")]
@@ -231,6 +236,7 @@ impl Default for Settings {
             // which endpoint serves what. Everything else is still there for
             // anyone who brings their own keys.
             active_provider: Some("velvetdesk-cloud".into()),
+            profile_folders: vec![],
             agent_mode: AgentMode::Auto,
             security_level: SecurityLevel::Safe,
             active_model_id: None,

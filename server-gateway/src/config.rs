@@ -44,11 +44,37 @@ pub struct GatewayConfig {
     /// rather than showing one that goes nowhere.
     #[serde(default)]
     pub topup_url: String,
+    /// The payment provider's API key, for opening a payment on behalf of an
+    /// operator who wants more credits. `VD_NOWPAY_KEY` sets it.
+    #[serde(default)]
+    pub nowpayments_key: String,
+    /// Where this gateway answers from, as the internet sees it —
+    /// `https://203-0-113-10.sslip.io`. The payment provider is told to send
+    /// its notice here, and it cannot reach a loopback address, so a gateway
+    /// without this simply does not offer to sell anything.
+    #[serde(default)]
+    pub public_url: String,
+    /// The IPN secret from the payment provider's dashboard.
+    ///
+    /// Every notification is signed with it; without it the gateway has no
+    /// way of telling a real payment from somebody posting JSON at the
+    /// endpoint, so an empty secret closes the endpoint rather than
+    /// trusting what arrives. `VD_IPN_SECRET` sets it, which keeps it out
+    /// of the config file on disk.
+    #[serde(default)]
+    pub ipn_secret: String,
     /// Upstreams in the order they are tried when the request names no model.
     pub upstreams: Vec<Upstream>,
     /// Budgets per tier, by the `tier` in the licence.
     #[serde(default)]
     pub tiers: HashMap<String, Tier>,
+    /// What a subscription costs, in dollars, by plan and length.
+    ///
+    /// The key is `<tier>:<months>` — `pro:1`, `business:12`. A plan that is
+    /// not in here cannot be bought, which is how a tier is taken off sale
+    /// without being taken away from the people already on it.
+    #[serde(default = "default_prices")]
+    pub plan_prices: HashMap<String, f64>,
     /// How many upstream calls may run at once. The rest queue.
     #[serde(default = "default_inflight")]
     pub max_inflight: usize,
@@ -154,6 +180,17 @@ fn default_credit_usd() -> f64 {
     0.001
 }
 
+fn default_prices() -> HashMap<String, f64> {
+    HashMap::from([
+        ("pro:1".to_string(), 10.0),
+        // Ten months' money for twelve: the year is the one worth selling,
+        // because a year of somebody's habit is worth more than the discount.
+        ("pro:12".to_string(), 100.0),
+        ("business:1".to_string(), 150.0),
+        ("business:12".to_string(), 1000.0),
+    ])
+}
+
 fn default_credit_price() -> f64 {
     // Four tenths of a cent a credit: a thousand credits is $4 of sales
     // against $1 of cost.
@@ -220,6 +257,9 @@ impl GatewayConfig {
             credit_usd: default_credit_usd(),
             credit_price_usd: default_credit_price(),
             topup_url: String::new(),
+            nowpayments_key: String::new(),
+            public_url: String::new(),
+            ipn_secret: String::new(),
             upstreams: vec![],
             // What is sold, as of now: pro is $10 a month for two people on
             // two machines, business is $150 a month or $1000 a year for a
@@ -243,6 +283,7 @@ impl GatewayConfig {
             // week. It exists to stop one runaway loop emptying a month in
             // an afternoon, not to pace anybody's shift; the week is the
             // real ceiling.
+            plan_prices: default_prices(),
             tiers: HashMap::from([
                 (
                     "pro".to_string(),
@@ -285,6 +326,21 @@ impl GatewayConfig {
         if let Ok(key) = std::env::var("VD_LICENSE_PUBLIC_KEY") {
             if !key.trim().is_empty() {
                 self.license_public_key = key.trim().to_string();
+            }
+        }
+        if let Ok(secret) = std::env::var("VD_IPN_SECRET") {
+            if !secret.trim().is_empty() {
+                self.ipn_secret = secret.trim().to_string();
+            }
+        }
+        if let Ok(key) = std::env::var("VD_NOWPAY_KEY") {
+            if !key.trim().is_empty() {
+                self.nowpayments_key = key.trim().to_string();
+            }
+        }
+        if let Ok(url) = std::env::var("VD_PUBLIC_URL") {
+            if !url.trim().is_empty() {
+                self.public_url = url.trim().trim_end_matches('/').to_string();
             }
         }
     }
