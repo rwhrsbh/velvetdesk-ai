@@ -1404,7 +1404,7 @@ async fn confirm_with_gateway(state: &AppState, token: &str) -> Result<()> {
         .map(|p| p.base_url.trim_end_matches('/').to_string())
         .unwrap_or_default();
     if base_url.is_empty() {
-        return Err(AppError::message("license.noGateway", json!({})));
+        return Err(AppError::message("license.buildHasNoGateway", json!({})));
     }
 
     let response = state

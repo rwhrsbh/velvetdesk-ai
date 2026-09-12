@@ -31,8 +31,9 @@ services:
       VD_ADMIN_TOKEN: ${VD_ADMIN_TOKEN:-}
       RUST_LOG: ${RUST_LOG:-info}
     ports:
-      # Loopback only: put caddy or nginx in front for TLS. Change to
-      # "8787:8787" to expose it directly, and only behind a firewall.
+      # Loopback only: the caddy service below is what faces the internet.
+      # Change to "8787:8787" to expose the gateway directly — that is plain
+      # HTTP, so only do it behind a firewall or for a local test.
       - "127.0.0.1:8787:8787"
     volumes:
       - ./gateway-data:/data
@@ -42,3 +43,26 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+
+  # TLS, for a server that has an IP and no domain name.
+  #
+  #   cp server-gateway/Caddyfile.example Caddyfile   (put your address in)
+  #   docker compose --profile tls up -d
+  #
+  # A free name from sslip.io points at your IP and lets Caddy get a real
+  # certificate; see the comments in the Caddyfile. Without this the licence
+  # key and every message travel in the clear.
+  caddy:
+    image: caddy:2
+    container_name: velvetdesk-caddy
+    profiles: ["tls"]
+    restart: unless-stopped
+    depends_on:
+      - gateway
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy-data:/data
+      - ./caddy-config:/config

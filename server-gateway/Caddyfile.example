@@ -1,0 +1,55 @@
+# TLS in front of the gateway, on a server that has an IP and no domain.
+#
+# Copy to ./Caddyfile, put your address in, and `docker compose --profile tls
+# up -d`. Caddy gets the certificate itself and renews it; nothing else to do.
+#
+# ---------------------------------------------------------------- with a name
+#
+# You do not have to buy a domain to have one. sslip.io and nip.io resolve
+# any address of the form 203-0-113-10.sslip.io to 203.0.113.10, free, with
+# no account and no records to manage — and because it is a name, Let's
+# Encrypt will issue for it. Replace the digits below with your own address
+# (dashes, not dots) and an email that gets renewal warnings.
+
+203-0-113-10.sslip.io {
+	tls you@example.com
+
+	# The admin page is the whole configuration of the service — providers,
+	# keys, prices, licences. Its token is the only thing in front of it, so
+	# it is also restricted to the addresses you administer from. Put your
+	# own there; remove the block only if you have decided the token alone
+	# is enough.
+	@admin path /admin /admin/*
+	handle @admin {
+		@elsewhere not remote_ip 203.0.113.7 10.0.0.0/8
+		respond @elsewhere "not here" 403
+		reverse_proxy gateway:8787
+	}
+
+	# Everything else: the app speaks HTTP/1.1 and WebSocket, and both pass
+	# through untouched.
+	handle {
+		reverse_proxy gateway:8787
+	}
+
+	encode gzip
+	log {
+		output file /var/log/caddy/gateway.log
+		format json
+	}
+}
+
+# ------------------------------------------------------ without a name at all
+#
+# If you must serve the bare IP, Caddy will make a self-signed certificate
+# for it. Every client then has to be told to trust that certificate, which
+# the app does not do — so this is for a bench, not for customers:
+#
+# https://203.0.113.10 {
+# 	tls internal
+# 	reverse_proxy gateway:8787
+# }
+#
+# The remaining option is plain HTTP, and it means exactly what it says: the
+# licence key and every message pass across the internet in the clear, for
+# anyone on the path to read. Use it to test, not to sell.

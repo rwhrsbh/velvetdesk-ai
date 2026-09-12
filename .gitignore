@@ -20,3 +20,8 @@ gateway.db*
 
 # The local test gateway keeps its database and keys here.
 gateway-data/
+
+# TLS in front of the gateway, when it is set up on a server.
+Caddyfile
+caddy-data/
+caddy-config/

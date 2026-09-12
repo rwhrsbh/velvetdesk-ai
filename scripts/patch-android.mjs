@@ -25,9 +25,24 @@ for (const line of permissions) {
   }
 }
 
+// A gateway reachable only by IP has no certificate a phone will accept, so
+// a build pointed at one talks plain HTTP. Android forbids that by default
+// and fails with a connection error that names nothing. This allows it for
+// the app's own traffic only — and only matters when the build's gateway
+// address is an http:// one, which the server's own README argues against.
+const gateway = process.env.VD_CLOUD_BASE_URL ?? "";
+if (gateway.startsWith("http://") && !xml.includes("usesCleartextTraffic")) {
+  xml = xml.replace("<application", '<application android:usesCleartextTraffic="true"');
+  changed = true;
+  console.warn(
+    "[patch-android] VD_CLOUD_BASE_URL is http:// — cleartext enabled; " +
+      "licence keys and chats will travel unencrypted",
+  );
+}
+
 if (changed) {
   writeFileSync(manifest, xml);
-  console.log("[patch-android] microphone permission added");
+  console.log("[patch-android] manifest patched");
 } else {
   console.log("[patch-android] manifest already patched");
 }

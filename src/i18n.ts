@@ -11,6 +11,7 @@ const ru: Dict = {
   "license.notAKey": "Это не ключ лицензии. Ключ — длинная строка, которая начинается с VD. (не id лицензии и не имя тарифа)",
   "license.notOurs": "Этот ключ подписан не нашим ключом — он от другой сборки или повреждён",
   "license.expiredOn": "Срок этого ключа вышел. Продлите подписку — данные на месте",
+  "license.buildHasNoGateway": "В этой сборке не задан адрес шлюза — она собрана без подписки",
   "license.noGateway": "Шлюз не отвечает: {error}",
   "license.refusedBy": "Шлюз не принял ключ: {message}",
   // ---- подписка и пределы бесплатной версии
@@ -646,6 +647,7 @@ const en: Dict = {
   "license.notAKey": "That is not a licence key. A key is a long string starting with VD. — not the licence id, not the plan name",
   "license.notOurs": "This key was signed by another key — it belongs to a different build, or it is damaged",
   "license.expiredOn": "This key has run out. Renew it — your data is untouched",
+  "license.buildHasNoGateway": "This build carries no gateway address — it was built without a subscription",
   "license.noGateway": "The gateway did not answer: {error}",
   "license.refusedBy": "The gateway refused the key: {message}",
   // ---- the subscription, and the edges of the free version

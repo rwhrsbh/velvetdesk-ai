@@ -133,6 +133,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           VD_LICENSE_PUBLIC_KEY: ${{ secrets.VD_LICENSE_PUBLIC_KEY }}
+          VD_CLOUD_BASE_URL: ${{ secrets.VD_CLOUD_BASE_URL }}
         run: npx tauri build --target ${{ matrix.target }} --ci
 
       - name: Collect artifacts
@@ -221,6 +222,8 @@ jobs:
         run: node scripts/set-version.mjs "${{ needs.check.outputs.version }}"
 
       - name: Initialise Android project
+        env:
+          VD_CLOUD_BASE_URL: ${{ secrets.VD_CLOUD_BASE_URL }}
         run: |
           npx tauri android init --ci
           node scripts/patch-android.mjs
@@ -228,6 +231,7 @@ jobs:
       - name: Build release APK
         env:
           VD_LICENSE_PUBLIC_KEY: ${{ secrets.VD_LICENSE_PUBLIC_KEY }}
+          VD_CLOUD_BASE_URL: ${{ secrets.VD_CLOUD_BASE_URL }}
         run: npx tauri android build --apk --target aarch64 armv7
 
       - name: Sign APKs
