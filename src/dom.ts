@@ -24,7 +24,10 @@ export function initials(name: string): string {
 
 export function avatarHtml(name: string, url: string, extraClass = ""): string {
   if (url) {
-    return `<img class="avatar ${extraClass}" src="${escapeHtml(url)}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'avatar ${extraClass}',textContent:'${escapeHtml(
+    // A picture is draggable in its own right, and dragging one out of a card
+    // starts an image drag instead of moving the card — which is why the
+    // rails felt like they could not be reordered at all.
+    return `<img class="avatar ${extraClass}" draggable="false" src="${escapeHtml(url)}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'avatar ${extraClass}',textContent:'${escapeHtml(
       initials(name),
     )}'}))" />`;
   }

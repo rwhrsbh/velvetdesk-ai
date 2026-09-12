@@ -75,6 +75,19 @@ export interface AppStore {
   expanded: string[];
 }
 
+/**
+ * True while a card is being carried from one place in a rail to another.
+ *
+ * A redraw mid-drag replaces the element under the pointer and the drag dies
+ * with it — which is what a background refresh landing at the wrong moment
+ * used to do. The rails hold still until the card is put down.
+ */
+export let dragging = false;
+
+export function setDragging(value: boolean) {
+  dragging = value;
+}
+
 export const store: AppStore = {
   plan: null,
   info: null,

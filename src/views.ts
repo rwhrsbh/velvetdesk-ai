@@ -4,6 +4,7 @@ import {
   activeMan,
   activeProfile,
   alreadyFiled,
+  dragging,
   attachmentUrl,
   splitDraft,
   store,
@@ -68,6 +69,7 @@ export function setIndexCounts(pairs: Array<[string, number]>) {
 }
 
 export function renderProfiles() {
+  if (dragging) return;
   const container = $("profileList");
   const profiles = visibleProfiles();
   if (profiles.length === 0) {
@@ -117,6 +119,7 @@ export function renderScope() {
 }
 
 export function renderMen() {
+  if (dragging) return;
   const back = document.getElementById("btnDeselectMan");
   if (back) back.hidden = !store.activeManId;
 

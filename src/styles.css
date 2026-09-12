@@ -665,10 +665,32 @@ input[type="range"] {
   text-align: center;
 }
 
-/* A card on its way to a new place in the rail. */
+.row-card {
+  /* The card is what gets picked up, not the text inside it: without this a
+     drag starts as a text selection and never becomes a drag at all. */
+  -webkit-user-drag: element;
+  user-select: none;
+}
+
+/* A card on its way to a new place in the rail: lifted off the list, tilted
+   a degree so it reads as held rather than stuck, and still legible — the
+   operator is aiming it at a gap. */
 .row-card.dragging {
-  opacity: 0.55;
+  opacity: 0.9;
   cursor: grabbing;
+  background: var(--surface-hi);
+  border-color: var(--accent);
+  box-shadow: 0 12px 28px rgb(0 0 0 / 0.45);
+  transform: rotate(-1deg) scale(1.02);
+}
+
+/* Where it would land. */
+.row-card.drop-before {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.row-card.drop-after {
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 /* The guided tour: everything dark except the one control being explained. */

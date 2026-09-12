@@ -34,6 +34,7 @@ import {
   makeEntry,
   outgoingText,
   pushEntry,
+  setDragging,
   store,
   visibleMen,
   type Attachment,
@@ -1411,29 +1412,49 @@ function bindReordering(listId: string, attribute: "profile" | "man", save: (ids
   const list = $(listId);
   let dragged: HTMLElement | null = null;
 
+  const clearMarks = () => {
+    for (const card of list.querySelectorAll<HTMLElement>(".drop-before, .drop-after")) {
+      card.classList.remove("drop-before", "drop-after");
+    }
+  };
+
   list.addEventListener("dragstart", (event) => {
     const card = (event.target as HTMLElement).closest<HTMLElement>(`[data-${attribute}]`);
     if (!card) return;
     dragged = card;
-    card.classList.add("dragging");
+    setDragging(true);
+    // The class has to land after the browser has taken its snapshot, or the
+    // picture under the pointer is the lifted, tilted version of the card
+    // rather than the card.
+    window.setTimeout(() => card.classList.add("dragging"), 0);
     // Firefox refuses to start a drag without something in the payload.
     event.dataTransfer?.setData("text/plain", card.dataset[attribute] ?? "");
-    if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move";
+      // The whole card travels with the pointer, held where it was grabbed.
+      const box = card.getBoundingClientRect();
+      event.dataTransfer.setDragImage(card, event.clientX - box.left, event.clientY - box.top);
+    }
   });
 
   list.addEventListener("dragover", (event) => {
     if (!dragged) return;
     event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
     const over = (event.target as HTMLElement).closest<HTMLElement>(`[data-${attribute}]`);
+    clearMarks();
     if (!over || over === dragged) return;
     const box = over.getBoundingClientRect();
     // Past the middle of a card means "after it", which is what makes the
     // list feel like it is being pushed apart rather than snapping around.
     const after = event.clientY > box.top + box.height / 2;
+    over.classList.add(after ? "drop-after" : "drop-before");
     list.insertBefore(dragged, after ? over.nextSibling : over);
   });
 
   const finish = () => {
+    clearMarks();
+    setDragging(false);
     if (!dragged) return;
     dragged.classList.remove("dragging");
     dragged = null;
@@ -1445,9 +1466,15 @@ function bindReordering(listId: string, attribute: "profile" | "man", save: (ids
 
   list.addEventListener("drop", (event) => {
     event.preventDefault();
+    event.stopPropagation();
     finish();
   });
   list.addEventListener("dragend", finish);
+  // A drag that ends outside the rail — over the chat, off the window — still
+  // has to put the card back down.
+  list.addEventListener("dragleave", (event) => {
+    if (!list.contains(event.relatedTarget as Node)) clearMarks();
+  });
 }
 
 function bindPanels() {
