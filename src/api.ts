@@ -155,6 +155,9 @@ export const api = {
   /** What this copy may do, and how much of today's free allowance is left. */
   planState: () => invoke<PlanState>("plan_state"),
 
+  /** Check a licence key and, if it is good, start using it. */
+  activateLicense: (token: string) => invoke<PlanState>("activate_license", { token }),
+
   /** Device sync: pairing, and one round on demand. */
   syncState: () => invoke<SyncState>("sync_state"),
   syncCreateInvite: () => invoke<SyncState>("sync_create_invite"),

@@ -206,6 +206,7 @@ pub fn run() {
             commands::save_settings,
             commands::cloud_status,
             commands::plan_state,
+            commands::activate_license,
             commands::sync_state,
             commands::sync_create_invite,
             commands::sync_join,

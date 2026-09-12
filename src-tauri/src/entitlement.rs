@@ -32,6 +32,26 @@ pub const PUBLIC_KEY: &str = match option_env!("VD_LICENSE_PUBLIC_KEY") {
     None => "",
 };
 
+/// The key this run actually checks signatures against.
+///
+/// A release build trusts only what was compiled into it: reading the key
+/// from the environment at run time would let anyone point the app at a key
+/// of their own and sign themselves a licence. A debug build does read the
+/// environment, because that is how the gateway on the bench is tested
+/// without rebuilding the app for every key.
+pub fn public_key() -> String {
+    if !PUBLIC_KEY.trim().is_empty() {
+        return PUBLIC_KEY.trim().to_string();
+    }
+    if cfg!(debug_assertions) {
+        return std::env::var("VD_LICENSE_PUBLIC_KEY")
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+    }
+    String::new()
+}
+
 /// The provider that is the subscription: its "key" is the licence.
 pub const CLOUD_PROVIDER: &str = "velvetdesk-cloud";
 
@@ -49,6 +69,22 @@ pub const CLOUD_BASE_URL: &str = match option_env!("VD_CLOUD_BASE_URL") {
     Some(url) => url,
     None => "https://cloud.velvetdesk.ai/v1",
 };
+
+/// The address this run uses.
+///
+/// Same rule as the licence key: a release goes where it was built to go,
+/// and only a debug build reads the environment — otherwise pointing the app
+/// at another gateway would be a matter of setting a variable.
+pub fn cloud_base_url() -> String {
+    if cfg!(debug_assertions) {
+        if let Ok(url) = std::env::var("VD_CLOUD_BASE_URL") {
+            if !url.trim().is_empty() {
+                return url.trim().trim_end_matches('/').to_string();
+            }
+        }
+    }
+    CLOUD_BASE_URL.to_string()
+}
 
 /// Model calls a free copy may make in a day.
 pub const FREE_REQUESTS_PER_DAY: u32 = 100;
@@ -167,7 +203,7 @@ pub fn read(token: &str) -> Entitlement {
     if token.is_empty() {
         return Entitlement::free("license.missing");
     }
-    let Some(key) = vd_license::public_key_from_base64(PUBLIC_KEY) else {
+    let Some(key) = vd_license::public_key_from_base64(&public_key()) else {
         return Entitlement::free("license.noPublicKey");
     };
     match vd_license::verify(token, &key) {
@@ -204,6 +240,96 @@ pub fn read(token: &str) -> Entitlement {
             }
         }
         Err(err) => Entitlement::free(&format!("license.invalid:{err}")),
+    }
+}
+
+/// What the gateway last said about a licence, kept for the builds that
+/// cannot check a signature themselves.
+///
+/// A release carries the public key and needs none of this. A build made
+/// without one — a development run, or a fork someone compiled — would
+/// otherwise treat a perfectly good licence as absent, because it has
+/// nothing to check it against. Asking the gateway is the honest fallback:
+/// the gateway is the party that decides anyway, and it is the one that can
+/// refuse. The answer is remembered so the app is not useless on a train.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Verdict {
+    /// Which token this was about, hashed — the token itself already lives
+    /// in the secrets file and does not need a second copy.
+    #[serde(default)]
+    pub token_hash: String,
+    #[serde(default)]
+    pub tier: String,
+    #[serde(default)]
+    pub license_id: String,
+    #[serde(default)]
+    pub expires_at: i64,
+    #[serde(default)]
+    pub max_peers: u32,
+    #[serde(default)]
+    pub checked_at: i64,
+}
+
+/// A token's fingerprint, for matching a remembered verdict to a key.
+pub fn fingerprint(token: &str) -> String {
+    use sha2::{Digest as _, Sha256};
+    let mut hash = Sha256::new();
+    hash.update(b"velvetdesk-license-fingerprint/v1");
+    hash.update(token.trim().as_bytes());
+    format!("{:x}", hash.finalize())
+}
+
+pub fn read_verdict(paths: &Paths) -> Option<Verdict> {
+    read_json::<Verdict>(&paths.root.join("cloud_verdict.json"))
+        .ok()
+        .flatten()
+}
+
+pub fn write_verdict(paths: &Paths, verdict: &Verdict) -> Result<()> {
+    write_json(&paths.root.join("cloud_verdict.json"), verdict)
+}
+
+pub fn forget_verdict(paths: &Paths) {
+    let _ = std::fs::remove_file(paths.root.join("cloud_verdict.json"));
+}
+
+/// What a licence grants, using the signature when this build can check one
+/// and the gateway's remembered answer when it cannot.
+pub fn read_here(paths: &Paths, token: &str) -> Entitlement {
+    let local = read(token);
+    if local.problem != "license.noPublicKey" {
+        return local;
+    }
+    let Some(verdict) = read_verdict(paths) else {
+        return local;
+    };
+    if verdict.token_hash != fingerprint(token) {
+        return local;
+    }
+    let now = Utc::now().timestamp();
+    let expired = verdict.expires_at != 0 && verdict.expires_at <= now;
+    let plan = Plan::from_tier(&verdict.tier);
+    Entitlement {
+        plan: if expired { Plan::Free } else { plan },
+        valid: !expired,
+        license_id: verdict.license_id,
+        tier: verdict.tier,
+        expires_at: verdict.expires_at,
+        days_left: if verdict.expires_at == 0 {
+            i64::MAX / 86_400
+        } else {
+            (verdict.expires_at - now).div_euclid(86_400)
+        },
+        problem: if expired {
+            "license.expired".into()
+        } else {
+            String::new()
+        },
+        limits: if expired {
+            Limits::free()
+        } else {
+            Limits::paid(verdict.max_peers.max(1))
+        },
     }
 }
 
@@ -361,7 +487,7 @@ pub struct PlanState {
 }
 
 pub fn plan_state(paths: &Paths, token: &str, profiles_used: usize) -> PlanState {
-    let entitlement = read(token);
+    let entitlement = read_here(paths, token);
     let meter = meter(paths);
     let requests_left = entitlement
         .limits

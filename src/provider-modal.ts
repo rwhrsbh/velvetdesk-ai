@@ -533,15 +533,26 @@ export async function openKeysModal(deps: ModalDeps) {
     // nothing in the app has to learn a second way of keeping a secret.
     card.querySelector("#btnLicense")?.addEventListener("click", async () => {
       const input = card.querySelector<HTMLInputElement>("#licenseKey");
+      const button = card.querySelector<HTMLButtonElement>("#btnLicense");
       const token = input?.value.trim() ?? "";
       if (!token) return;
+      if (button) button.disabled = true;
       try {
-        await api.setKeys(p.id, [token]);
+        // The key is checked before it is stored — by its signature, or by
+        // the gateway when this build carries no key to check against — so
+        // "accepted" means the subscription is actually on.
+        const plan = await api.activateLicense(token);
         catalogs.delete(p.id);
-        toast(t("plan.activated"), "success");
+        await deps.refresh();
+        toast(
+          plan.plan === "free" ? t("plan.stillFree") : t("plan.activatedAs", { tier: plan.tier }),
+          plan.plan === "free" ? "error" : "success",
+        );
         await draw();
       } catch (error) {
         toast(errorText(error), "error");
+      } finally {
+        if (button) button.disabled = false;
       }
     });
 
@@ -559,7 +570,6 @@ export async function openKeysModal(deps: ModalDeps) {
             "license.missing": "keys.cloudMissing",
             "license.expired": "keys.cloudExpired",
             "license.invalid": "keys.cloudInvalid",
-            "license.noPublicKey": "keys.cloudNoPublicKey",
             "license.refused": "keys.cloudRefused",
           };
           const [name, ...rest] = status.problem.split(":");

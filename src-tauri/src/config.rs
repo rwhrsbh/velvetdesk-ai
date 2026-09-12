@@ -193,7 +193,7 @@ impl Default for Settings {
                     kind: ProviderKind::OpenaiCompatible,
                     // Ours, and fixed: without a licence key this provider is
                     // inert, exactly like the others without their keys.
-                    base_url: crate::entitlement::CLOUD_BASE_URL.into(),
+                    base_url: crate::entitlement::cloud_base_url(),
                     api_version: "v1".into(),
                     model: "deepseek-chat".into(),
                     extra_headers: vec![],
@@ -285,7 +285,7 @@ impl Settings {
             .iter_mut()
             .find(|p| p.id == crate::entitlement::CLOUD_PROVIDER)
         {
-            cloud.base_url = crate::entitlement::CLOUD_BASE_URL.to_string();
+            cloud.base_url = crate::entitlement::cloud_base_url();
             cloud.api_version = "v1".into();
             // Which machine is using the subscription. A licence for ten
             // devices is enforced on this, so it travels with every call

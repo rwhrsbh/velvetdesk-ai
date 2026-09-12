@@ -1250,11 +1250,7 @@ pub async fn cloud_status(state: State<'_, AppState>) -> Result<CloudStatus> {
     // The key the signature is checked against is baked into the binary, so
     // there is nothing here for the operator to configure or to get wrong. A
     // build made without one verifies nothing and says so.
-    let public_key = if settings.cloud_public_key.trim().is_empty() {
-        entitlement::PUBLIC_KEY.to_string()
-    } else {
-        settings.cloud_public_key.clone()
-    };
+    let public_key = entitlement::public_key();
     match vd_license::public_key_from_base64(&public_key) {
         Some(public_key) => match vd_license::verify(&token, &public_key) {
             Ok(license) => {
@@ -1349,6 +1345,119 @@ pub async fn cloud_status(state: State<'_, AppState>) -> Result<CloudStatus> {
 #[tauri::command]
 pub fn list_keys(state: State<'_, AppState>, provider_id: String) -> Result<Vec<KeyStatus>> {
     Ok(state.pool(&provider_id).status())
+}
+
+/// Take a licence key, and say plainly what it is.
+///
+/// Saving whatever was pasted and reporting success was the wrong shape:
+/// somebody who types the licence *id* instead of the key, or pastes half of
+/// one, was told the key had been accepted and then found that nothing had
+/// changed. The signature is checked here, before anything is stored, and
+/// the answer names the actual problem.
+#[tauri::command]
+pub async fn activate_license(
+    state: State<'_, AppState>,
+    token: String,
+) -> Result<entitlement::PlanState> {
+    let token = token.trim().to_string();
+    if token.is_empty() {
+        return Err(AppError::message("license.empty", json!({})));
+    }
+    // A licence key is the whole signed token. The id of a licence — the
+    // name it was issued under — looks like a key to someone who has only
+    // ever been sent one, and saying so is kinder than failing silently.
+    if !token.starts_with("VD.") || token.matches('.').count() != 2 {
+        return Err(AppError::message("license.notAKey", json!({})));
+    }
+
+    let local = entitlement::read(&token);
+    match local.problem.split(':').next().unwrap_or("") {
+        // Signed by our key and in date: nothing else to ask anyone.
+        "" if local.valid => {}
+        "license.expired" => {
+            return Err(AppError::message(
+                "license.expiredOn",
+                json!({ "date": local.expires_at }),
+            ))
+        }
+        // This build carries no key to check against — a development run, or
+        // one compiled without the secret. The gateway can still say, and it
+        // is the gateway that decides in the end.
+        "license.noPublicKey" => confirm_with_gateway(&state, &token).await?,
+        _ => return Err(AppError::message("license.notOurs", json!({}))),
+    }
+
+    let mut secrets = state.secrets.read().clone();
+    secrets
+        .keys
+        .insert(entitlement::CLOUD_PROVIDER.to_string(), vec![token]);
+    state.save_secrets(secrets)?;
+    plan_state(state)
+}
+
+/// Ask the gateway whether this licence is good, and remember what it said.
+async fn confirm_with_gateway(state: &AppState, token: &str) -> Result<()> {
+    let base_url = state
+        .settings
+        .read()
+        .provider(entitlement::CLOUD_PROVIDER)
+        .map(|p| p.base_url.trim_end_matches('/').to_string())
+        .unwrap_or_default();
+    if base_url.is_empty() {
+        return Err(AppError::message("license.noGateway", json!({})));
+    }
+
+    let response = state
+        .llm
+        .http
+        .get(format!("{base_url}/usage"))
+        .header("authorization", format!("Bearer {token}"))
+        .header(
+            entitlement::DEVICE_HEADER,
+            crate::hwid::device_id(&state.paths),
+        )
+        .send()
+        .await
+        .map_err(|err| {
+            AppError::message("license.noGateway", json!({ "error": err.to_string() }))
+        })?;
+
+    let status = response.status();
+    let body: Value = response.json().await.unwrap_or_else(|_| json!({}));
+    if !status.is_success() {
+        let said = body
+            .pointer("/error/message")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        return Err(AppError::message(
+            "license.refusedBy",
+            json!({ "message": if said.is_empty() { status.to_string() } else { said } }),
+        ));
+    }
+
+    let verdict = entitlement::Verdict {
+        token_hash: entitlement::fingerprint(token),
+        tier: body
+            .get("tier")
+            .and_then(Value::as_str)
+            .unwrap_or("pro")
+            .to_string(),
+        license_id: body
+            .get("license_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        expires_at: body.get("expires_at").and_then(Value::as_i64).unwrap_or(0),
+        max_peers: body
+            .get("max_peers")
+            .and_then(Value::as_u64)
+            .unwrap_or(2)
+            .min(u32::MAX as u64) as u32,
+        checked_at: chrono::Utc::now().timestamp(),
+    };
+    entitlement::write_verdict(&state.paths, &verdict)?;
+    Ok(())
 }
 
 #[tauri::command]

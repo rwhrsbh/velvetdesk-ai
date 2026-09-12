@@ -111,7 +111,7 @@ impl AppState {
             .first()
             .cloned()
             .unwrap_or_default();
-        let entitlement = crate::entitlement::read(&token);
+        let entitlement = crate::entitlement::read_here(&self.paths, &token);
         crate::entitlement::set_limits(entitlement.limits);
         entitlement
     }

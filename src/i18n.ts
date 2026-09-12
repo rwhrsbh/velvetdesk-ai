@@ -5,6 +5,14 @@ export type Lang = "ru" | "en";
 type Dict = Record<string, string>;
 
 const ru: Dict = {
+  "plan.activatedAs": "Подписка {tier} включена",
+  "plan.stillFree": "Ключ сохранён, но подписка не включилась — проверьте его в админке шлюза",
+  "license.empty": "Вставьте ключ лицензии",
+  "license.notAKey": "Это не ключ лицензии. Ключ — длинная строка, которая начинается с VD. (не id лицензии и не имя тарифа)",
+  "license.notOurs": "Этот ключ подписан не нашим ключом — он от другой сборки или повреждён",
+  "license.expiredOn": "Срок этого ключа вышел. Продлите подписку — данные на месте",
+  "license.noGateway": "Шлюз не отвечает: {error}",
+  "license.refusedBy": "Шлюз не принял ключ: {message}",
   // ---- подписка и пределы бесплатной версии
   "plan.addressFixed": "адрес подписки вшит в приложение и не меняется",
   "plan.chip": "Free · {left} из {cap}",
@@ -528,7 +536,6 @@ const ru: Dict = {
   "keys.cloudMissing": "Ключ лицензии не добавлен",
   "keys.cloudExpired": "Срок лицензии истёк",
   "keys.cloudInvalid": "Подпись лицензии не сходится",
-  "keys.cloudNoPublicKey": "Без публичного ключа лицензию проверит только шлюз",
   "keys.cloudRefused": "Шлюз отказал этой лицензии",
   "keys.cloudOffline": "шлюз не ответил, остаток неизвестен",
   "keys.sync": "Синхронизация устройств",
@@ -633,6 +640,14 @@ const ru: Dict = {
 };
 
 const en: Dict = {
+  "plan.activatedAs": "{tier} subscription is on",
+  "plan.stillFree": "The key was saved but nothing unlocked — check it in the gateway's admin page",
+  "license.empty": "Paste a licence key",
+  "license.notAKey": "That is not a licence key. A key is a long string starting with VD. — not the licence id, not the plan name",
+  "license.notOurs": "This key was signed by another key — it belongs to a different build, or it is damaged",
+  "license.expiredOn": "This key has run out. Renew it — your data is untouched",
+  "license.noGateway": "The gateway did not answer: {error}",
+  "license.refusedBy": "The gateway refused the key: {message}",
   // ---- the subscription, and the edges of the free version
   "plan.addressFixed": "the subscription's address is part of the build, not a setting",
   "plan.chip": "Free · {left} of {cap}",
@@ -1154,7 +1169,6 @@ const en: Dict = {
   "keys.cloudMissing": "No licence key has been added",
   "keys.cloudExpired": "The licence has expired",
   "keys.cloudInvalid": "The licence signature does not match",
-  "keys.cloudNoPublicKey": "Without a public key only the gateway can check the licence",
   "keys.cloudRefused": "The gateway refused this licence",
   "keys.cloudOffline": "the gateway did not answer, so the balance is unknown",
   "keys.sync": "Device sync",
