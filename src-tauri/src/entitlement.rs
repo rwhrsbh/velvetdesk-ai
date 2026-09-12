@@ -436,21 +436,32 @@ pub fn meter(paths: &Paths) -> Meter {
     roll(stored, Utc::now().timestamp())
 }
 
-/// Count one model call against the day, or refuse it.
+/// Is there room in the day for one more? Counts nothing.
 ///
-/// Called once per operator action — a reply, a master-chat turn, a digest —
-/// not once per HTTP request to the provider: a run that needs three calls to
-/// answer is one thing the operator asked for.
+/// Asked before the work starts, so a copy that has spent its day is told so
+/// instead of watching a spinner it has already paid for.
+pub fn ensure_room(paths: &Paths) -> Result<()> {
+    let Some(cap) = limits().requests_per_day else {
+        return Ok(());
+    };
+    if meter(paths).used >= cap {
+        return Err(AppError::message(
+            "limit.requestsPerDay",
+            serde_json::json!({ "cap": cap, "resetsIn": seconds_to_midnight() }),
+        ));
+    }
+    Ok(())
+}
+
+/// Count one answer against the day.
+///
+/// Called once per operator action that actually produced something — a
+/// reply, a master-chat turn, a digest — and not once per HTTP request to
+/// the provider: a run that needed three calls to answer is one thing the
+/// operator asked for. A run that failed is charged nothing at all, because
+/// nobody should pay a hundredth of their day for a provider's bad minute.
 pub fn charge(paths: &Paths) -> Result<Meter> {
     let mut meter = meter(paths);
-    if let Some(cap) = limits().requests_per_day {
-        if meter.used >= cap {
-            return Err(AppError::message(
-                "limit.requestsPerDay",
-                serde_json::json!({ "cap": cap, "resetsIn": seconds_to_midnight() }),
-            ));
-        }
-    }
     meter.used = meter.used.saturating_add(1);
     write_json(&paths.meter_file(), &meter)?;
     Ok(meter)

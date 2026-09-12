@@ -860,16 +860,26 @@ input[type="range"] {
 }
 
 /* Retry and edit sit on the operator's own messages, out of the way until the
-   pointer is on the one they belong to. */
+   pointer is on the one they belong to.
+   Hidden means gone, not merely transparent: at opacity alone the row still
+   took its height, and every message the operator sent was a bubble with a
+   band of empty blue under the text. */
 .msg.user .msg-actions {
   justify-content: flex-end;
   opacity: 0;
+  height: 0;
+  margin-top: 0;
+  overflow: hidden;
+  pointer-events: none;
   transition: opacity 0.12s ease;
 }
 
 .msg.user:hover .msg-actions,
 .msg.user:focus-within .msg-actions {
   opacity: 1;
+  height: auto;
+  margin-top: 9px;
+  pointer-events: auto;
 }
 
 /* Folders agents have been let into. */

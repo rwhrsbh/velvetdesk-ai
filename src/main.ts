@@ -990,6 +990,7 @@ async function dispatchMessage(
 
     const thoughts = output.thoughts || ((run.live.meta as { thoughts?: string })?.thoughts ?? "");
     endRun(run);
+    void refreshPlanChip();
     // The core wrote both messages down under ids of its own. Adopting them
     // is what lets deleting one actually delete it: the bubble on screen and
     // the line in the log are the same message again.
@@ -1027,6 +1028,9 @@ async function dispatchMessage(
     endRun(run);
     renderAll();
     void refreshContextGauge();
+    // A run that failed costs nothing, and the count on screen should show
+    // that rather than leaving the operator to wonder.
+    void refreshPlanChip();
   }
 }
 
@@ -2193,6 +2197,7 @@ async function sendToMaster(
       avatars: await cardPictures(attached),
     });
     endRun(run);
+    void refreshPlanChip();
     if (output.user_entry_id) asked.id = output.user_entry_id;
     const answer = makeEntry("assistant", output.reply_key ? t(output.reply_key) : output.reply, {
       steps: output.steps as unknown as RunStep[],
@@ -2216,6 +2221,9 @@ async function sendToMaster(
     endRun(run);
     renderAll();
     void refreshContextGauge();
+    // A run that failed costs nothing, and the count on screen should show
+    // that rather than leaving the operator to wonder.
+    void refreshPlanChip();
   }
 }
 
