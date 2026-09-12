@@ -1533,6 +1533,220 @@ pub fn list_keys(state: State<'_, AppState>, provider_id: String) -> Result<Vec<
     Ok(state.pool(&provider_id).status())
 }
 
+/// The gateway's address without the `/v1` the chat API lives under.
+///
+/// Buying happens beside the API rather than inside it: a buyer has no
+/// licence yet, and `/v1` is the part that demands one.
+fn cloud_root() -> String {
+    let base = entitlement::cloud_base_url();
+    base.trim_end_matches('/')
+        .trim_end_matches("/v1")
+        .to_string()
+}
+
+/// What the subscription costs, and what each plan gives.
+#[tauri::command]
+pub async fn cloud_plans(state: State<'_, AppState>) -> Result<Value> {
+    let root = cloud_root();
+    if root.is_empty() {
+        return Err(AppError::message("license.buildHasNoGateway", json!({})));
+    }
+    let response = state
+        .llm
+        .http
+        .get(format!("{root}/pay/plans"))
+        .send()
+        .await
+        .map_err(|err| {
+            AppError::message("license.noGateway", json!({ "error": err.to_string() }))
+        })?;
+    response
+        .json::<Value>()
+        .await
+        .map_err(|err| AppError::Provider(err.to_string()))
+}
+
+/// The coins the payment provider takes, with the icons it publishes.
+#[tauri::command]
+pub async fn cloud_coins(state: State<'_, AppState>) -> Result<Value> {
+    let root = cloud_root();
+    let response = state
+        .llm
+        .http
+        .get(format!("{root}/pay/coins"))
+        .send()
+        .await
+        .map_err(|err| {
+            AppError::message("license.noGateway", json!({ "error": err.to_string() }))
+        })?;
+    if !response.status().is_success() {
+        return Err(AppError::message("pay.notSelling", json!({})));
+    }
+    response
+        .json::<Value>()
+        .await
+        .map_err(|err| AppError::Provider(err.to_string()))
+}
+
+/// Start buying a plan. Comes back with an address to pay to and an order
+/// number, which is the only thing that will hand over the key afterwards.
+#[tauri::command]
+pub async fn cloud_subscribe(
+    state: State<'_, AppState>,
+    tier: String,
+    months: i64,
+    pay_currency: String,
+    note: String,
+) -> Result<Value> {
+    let root = cloud_root();
+    let response = state
+        .llm
+        .http
+        .post(format!("{root}/pay/subscribe"))
+        .json(&json!({
+            "tier": tier,
+            "months": months,
+            "pay_currency": pay_currency,
+            "note": note,
+        }))
+        .send()
+        .await
+        .map_err(|err| {
+            AppError::message("license.noGateway", json!({ "error": err.to_string() }))
+        })?;
+    let status = response.status();
+    let body: Value = response.json().await.unwrap_or_else(|_| json!({}));
+    if !status.is_success() {
+        return Err(AppError::message(
+            "pay.refused",
+            json!({ "message": body.pointer("/error/message").and_then(Value::as_str).unwrap_or("") }),
+        ));
+    }
+
+    // Written down before the operator has paid a cent, so an order survives
+    // a closed window, a crash, or a payment that arrives an hour later.
+    if let Some(order_id) = body.get("order_id").and_then(Value::as_str) {
+        let mut orders = crate::entitlement::read_purchases(&state.paths);
+        orders.insert(
+            0,
+            json!({
+                "order_id": order_id,
+                "tier": tier,
+                "months": months,
+                "paid": false,
+                "license": "",
+                "license_id": "",
+                "created_at": chrono::Utc::now().timestamp(),
+            }),
+        );
+        crate::entitlement::write_purchases(&state.paths, &orders)?;
+    }
+    Ok(body)
+}
+
+/// Buy credits on a licence that already exists.
+#[tauri::command]
+pub async fn cloud_buy_credits(
+    state: State<'_, AppState>,
+    credits: f64,
+    pay_currency: String,
+) -> Result<Value> {
+    let root = cloud_root();
+    let token = license_key(&state);
+    let response = state
+        .llm
+        .http
+        .post(format!("{root}/pay/checkout"))
+        .header("authorization", format!("Bearer {}", token.trim()))
+        .header(
+            entitlement::DEVICE_HEADER,
+            crate::hwid::device_id(&state.paths),
+        )
+        .json(&json!({ "credits": credits, "pay_currency": pay_currency }))
+        .send()
+        .await
+        .map_err(|err| {
+            AppError::message("license.noGateway", json!({ "error": err.to_string() }))
+        })?;
+    let status = response.status();
+    let body: Value = response.json().await.unwrap_or_else(|_| json!({}));
+    if !status.is_success() {
+        return Err(AppError::message(
+            "pay.refused",
+            json!({ "message": body.pointer("/error/message").and_then(Value::as_str).unwrap_or("") }),
+        ));
+    }
+    Ok(body)
+}
+
+/// Purchases made from this machine, ours and the gateway's copies merged.
+///
+/// A key that was bought and not written down is the one thing in this flow
+/// that cannot be recovered by trying again, so it is kept twice: beside the
+/// data on this machine, and on the gateway under the machine's own id. The
+/// local copy answers with no network; the gateway's survives a wiped disk.
+#[tauri::command]
+pub async fn cloud_purchases(state: State<'_, AppState>) -> Result<Value> {
+    let local = crate::entitlement::read_purchases(&state.paths);
+    let root = cloud_root();
+    let mut merged: Vec<Value> = local.clone();
+
+    if !root.is_empty() {
+        if let Ok(response) = state
+            .llm
+            .http
+            .get(format!("{root}/pay/orders"))
+            .header(
+                entitlement::DEVICE_HEADER,
+                crate::hwid::device_id(&state.paths),
+            )
+            .send()
+            .await
+        {
+            if let Ok(body) = response.json::<Value>().await {
+                if let Some(orders) = body.get("orders").and_then(Value::as_array) {
+                    for order in orders {
+                        let id = order.get("order_id").and_then(Value::as_str).unwrap_or("");
+                        // The gateway's copy is the authoritative one: it is
+                        // where the licence actually appears when the money
+                        // lands, and the local note may predate that.
+                        merged.retain(|kept| {
+                            kept.get("order_id").and_then(Value::as_str) != Some(id)
+                        });
+                        merged.push(order.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    merged.sort_by_key(|order| -order.get("created_at").and_then(Value::as_i64).unwrap_or(0));
+    crate::entitlement::write_purchases(&state.paths, &merged)?;
+    Ok(json!({ "orders": merged }))
+}
+
+/// Has the money landed? Returns the licence once it has.
+///
+/// Asked every few seconds while the payment screen is open, so it is kept
+/// cheap and says nothing until there is something to say.
+#[tauri::command]
+pub async fn cloud_order(state: State<'_, AppState>, order: String) -> Result<Value> {
+    let root = cloud_root();
+    let response = state
+        .llm
+        .http
+        .get(format!("{root}/pay/order/{order}"))
+        .send()
+        .await
+        .map_err(|err| {
+            AppError::message("license.noGateway", json!({ "error": err.to_string() }))
+        })?;
+    response
+        .json::<Value>()
+        .await
+        .map_err(|err| AppError::Provider(err.to_string()))
+}
+
 /// Take a licence key, and say plainly what it is.
 ///
 /// Saving whatever was pasted and reporting success was the wrong shape:

@@ -165,6 +165,20 @@ export const api = {
   /** What this copy may do, and how much of today's free allowance is left. */
   planState: () => invoke<PlanState>("plan_state"),
 
+  /** What the subscription costs, and the coins the provider will take. */
+  cloudPlans: () => invoke<{ plans: unknown[]; selling: boolean }>("cloud_plans"),
+  cloudCoins: () => invoke<{ coins: unknown[] }>("cloud_coins"),
+  /** Start buying a plan; comes back with an address and an order number. */
+  cloudSubscribe: (tier: string, months: number, payCurrency: string, note: string) =>
+    invoke<Record<string, unknown>>("cloud_subscribe", { tier, months, payCurrency, note }),
+  /** Buy credits on the licence already in use. */
+  cloudBuyCredits: (credits: number, payCurrency: string) =>
+    invoke<Record<string, unknown>>("cloud_buy_credits", { credits, payCurrency }),
+  /** Has the money landed, and what key did it earn? */
+  cloudOrder: (order: string) => invoke<Record<string, unknown>>("cloud_order", { order }),
+  /** Everything this machine has bought, ours and the gateway's merged. */
+  cloudPurchases: () => invoke<{ orders: unknown[] }>("cloud_purchases"),
+
   /** Check a licence key and, if it is good, start using it. */
   activateLicense: (token: string) => invoke<PlanState>("activate_license", { token }),
 

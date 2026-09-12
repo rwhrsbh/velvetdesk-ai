@@ -1,6 +1,7 @@
 import { api, errorText, onModelEvent } from "./api";
 import type { ModalDeps } from "./deps";
 
+import { openBuyModal, openPurchasesModal } from "./buy-modal";
 import { closeModal, escapeHtml, openModal, toast } from "./dom";
 import { t } from "./i18n";
 import { unloadModel } from "./local-whisper";
@@ -151,6 +152,10 @@ function planPanel(plan: PlanState | null, hasKey: boolean): string {
         <li>${t("plan.perkSync")}</li>
       </ul>
       ${plan.problem === "license.expired" ? `<div class="meta">${t("plan.expiredData")}</div>` : ""}
+      <div class="row-inline">
+        <button class="btn btn-primary" id="btnBuyPlan">${t("buy.buyPlan")}</button>
+        <button class="btn btn-secondary" id="btnPurchases">${t("buy.history")}</button>
+      </div>
       ${field}
     </div>`;
   }
@@ -168,6 +173,10 @@ function planPanel(plan: PlanState | null, hasKey: boolean): string {
     <div class="row-inline">
       <button class="btn btn-secondary" id="btnSyncNow">${t("keys.syncNow")}</button>
       <button class="btn btn-secondary" id="btnSyncForget">${t("keys.syncForget")}</button>
+    </div>
+    <div class="row-inline">
+      <button class="btn btn-secondary" id="btnBuyPlan">${t("buy.extendPlan")}</button>
+      <button class="btn btn-secondary" id="btnPurchases">${t("buy.history")}</button>
     </div>
     ${field}
   </div>`;
@@ -542,6 +551,13 @@ export async function openKeysModal(deps: ModalDeps) {
       </div>
     `);
 
+    card.querySelector("#btnBuyPlan")?.addEventListener("click", () => {
+      void openBuyModal();
+    });
+    card.querySelector("#btnPurchases")?.addEventListener("click", () => {
+      void openPurchasesModal();
+    });
+
     // The licence is stored where every other provider's key is stored, so
     // nothing in the app has to learn a second way of keeping a secret.
     card.querySelector("#btnLicense")?.addEventListener("click", async () => {
@@ -625,11 +641,16 @@ export async function openKeysModal(deps: ModalDeps) {
         const more = card.querySelector<HTMLElement>("#cloudTopUp");
         if (more) {
           more.hidden = false;
-          more.innerHTML = status.can_top_up
-            ? `<a href="${escapeHtml(status.topup_url)}" target="_blank" rel="noreferrer">${t(
-                "plan.buyCredits",
-              )}</a>`
-            : t("plan.buyOnBusiness");
+          if (status.can_top_up) {
+            more.innerHTML = `<button class="btn btn-secondary" id="btnTopUp">${t(
+              "plan.buyCredits",
+            )}</button>`;
+            more.querySelector("#btnTopUp")?.addEventListener("click", () => {
+              void openBuyModal({ credits: true });
+            });
+          } else {
+            more.textContent = t("plan.buyOnBusiness");
+          }
         }
         line.textContent = parts.join(" · ");
       } catch (error) {

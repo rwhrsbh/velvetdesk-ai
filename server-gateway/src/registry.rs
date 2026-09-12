@@ -293,6 +293,9 @@ pub struct Purchase {
     pub license: String,
     pub paid_at: i64,
     pub created_at: i64,
+    /// The machine that opened the purchase, so it can come back for its key.
+    #[serde(default)]
+    pub device: String,
 }
 
 /// A record on its way to the other devices, as the gateway holds it.

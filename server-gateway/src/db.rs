@@ -211,6 +211,10 @@ impl Db {
              );",
         )?;
         Db::add_column(conn, "license", "room", "TEXT NOT NULL DEFAULT ''");
+        // Which machine opened a purchase. It is how somebody who closed the
+        // window before copying their key gets it back: the same machine asks
+        // again and is handed what it bought.
+        Db::add_column(conn, "purchase", "device", "TEXT NOT NULL DEFAULT ''");
         Db::add_column(conn, "model", "voice", "INTEGER NOT NULL DEFAULT 0");
         Db::add_column(conn, "model", "price_request", "REAL NOT NULL DEFAULT 0");
         Ok(())
@@ -303,24 +307,57 @@ impl Db {
 
     pub fn open_purchase(&self, order: &Purchase) -> rusqlite::Result<()> {
         self.conn.lock().execute(
-            "INSERT INTO purchase (order_id, tier, months, devices, note, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO purchase (order_id, tier, months, devices, note, device, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             rusqlite::params![
                 order.order_id,
                 order.tier,
                 order.months,
                 order.devices,
                 order.note,
+                order.device,
                 order.created_at,
             ],
         )?;
         Ok(())
     }
 
+    /// Everything one machine has bought, newest first.
+    ///
+    /// The machine is the claim here, the way the order number is for a
+    /// single purchase: whoever is sitting at the computer that paid gets
+    /// their keys back, and nobody else is asking this question.
+    pub fn purchases_by_device(&self, device: &str) -> rusqlite::Result<Vec<Purchase>> {
+        let conn = self.conn.lock();
+        let mut statement = conn.prepare(
+            "SELECT order_id, tier, months, devices, note, license_id, license, paid_at,
+                    created_at, device
+             FROM purchase WHERE device = ?1 ORDER BY created_at DESC LIMIT 50",
+        )?;
+        let rows = statement
+            .query_map([device], |row| {
+                Ok(Purchase {
+                    order_id: row.get(0)?,
+                    tier: row.get(1)?,
+                    months: row.get(2)?,
+                    devices: row.get(3)?,
+                    note: row.get(4)?,
+                    license_id: row.get(5)?,
+                    license: row.get(6)?,
+                    paid_at: row.get(7)?,
+                    created_at: row.get(8)?,
+                    device: row.get(9)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
     pub fn purchase(&self, order_id: &str) -> rusqlite::Result<Option<Purchase>> {
         let conn = self.conn.lock();
         conn.query_row(
-            "SELECT order_id, tier, months, devices, note, license_id, license, paid_at, created_at
+            "SELECT order_id, tier, months, devices, note, license_id, license, paid_at,
+                    created_at, device
              FROM purchase WHERE order_id = ?1",
             [order_id],
             |row| {
@@ -334,6 +371,7 @@ impl Db {
                     license: row.get(6)?,
                     paid_at: row.get(7)?,
                     created_at: row.get(8)?,
+                    device: row.get(9)?,
                 })
             },
         )

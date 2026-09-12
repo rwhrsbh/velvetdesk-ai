@@ -358,6 +358,30 @@ pub fn read_here(paths: &Paths, token: &str) -> Entitlement {
     }
 }
 
+/// Orders this machine has placed, as the app remembers them.
+///
+/// A licence key is shown once, in a dialog somebody can close by accident,
+/// and there is no way to mint the same one again. So every order is written
+/// down here the moment it is opened, and the key is added to it when it
+/// arrives.
+pub fn purchases_file(paths: &Paths) -> std::path::PathBuf {
+    paths.root.join("purchases.json")
+}
+
+pub fn read_purchases(paths: &Paths) -> Vec<serde_json::Value> {
+    read_json::<Vec<serde_json::Value>>(&purchases_file(paths))
+        .ok()
+        .flatten()
+        .unwrap_or_default()
+}
+
+pub fn write_purchases(paths: &Paths, orders: &[serde_json::Value]) -> Result<()> {
+    // Fifty is more history than anybody will scroll, and it keeps a file
+    // that is read on every visit to the panel small.
+    let kept: Vec<serde_json::Value> = orders.iter().take(50).cloned().collect();
+    write_json(&purchases_file(paths), &kept)
+}
+
 /// The limits in force right now, for code too deep to be handed them.
 ///
 /// The agent's tools are the reason this exists: a tool call that would create

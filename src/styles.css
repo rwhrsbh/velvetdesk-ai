@@ -2482,3 +2482,126 @@ details.advanced[open] {
   border-color: var(--danger);
   color: var(--danger);
 }
+
+/* Buying: the plans, the coins, and the address to pay to. */
+.plan-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.plan-pick {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  background: var(--sunken);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.plan-pick:hover {
+  border-color: var(--text-faint);
+}
+
+.plan-pick.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--sunken));
+}
+
+.plan-pick-name {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.plan-pick-price {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.plan-pick-meta {
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+
+.coin-grid {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+  max-height: 210px;
+  overflow-y: auto;
+  margin-top: 8px;
+  padding: 2px;
+}
+
+.coin {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding: 8px 4px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  background: var(--sunken);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.coin:hover {
+  color: var(--text);
+  border-color: var(--text-faint);
+}
+
+.coin.active {
+  border-color: var(--accent);
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 12%, var(--sunken));
+}
+
+.coin img,
+.coin-blank {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  object-fit: contain;
+}
+
+.coin-blank {
+  display: grid;
+  place-items: center;
+  font-size: 9px;
+  background: var(--line);
+  color: var(--text-dim);
+}
+
+.coin-code {
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+}
+
+.pay-card {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--accent);
+  background: var(--sunken);
+}
+
+.pay-amount {
+  font-size: 20px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.pay-address {
+  font-family: var(--mono);
+  font-size: 12px;
+  word-break: break-all;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 8px 10px;
+  user-select: text;
+}

@@ -49,6 +49,7 @@ pub fn router(state: AppState) -> Router {
         .route("/pay/coins", get(coins))
         .route("/pay/subscribe", post(subscribe))
         .route("/pay/order/{order}", get(order_status))
+        .route("/pay/orders", get(orders_for_device))
         // Payment notifications. Open by necessity — the provider posts here
         // with no credentials of ours — and trusted only by signature.
         .route("/pay/ipn", post(payment_notice))
@@ -977,6 +978,7 @@ struct SubscribeBody {
 /// only thing that will hand over the key afterwards.
 async fn subscribe(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<SubscribeBody>,
 ) -> Result<Json<Value>, ApiError> {
     if state.cfg.nowpayments_key.trim().is_empty() || state.cfg.public_url.trim().is_empty() {
@@ -1002,6 +1004,7 @@ async fn subscribe(
         license: String::new(),
         paid_at: 0,
         created_at: now(),
+        device: device_id(&headers),
     })?;
 
     let callback = format!("{}/pay/ipn", state.cfg.public_url.trim_end_matches('/'));
@@ -1069,6 +1072,37 @@ async fn order_status(
         "license": found.license,
         "license_id": found.license_id,
     })))
+}
+
+/// Everything this machine has bought, with the keys it earned.
+///
+/// For the operator who closed the window before copying their key, and for
+/// the one who reinstalled: the machine asks, and gets back what it paid for.
+async fn orders_for_device(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, ApiError> {
+    let device = device_id(&headers);
+    if device == "unnamed" {
+        return Err(ApiError::BadRequest("no device was named".into()));
+    }
+    let orders: Vec<Value> = state
+        .db
+        .purchases_by_device(&device)?
+        .into_iter()
+        .map(|order| {
+            json!({
+                "order_id": order.order_id,
+                "tier": order.tier,
+                "months": order.months,
+                "paid": order.paid_at > 0,
+                "license": order.license,
+                "license_id": order.license_id,
+                "created_at": order.created_at,
+            })
+        })
+        .collect();
+    Ok(Json(json!({ "orders": orders })))
 }
 
 #[derive(serde::Deserialize)]
