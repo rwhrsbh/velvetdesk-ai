@@ -1525,24 +1525,100 @@ function bindReordering(listId: string, attribute: "profile" | "man", save: (ids
   let startY = 0;
   let startX = 0;
   let grabY = 0;
+  let grabX = 0;
   let moved = false;
   /** The folder under the pointer, when the card is over one. */
   let overFolder: string | null = null;
 
+  // Where everything was when the drag began, or when the list last changed.
+  //
+  // Measuring the list is the expensive part of this: asking an element for
+  // its position forces the browser to work out the layout, and doing that
+  // for forty cards on every mouse event — a hundred times a second — is how
+  // moving one card came to cost a fifth of a core. The positions only change
+  // when the card is actually moved, so they are measured then and reused.
+  type Spot = { el: HTMLElement; top: number; middle: number; bottom: number; folder: string | null };
+  let spots: Spot[] = [];
+
+  let frame = 0;
+  let pointerY = 0;
+  let pointerX = 0;
+
   const cards = () => Array.from(list.querySelectorAll<HTMLElement>(`[data-${attribute}]`));
 
+  function measure() {
+    spots = [];
+    for (const el of list.querySelectorAll<HTMLElement>(`[data-${attribute}], .folder-head`)) {
+      const box = el.getBoundingClientRect();
+      spots.push({
+        el,
+        top: box.top,
+        middle: box.top + box.height / 2,
+        bottom: box.bottom,
+        folder: el.classList.contains("folder-head") ? (el.dataset.folder ?? "") : null,
+      });
+    }
+  }
+
   const cleanUp = () => {
+    if (frame) cancelAnimationFrame(frame);
+    frame = 0;
     ghost?.remove();
     ghost = null;
     card?.classList.remove("dragging");
     card = null;
     moved = false;
     overFolder = null;
+    spots = [];
     for (const head of list.querySelectorAll<HTMLElement>(".folder-head.taking")) {
       head.classList.remove("taking");
     }
     setDragging(false);
   };
+
+  /** One frame's worth of dragging, however many events arrived. */
+  function step() {
+    frame = 0;
+    if (!card) return;
+
+    // The ghost moves by transform: no layout, no paint of anything else,
+    // just the compositor shifting a layer that is already drawn.
+    if (ghost) {
+      ghost.style.transform = `translate3d(${pointerX - grabX}px, ${pointerY - grabY}px, 0) rotate(-1.5deg)`;
+    }
+
+    let folder: string | null = null;
+    let before: HTMLElement | null = null;
+    for (const spot of spots) {
+      if (spot.el === card) continue;
+      if (spot.folder !== null) {
+        if (pointerY >= spot.top && pointerY <= spot.bottom) folder = spot.folder;
+        continue;
+      }
+      if (before === null && pointerY < spot.middle) before = spot.el;
+    }
+
+    if (folder !== overFolder) {
+      for (const head of list.querySelectorAll<HTMLElement>(".folder-head.taking")) {
+        head.classList.remove("taking");
+      }
+      if (folder !== null) {
+        const head = spots.find((spot) => spot.folder === folder)?.el;
+        head?.classList.add("taking");
+      }
+      overFolder = folder;
+    }
+    if (folder !== null) return;
+
+    // Nothing to do unless the gap has actually moved: the list is only
+    // touched when the card changes places, not on every frame.
+    const next = before ?? null;
+    const now = card.nextElementSibling;
+    if (next === now || (next === null && now === null)) return;
+    if (next) list.insertBefore(card, next);
+    else list.appendChild(card);
+    measure();
+  }
 
   list.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
@@ -1554,12 +1630,17 @@ function bindReordering(listId: string, attribute: "profile" | "man", save: (ids
     card = hit;
     startY = event.clientY;
     startX = event.clientX;
-    grabY = event.clientY - hit.getBoundingClientRect().top;
+    const box = hit.getBoundingClientRect();
+    grabY = event.clientY - box.top;
+    grabX = event.clientX - box.left;
     moved = false;
   });
 
   window.addEventListener("pointermove", (event) => {
     if (!card) return;
+    pointerY = event.clientY;
+    pointerX = event.clientX;
+
     if (!moved) {
       const far =
         Math.abs(event.clientY - startY) > THRESHOLD ||
@@ -1573,48 +1654,20 @@ function bindReordering(listId: string, attribute: "profile" | "man", save: (ids
       ghost = card.cloneNode(true) as HTMLElement;
       ghost.classList.add("drag-ghost");
       ghost.style.width = `${box.width}px`;
-      ghost.style.left = `${box.left}px`;
       document.body.appendChild(ghost);
       card.classList.add("dragging");
       list.setPointerCapture?.(event.pointerId);
+      measure();
     }
 
-    if (ghost) ghost.style.top = `${event.clientY - grabY}px`;
-
-    // A folder heading under the pointer is an invitation to file the card
-    // into it, and it lights up rather than opening a gap.
-    const head = document
-      .elementFromPoint(event.clientX, event.clientY)
-      ?.closest<HTMLElement>(".folder-head");
-    for (const other of list.querySelectorAll<HTMLElement>(".folder-head.taking")) {
-      if (other !== head) other.classList.remove("taking");
-    }
-    overFolder = head && list.contains(head) ? (head.dataset.folder ?? null) : null;
-    if (head && list.contains(head)) {
-      head.classList.add("taking");
-      event.preventDefault();
-      return;
-    }
-
-    // Where it would land: the first card whose middle is below the pointer.
-    const others = cards().filter((item) => item !== card);
-    let before: HTMLElement | null = null;
-    for (const item of others) {
-      const box = item.getBoundingClientRect();
-      if (event.clientY < box.top + box.height / 2) {
-        before = item;
-        break;
-      }
-    }
-    if (before) {
-      list.insertBefore(card, before);
-    } else {
-      list.appendChild(card);
-    }
+    // Several move events can arrive between two frames, and the screen can
+    // only show the last of them: the work is done once, when the browser is
+    // ready to paint.
+    if (!frame) frame = requestAnimationFrame(step);
     event.preventDefault();
   });
 
-  window.addEventListener("pointerup", () => {
+  const finish = () => {
     if (!card) return;
     const wasDragged = moved;
     const dropped = card.dataset[attribute] ?? "";
@@ -1632,20 +1685,13 @@ function bindReordering(listId: string, attribute: "profile" | "man", save: (ids
       return;
     }
     save(ids);
-  });
+  };
 
+  window.addEventListener("pointerup", finish, { passive: true });
   // A drag interrupted — the window lost focus, the pointer was cancelled —
   // leaves the list as it stands rather than snapping back, and saves it:
   // what is on screen is what the operator arranged.
-  window.addEventListener("pointercancel", () => {
-    if (!card) return;
-    const wasDragged = moved;
-    const ids = cards()
-      .map((item) => item.dataset[attribute] ?? "")
-      .filter(Boolean);
-    cleanUp();
-    if (wasDragged) save(ids);
-  });
+  window.addEventListener("pointercancel", finish, { passive: true });
 }
 
 function bindPanels() {

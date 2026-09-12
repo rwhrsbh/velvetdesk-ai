@@ -686,6 +686,8 @@ input[type="range"] {
    the card underneath it is what decides where the gap goes. */
 .drag-ghost {
   position: fixed;
+  top: 0;
+  left: 0;
   z-index: 90;
   pointer-events: none;
   margin: 0;
@@ -693,8 +695,11 @@ input[type="range"] {
   border: 1px solid var(--accent);
   border-radius: var(--r-sm);
   box-shadow: 0 16px 34px rgb(0 0 0 / 0.5);
-  transform: rotate(-1.5deg) scale(1.03);
   opacity: 0.96;
+  /* Moved by transform, which the compositor can do without laying the page
+     out again — and promoted to its own layer so it never repaints the rail
+     underneath it. */
+  will-change: transform;
 }
 
 /* The guided tour: everything dark except the one control being explained. */
