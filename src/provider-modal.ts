@@ -1,6 +1,6 @@
 import { api, errorText, onModelEvent } from "./api";
 import type { ModalDeps } from "./deps";
-import { copyText } from "./context-menu";
+
 import { closeModal, escapeHtml, openModal, toast } from "./dom";
 import { t } from "./i18n";
 import { unloadModel } from "./local-whisper";
@@ -158,17 +158,6 @@ function planPanel(plan: PlanState | null, hasKey: boolean): string {
       <button class="btn btn-secondary" id="btnSyncForget">${t("keys.syncForget")}</button>
     </div>
     ${field}
-    <details class="advanced">
-      <summary>${t("plan.manualPairing")}</summary>
-      <div class="meta">${t("plan.manualPairingHint")}</div>
-      <div class="row-inline">
-        <button class="btn btn-secondary" id="btnSyncInvite">${t("keys.syncInvite")}</button>
-      </div>
-      <div class="row-inline">
-        <input class="field-input" id="syncInvite" placeholder="${t("keys.syncJoinPlaceholder")}" autocomplete="off" />
-        <button class="btn btn-secondary" id="btnSyncJoin">${t("keys.syncJoin")}</button>
-      </div>
-    </details>
   </div>`;
 }
 
@@ -184,11 +173,18 @@ export async function openKeysModal(deps: ModalDeps) {
   const provider = (): ProviderConfig =>
     settings.providers.find((p) => p.id === providerId) ?? settings.providers[0];
 
-  /** Persist the form, then reload models with the stored keys. */
+  /**
+   * Persist the form, then reload models with the stored keys.
+   *
+   * Saving a provider's settings does not make it the one the app works
+   * through: opening the subscription tab to paste a licence used to switch
+   * the whole app onto a provider with no licence in it, and the next
+   * restart came up on an empty cloud provider instead of the operator's own
+   * keys. Choosing is `choose` below, and it is deliberate.
+   */
   const persist = async (patch: Partial<ProviderConfig>, quiet = false) => {
     const target = settings.providers.find((p) => p.id === providerId);
     if (target) Object.assign(target, patch);
-    settings.active_provider = providerId;
     try {
       settings = await api.saveSettings(settings);
       store.settings = settings;
@@ -547,6 +543,11 @@ export async function openKeysModal(deps: ModalDeps) {
         // the gateway when this build carries no key to check against — so
         // "accepted" means the subscription is actually on.
         const plan = await api.activateLicense(token);
+        // A licence that works is the operator saying they want the
+        // subscription; anything else would leave them wondering why the
+        // app still talks to their old keys.
+        if (plan.plan !== "free") settings.active_provider = p.id;
+        await persist({}, true);
         catalogs.delete(p.id);
         await deps.refresh();
         toast(
@@ -643,33 +644,6 @@ export async function openKeysModal(deps: ModalDeps) {
       }
     }
 
-    card.querySelector("#btnSyncInvite")?.addEventListener("click", async () => {
-      try {
-        const state = await api.syncCreateInvite();
-        // The invite is the secret: it goes to the clipboard, not onto a
-        // screen someone else may be looking at.
-        await copyText(state.invite);
-        toast(t("keys.syncInviteCopied"), "success");
-        await showSyncState();
-      } catch (error) {
-        toast(errorText(error), "error");
-      }
-    });
-
-    card.querySelector("#btnSyncJoin")?.addEventListener("click", async () => {
-      const input = card.querySelector<HTMLInputElement>("#syncInvite");
-      const invite = input?.value.trim() ?? "";
-      if (!invite) return;
-      try {
-        await api.syncJoin(invite);
-        if (input) input.value = "";
-        toast(t("keys.syncJoined"), "success");
-        await showSyncState();
-      } catch (error) {
-        toast(errorText(error), "error");
-      }
-    });
-
     card.querySelector("#btnSyncNow")?.addEventListener("click", async () => {
       try {
         const report = await api.syncNow();
@@ -702,6 +676,10 @@ export async function openKeysModal(deps: ModalDeps) {
     card.querySelectorAll<HTMLButtonElement>("[data-provider]").forEach((btn) => {
       btn.addEventListener("click", async () => {
         providerId = btn.dataset.provider!;
+        // A provider that has nothing to work with — no keys, no licence —
+        // is shown but not switched to. Pasting one makes it the choice.
+        const target = settings.providers.find((item) => item.id === providerId);
+        if (target && target.key_count > 0) settings.active_provider = providerId;
         await persist({}, true);
         await draw();
       });

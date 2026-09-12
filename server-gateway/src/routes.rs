@@ -86,10 +86,20 @@ impl IntoResponse for ApiError {
                     }
                 }),
             ),
-            ApiError::Upstream(message) => (
-                StatusCode::BAD_GATEWAY,
-                json!({ "error": { "type": "upstream", "message": message } }),
-            ),
+            // What went wrong upstream is the gateway's business, not the
+            // client's. The raw text names the model, the provider behind it
+            // and sometimes a link to their console — which together tell a
+            // paying customer exactly what they are really talking to, and
+            // tell anybody else how the service is assembled. It is logged
+            // here in full and answered for in one sentence.
+            ApiError::Upstream(message) => {
+                log::warn!("upstream failed: {message}");
+                let (code, text) = classify_upstream(&message);
+                (
+                    code,
+                    json!({ "error": { "type": "upstream", "message": text } }),
+                )
+            }
             ApiError::Busy {
                 message,
                 retry_after,
@@ -110,6 +120,42 @@ impl IntoResponse for ApiError {
         };
         (status, Json(body)).into_response()
     }
+}
+
+/// Turn an upstream failure into something safe to say out loud.
+///
+/// The distinctions worth keeping are the ones a client can act on: wait and
+/// try again, or stop and tell somebody. Everything else is one sentence.
+fn classify_upstream(detail: &str) -> (StatusCode, &'static str) {
+    let lower = detail.to_ascii_lowercase();
+    let rate_limited = lower.contains("429")
+        || lower.contains("rate-limit")
+        || lower.contains("rate limit")
+        || lower.contains("quota")
+        || lower.contains("overload")
+        || lower.contains("parked");
+    if rate_limited {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "the service is busy right now — try again in a minute",
+        );
+    }
+    if lower.contains("declined") || lower.contains("blocked") || lower.contains("safety") {
+        return (
+            StatusCode::BAD_REQUEST,
+            "the model declined to answer this request",
+        );
+    }
+    if lower.contains("timed out") || lower.contains("timeout") || lower.contains("transport") {
+        return (
+            StatusCode::GATEWAY_TIMEOUT,
+            "the service did not answer in time — try again",
+        );
+    }
+    (
+        StatusCode::BAD_GATEWAY,
+        "the service could not answer this request — try again shortly",
+    )
 }
 
 impl From<rusqlite::Error> for ApiError {
@@ -411,8 +457,11 @@ async fn chat_completions(
             }
             Err(err) => {
                 // The stream has already started, so the failure travels as
-                // an event rather than a status code nobody will see.
-                let body = json!({ "error": { "type": "upstream", "message": err.to_string() } });
+                // an event rather than a status code nobody will see — and
+                // it is sanitised the same way, for the same reason.
+                log::warn!("upstream failed mid-stream: {err}");
+                let (_, text) = classify_upstream(&err.to_string());
+                let body = json!({ "error": { "type": "upstream", "message": text } });
                 let _ = tx.send(Event::default().data(body.to_string()));
             }
         }
@@ -576,8 +625,13 @@ async fn gemini_generate(
                 let _ = tx.send(Event::default().data(last.to_string()));
             }
             Err(err) => {
-                let body =
-                    json!({ "error": { "status": "UNAVAILABLE", "message": err.to_string() } });
+                log::warn!("upstream failed mid-stream: {err}");
+                let body = json!({
+                    "error": {
+                        "status": "UNAVAILABLE",
+                        "message": classify_upstream(&err.to_string()).1,
+                    }
+                });
                 let _ = tx.send(Event::default().data(body.to_string()));
             }
         }

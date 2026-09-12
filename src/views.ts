@@ -24,7 +24,15 @@ export function renderTopbar() {
   }
   const provider =
     settings.providers.find((p) => p.id === settings.active_provider) ?? settings.providers[0];
-  if (provider) {
+  if (provider && provider.id === "velvetdesk-cloud") {
+    // The subscription is not a model anybody chose, and naming the model it
+    // happens to answer with invites the question of how to change it. What
+    // matters is whether the licence is in.
+    label.textContent = provider.key_count
+      ? t("provider.cloudOn")
+      : t("provider.cloudOff");
+    dot.className = provider.key_count ? "dot" : "dot off";
+  } else if (provider) {
     label.textContent = provider.key_count
       ? t("provider.keys", {
           // A provider whose model has not been chosen yet says so, rather

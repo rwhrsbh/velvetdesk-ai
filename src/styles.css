@@ -890,27 +890,21 @@ input[type="range"] {
   border-color: rgb(255 255 255 / 0.28);
 }
 
-/* Retry and edit sit on the operator's own messages, out of the way until the
-   pointer is on the one they belong to.
-   Hidden means gone, not merely transparent: at opacity alone the row still
-   took its height, and every message the operator sent was a bubble with a
-   band of empty blue under the text. */
-.msg.user .msg-actions {
-  justify-content: flex-end;
-  opacity: 0;
-  height: 0;
-  margin-top: 0;
-  overflow: hidden;
-  pointer-events: none;
-  transition: opacity 0.12s ease;
+/* Retry and edit sit beside the operator's own message rather than under it.
+   They used to appear on hover, which meant the bubble grew as the pointer
+   crossed it and shrank again as it left — a flicker on every pass. They are
+   simply there now, as they are on the model's answers, and the text sits
+   level with them instead of above them. */
+.msg.user .bubble {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
-.msg.user:hover .msg-actions,
-.msg.user:focus-within .msg-actions {
-  opacity: 1;
-  height: auto;
-  margin-top: 9px;
-  pointer-events: auto;
+.msg.user .msg-actions {
+  margin-top: 0;
+  flex: 0 0 auto;
+  align-self: center;
 }
 
 /* Folders agents have been let into. */
