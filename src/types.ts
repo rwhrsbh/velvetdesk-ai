@@ -284,6 +284,39 @@ export interface SyncState {
   relay: string;
   auto: boolean;
   last: SyncReport | null;
+  /** False on the free plan: sync is one of the things a licence buys. */
+  allowed: boolean;
+  /** Machines this licence covers. */
+  devices: number;
+  /** The pairing came from the licence, so nothing had to be typed in. */
+  from_license: boolean;
+}
+
+/** What the plan allows. Null anywhere means no ceiling. */
+export interface PlanLimits {
+  requests_per_day: number | null;
+  profiles: number | null;
+  men_per_profile: number | null;
+  devices: number;
+  cloud: boolean;
+  sync: boolean;
+}
+
+/** The plan, the day's meter, and what is left of both. */
+export interface PlanState {
+  plan: "free" | "pro" | "business";
+  valid: boolean;
+  license_id: string;
+  tier: string;
+  expires_at: number;
+  days_left: number;
+  problem: string;
+  limits: PlanLimits;
+  used_today: number;
+  requests_left: number | null;
+  resets_in: number;
+  profiles_used: number;
+  expires_on: string;
 }
 
 /** Where the VelvetDesk Cloud subscription stands, licence and credits both. */

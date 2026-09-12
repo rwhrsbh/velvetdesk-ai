@@ -7,6 +7,7 @@ import { unloadModel } from "./local-whisper";
 import { store } from "./store";
 import type {
   KeyStatus,
+  PlanState,
   LocalModel,
   ModelCatalog,
   ModelInfo,
@@ -89,6 +90,88 @@ function watchDownloads() {
 
 let watching = false;
 
+/** How much of a limited allowance is left, as a bar. */
+function meterBar(used: number, cap: number): string {
+  const share = cap > 0 ? Math.min(1, used / cap) : 0;
+  const low = share > 0.8 ? " low" : "";
+  return `<div class="meter${low}"><span style="width:${Math.round(share * 100)}%"></span></div>`;
+}
+
+/**
+ * The subscription, drawn as what it is worth rather than as a form.
+ *
+ * On the free plan this is the sales pitch and the meter that makes it land:
+ * the operator sees what today has cost them and what the ceiling is. With a
+ * licence it is a receipt — the plan, the date, and the one field that
+ * replaces it when it runs out. Either way there is nothing here to fill in
+ * except a licence key, because everything else about the cloud provider —
+ * models, fallbacks, voice, keys — lives on the server.
+ */
+function planPanel(plan: PlanState | null, hasKey: boolean): string {
+  if (!plan) return `<div class="plan-card"><div class="meta">${t("keys.cloudChecking")}</div></div>`;
+
+  const paid = plan.plan !== "free";
+  const field = `
+    <div class="row-inline">
+      <input class="field-input" id="licenseKey" placeholder="${t("plan.keyPlaceholder")}" autocomplete="off" />
+      <button class="btn btn-primary" id="btnLicense">${t(hasKey ? "plan.replace" : "plan.activate")}</button>
+    </div>
+    <div class="meta" id="cloudStatus">${t("keys.cloudChecking")}</div>`;
+
+  if (!paid) {
+    const cap = plan.limits.requests_per_day ?? 0;
+    const left = plan.requests_left ?? 0;
+    return `<div class="plan-card free">
+      <div class="plan-head">
+        <span class="plan-name">${t("plan.freeTitle")}</span>
+        <span class="plan-badge muted">${t("plan.freeBadge")}</span>
+      </div>
+      <div class="meta">${t("plan.todayUsed", { used: plan.used_today, cap, left })}</div>
+      ${meterBar(plan.used_today, cap)}
+      <div class="meta">${t("plan.freeProfiles", {
+        used: plan.profiles_used,
+        cap: plan.limits.profiles ?? 0,
+        men: plan.limits.men_per_profile ?? 0,
+      })}</div>
+      <ul class="plan-perks">
+        <li>${t("plan.perkUnlimited")}</li>
+        <li>${t("plan.perkNoKeys")}</li>
+        <li>${t("plan.perkVoice")}</li>
+        <li>${t("plan.perkSync")}</li>
+      </ul>
+      ${plan.problem === "license.expired" ? `<div class="meta">${t("plan.expiredData")}</div>` : ""}
+      ${field}
+    </div>`;
+  }
+
+  return `<div class="plan-card">
+    <div class="plan-head">
+      <span class="plan-name">${t("plan.paidTitle", { tier: plan.tier })}</span>
+      <span class="plan-badge">${
+        plan.expires_at ? t("plan.daysLeft", { n: Math.max(0, plan.days_left) }) : t("keys.cloudForever")
+      }</span>
+    </div>
+    <div class="meta">${t("plan.paidWhat", { devices: plan.limits.devices })}</div>
+    <div class="meta" id="syncStatus">${t("keys.syncChecking")}</div>
+    <div class="row-inline">
+      <button class="btn btn-secondary" id="btnSyncNow">${t("keys.syncNow")}</button>
+      <button class="btn btn-secondary" id="btnSyncForget">${t("keys.syncForget")}</button>
+    </div>
+    ${field}
+    <details class="advanced">
+      <summary>${t("plan.manualPairing")}</summary>
+      <div class="meta">${t("plan.manualPairingHint")}</div>
+      <div class="row-inline">
+        <button class="btn btn-secondary" id="btnSyncInvite">${t("keys.syncInvite")}</button>
+      </div>
+      <div class="row-inline">
+        <input class="field-input" id="syncInvite" placeholder="${t("keys.syncJoinPlaceholder")}" autocomplete="off" />
+        <button class="btn btn-secondary" id="btnSyncJoin">${t("keys.syncJoin")}</button>
+      </div>
+    </details>
+  </div>`;
+}
+
 export async function openKeysModal(deps: ModalDeps) {
   if (!watching) {
     watchDownloads();
@@ -145,6 +228,12 @@ export async function openKeysModal(deps: ModalDeps) {
     }
     const catalog = catalogs.get(p.id) ?? null;
     const isGemini = p.kind === "gemini";
+    let plan: PlanState | null = null;
+    try {
+      plan = await api.planState();
+    } catch (error) {
+      console.error("plan", error);
+    }
     // The cloud provider is billed rather than keyed: the "key" is a
     // licence, and what matters about it is what is left on it.
     const isCloud = p.id === "velvetdesk-cloud";
@@ -188,37 +277,12 @@ export async function openKeysModal(deps: ModalDeps) {
         </div>
       </div>
 
+      ${isCloud ? planPanel(plan, keys.length > 0) : ""}
+
       ${
         isCloud
-          ? `<div class="field">
-        <label>${t("keys.cloudPublicKey")}
-          <span class="hint-inline">${t("keys.cloudPublicKeyHint")}</span>
-        </label>
-        <input class="field-input" id="cloudPublicKey" value="${escapeHtml(
-          settings.cloud_public_key ?? "",
-        )}" placeholder="${t("keys.cloudPublicKeyPlaceholder")}" autocomplete="off" />
-        <div class="meta" id="cloudStatus">${t("keys.cloudChecking")}</div>
-      </div>
-
-      <div class="field">
-        <label>${t("keys.sync")}
-          <span class="hint-inline">${t("keys.syncHint")}</span>
-        </label>
-        <div class="meta" id="syncStatus">${t("keys.syncChecking")}</div>
-        <div class="row-inline">
-          <button class="btn btn-secondary" id="btnSyncInvite">${t("keys.syncInvite")}</button>
-          <button class="btn btn-secondary" id="btnSyncNow">${t("keys.syncNow")}</button>
-          <button class="btn btn-secondary" id="btnSyncForget">${t("keys.syncForget")}</button>
-        </div>
-        <div class="row-inline">
-          <input class="field-input" id="syncInvite" placeholder="${t("keys.syncJoinPlaceholder")}" autocomplete="off" />
-          <button class="btn btn-primary" id="btnSyncJoin">${t("keys.syncJoin")}</button>
-        </div>
-      </div>`
-          : ""
-      }
-
-      <div class="field">
+          ? ""
+          : `<div class="field">
         <label>${t("keys.step1", { n: keys.length })}</label>
         <div id="keyList">
           ${
@@ -279,7 +343,8 @@ export async function openKeysModal(deps: ModalDeps) {
           <span class="hint-inline">${t("keys.chainHint")}</span>
         </label>
         <div class="chain-list" id="chainList"></div>
-      </div>
+      </div>`
+      }
 
       <div class="field">
         <label>${t("keys.folders")}
@@ -291,7 +356,7 @@ export async function openKeysModal(deps: ModalDeps) {
 
       <div class="field">
         <label>${t("keys.voice")}
-          <span class="hint-inline">${t("keys.voiceWhere")}</span>
+          <span class="hint-inline">${isCloud ? t("keys.voiceIncluded") : t("keys.voiceWhere")}</span>
         </label>
         <div class="segmented-control wide" id="speechEngine">
           <button class="segmented-btn ${isLocal ? "" : "active"}" data-engine="provider">
@@ -378,10 +443,14 @@ export async function openKeysModal(deps: ModalDeps) {
             <label>${t("keys.temperature", { v: p.temperature.toFixed(2) })}</label>
             <input type="range" id="temperature" min="0" max="2" step="0.05" value="${p.temperature}" />
           </div>
-          <div class="field">
+          ${
+            isCloud
+              ? ""
+              : `<div class="field">
             <label>${t("keys.version")}</label>
             <input class="field-input" id="apiVersion" value="${escapeHtml(p.api_version)}" />
-          </div>
+          </div>`
+          }
         </div>
         <div class="field">
           <label>${t("keys.headers")}</label>
@@ -453,11 +522,20 @@ export async function openKeysModal(deps: ModalDeps) {
       </div>
     `);
 
-    const publicKeyInput = card.querySelector<HTMLInputElement>("#cloudPublicKey");
-    publicKeyInput?.addEventListener("change", async () => {
-      settings.cloud_public_key = publicKeyInput.value.trim();
-      await persist({}, true);
-      await showCloudStatus();
+    // The licence is stored where every other provider's key is stored, so
+    // nothing in the app has to learn a second way of keeping a secret.
+    card.querySelector("#btnLicense")?.addEventListener("click", async () => {
+      const input = card.querySelector<HTMLInputElement>("#licenseKey");
+      const token = input?.value.trim() ?? "";
+      if (!token) return;
+      try {
+        await api.setKeys(p.id, [token]);
+        catalogs.delete(p.id);
+        toast(t("plan.activated"), "success");
+        await draw();
+      } catch (error) {
+        toast(errorText(error), "error");
+      }
     });
 
     /** Licence and credits, once the gateway has answered — or said nothing. */
@@ -510,7 +588,15 @@ export async function openKeysModal(deps: ModalDeps) {
       try {
         const state = await api.syncState();
         const parts: string[] = [];
-        parts.push(state.paired ? t("keys.syncPaired") : t("keys.syncUnpaired"));
+        if (!state.allowed) {
+          parts.push(t("keys.syncPaidOnly"));
+        } else if (state.from_license) {
+          // Nothing was typed in and nothing needs to be: the second machine
+          // joins by being given the same licence.
+          parts.push(t("keys.syncByLicense", { n: state.devices }));
+        } else {
+          parts.push(state.paired ? t("keys.syncPaired") : t("keys.syncUnpaired"));
+        }
         if (state.last?.finished_at) {
           parts.push(
             t("keys.syncLast", {

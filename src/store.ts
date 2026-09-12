@@ -9,6 +9,7 @@ import type {
   Profile,
   SecurityLevel,
   Settings,
+  PlanState,
 } from "./types";
 
 export interface UiEntry extends AgentEntry {
@@ -36,6 +37,8 @@ export interface QueuedMessage {
 export interface AppStore {
   info: AppInfo | null;
   settings: Settings | null;
+  /** What this copy may do, refreshed whenever anything is spent. */
+  plan: PlanState | null;
   profiles: Profile[];
   men: Man[];
   entries: UiEntry[];
@@ -73,6 +76,7 @@ export interface AppStore {
 }
 
 export const store: AppStore = {
+  plan: null,
   info: null,
   settings: null,
   profiles: [],

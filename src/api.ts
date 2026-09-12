@@ -11,6 +11,7 @@ import type {
   Bootstrap,
   ChatThread,
   CloudStatus,
+  PlanState,
   DoctorReport,
   GlobalIndex,
   KeyStatus,
@@ -150,6 +151,9 @@ export const api = {
 
   /** Licence and credits for the cloud provider, checked locally then asked of the gateway. */
   cloudStatus: () => invoke<CloudStatus>("cloud_status"),
+
+  /** What this copy may do, and how much of today's free allowance is left. */
+  planState: () => invoke<PlanState>("plan_state"),
 
   /** Device sync: pairing, and one round on demand. */
   syncState: () => invoke<SyncState>("sync_state"),

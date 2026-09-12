@@ -82,6 +82,7 @@ async function refresh() {
   store.profiles = profiles;
   store.settings = settings;
   store.pending = pending;
+  void refreshPlanChip();
 
   if (store.activeModelId && !profiles.some((p) => p.id === store.activeModelId)) {
     store.activeModelId = null;
@@ -1341,6 +1342,7 @@ function bindTopbar() {
 
   $("btnKeys").addEventListener("click", () => void openKeysModal(deps));
   $("providerChip").addEventListener("click", () => void openKeysModal(deps));
+  $("planChip").addEventListener("click", () => nagAboutFree(true));
   $("btnDoctor").addEventListener("click", () => void openDoctorModal(deps));
   $("btnMaster").addEventListener("click", () => void toggleMasterChat());
   $("btnPending").addEventListener("click", () => void openPendingModal(deps));
@@ -2702,6 +2704,65 @@ function bindAgentEvents() {
   });
 }
 
+
+/**
+ * The plan chip: how much of today's free allowance is left.
+ *
+ * Hidden entirely on a paid plan — a subscriber has nothing to count — and
+ * turned red once the day is spent, because at that point every button in
+ * the window is about to refuse and the reason should already be on screen.
+ */
+async function refreshPlanChip() {
+  const chip = $("planChip") as HTMLButtonElement;
+  const text = $("planChipText");
+  try {
+    const plan = await api.planState();
+    store.plan = plan;
+    const cap = plan.limits.requests_per_day;
+    if (plan.plan !== "free" || cap === null) {
+      chip.hidden = true;
+      return;
+    }
+    const left = plan.requests_left ?? 0;
+    chip.hidden = false;
+    chip.classList.toggle("spent", left === 0);
+    chip.title = t("plan.nagBody", { used: plan.used_today, cap });
+    text.textContent = t("plan.chip", { left, cap });
+  } catch (error) {
+    console.error("plan", error);
+    chip.hidden = true;
+  }
+}
+
+/** Shown once a session, and again when the day runs out. */
+let nagged = false;
+
+function nagAboutFree(force = false) {
+  const plan = store.plan;
+  if (!plan || plan.plan !== "free") return;
+  if (nagged && !force) return;
+  nagged = true;
+  const cap = plan.limits.requests_per_day ?? 0;
+  const card = openModal(`
+    <h3>${t("plan.nagTitle")}</h3>
+    <div class="modal-sub">${t("plan.nagBody", { used: plan.used_today, cap })}</div>
+    <ul class="plan-perks">
+      <li>${t("plan.perkUnlimited")}</li>
+      <li>${t("plan.perkNoKeys")}</li>
+      <li>${t("plan.perkVoice")}</li>
+      <li>${t("plan.perkSync")}</li>
+    </ul>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" data-act="close">${t("plan.later")}</button>
+      <button class="btn btn-primary" id="btnUpgrade">${t("plan.upgrade")}</button>
+    </div>
+  `);
+  card.querySelector("#btnUpgrade")?.addEventListener("click", () => {
+    closeModal();
+    void openKeysModal(deps);
+  });
+}
+
 async function boot() {
   bindModalDismiss();
   bindTopbar();
@@ -2739,6 +2800,13 @@ async function boot() {
     if (preferred) await selectProfile(preferred, false);
 
     renderAll();
+    await refreshPlanChip();
+
+    // The free version says so once, after the window has settled — and the
+    // pitch is the four things a subscription actually changes, not a wall.
+    if (store.plan?.plan === "free") {
+      window.setTimeout(() => nagAboutFree(), 6000);
+    }
 
     // A quiet look at the release page a moment after the window is usable.
     if (data.settings.update_check) {

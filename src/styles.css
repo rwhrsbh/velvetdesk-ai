@@ -159,6 +159,9 @@ a {
   padding: 2px;
   border-radius: var(--r-sm);
   display: flex;
+  /* Five providers do not fit on one line in a modal this wide, and a row
+     that overflows puts the last of them half outside the dialog. */
+  flex-wrap: wrap;
   border: 1px solid var(--line);
   gap: 2px;
 }
@@ -168,7 +171,79 @@ a {
 }
 
 .segmented-control.wide .segmented-btn {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The subscription panel: what the plan is, what is left of it, and the one
+   field that changes any of it. */
+.plan-card {
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.plan-card.free {
+  border-color: var(--accent);
+}
+
+.plan-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.plan-name {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.plan-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  white-space: nowrap;
+}
+
+.plan-badge.muted {
+  background: var(--line);
+  color: var(--text-dim);
+}
+
+.plan-perks {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.meter {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.meter > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.meter.low > span {
+  background: var(--danger);
 }
 
 .segmented-btn {
@@ -2334,4 +2409,15 @@ details.advanced[open] {
   height: 1px;
   margin: 4px 6px;
   background: var(--line);
+}
+
+/* What the free plan has left, where the operator cannot miss it. */
+.plan-chip {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.plan-chip.spent {
+  border-color: var(--danger);
+  color: var(--danger);
 }
