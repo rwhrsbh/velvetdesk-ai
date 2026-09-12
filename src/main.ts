@@ -2744,7 +2744,8 @@ function nagAboutFree(force = false) {
   if (nagged && !force) return;
   nagged = true;
   const cap = plan.limits.requests_per_day ?? 0;
-  const card = openModal(`
+  const card = openModal(
+    `
     <h3>${t("plan.nagTitle")}</h3>
     <div class="modal-sub">${t("plan.nagBody", { used: plan.used_today, cap })}</div>
     <ul class="plan-perks">
@@ -2757,7 +2758,10 @@ function nagAboutFree(force = false) {
       <button class="btn btn-secondary" data-act="close">${t("plan.later")}</button>
       <button class="btn btn-primary" id="btnUpgrade">${t("plan.upgrade")}</button>
     </div>
-  `);
+  `,
+    undefined,
+    true,
+  );
   card.querySelector("#btnUpgrade")?.addEventListener("click", () => {
     closeModal();
     void openKeysModal(deps);
@@ -2803,18 +2807,18 @@ async function boot() {
     renderAll();
     await refreshPlanChip();
 
-    // Both of these arrive on a timer, and used to land on top of each
-    // other: whichever was second replaced the first before anyone had read
-    // it. They queue for the screen instead — the update offer first,
-    // because a new version is the more perishable news.
-    if (data.settings.update_check) {
-      window.setTimeout(() => whenFree(() => void offerUpdate(false)), 4000);
+    // The free-version notice comes up with the window rather than a few
+    // seconds into it: arriving late means arriving over somebody who has
+    // already started working, which is the one moment it is in the way.
+    if (store.plan?.plan === "free") {
+      whenFree(() => nagAboutFree());
     }
 
-    // The free version says so once, after the window has settled — and the
-    // pitch is the four things a subscription actually changes, not a wall.
-    if (store.plan?.plan === "free") {
-      window.setTimeout(() => whenFree(() => nagAboutFree()), 6000);
+    // The update offer waits its turn behind it. Two dialogs on a timer used
+    // to land on top of each other, and whichever was second replaced the
+    // first before anyone had read it.
+    if (data.settings.update_check) {
+      window.setTimeout(() => whenFree(() => void offerUpdate(false)), 4000);
     }
 
     // The first run opens the guide by itself: an empty window explains

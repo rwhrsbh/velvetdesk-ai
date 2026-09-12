@@ -149,10 +149,21 @@ function showNextWaiting() {
   }, 120);
 }
 
-export function openModal(html: string, onClose?: () => void) {
+/**
+ * Show a dialog.
+ *
+ * `sticky` refuses the backdrop click. Nearly every dialog here should be
+ * dismissable by clicking away from it, and the exception is a dialog that
+ * exists to be read: the free-version notice appears on its own, over a
+ * window the operator is reaching into, and a stray click used to throw it
+ * away before it registered. Escape and the buttons still close it — this
+ * is not a dialog anyone is trapped in.
+ */
+export function openModal(html: string, onClose?: () => void, sticky = false) {
   const overlay = $("modalOverlay");
   const card = $("modalCard");
   card.innerHTML = html;
+  overlay.dataset.sticky = sticky ? "1" : "";
 
   // The webview offers to remember and refill these fields, and draws that
   // offer as an oversized panel over the form. Nothing here is a login or an
@@ -192,7 +203,8 @@ export function bindModalDismiss() {
     pressedBackdrop = event.target === overlay;
   });
   overlay.addEventListener("click", (event) => {
-    if (event.target === overlay && pressedBackdrop) closeModal();
+    const sticky = overlay.dataset.sticky === "1";
+    if (event.target === overlay && pressedBackdrop && !sticky) closeModal();
     pressedBackdrop = false;
   });
   document.addEventListener("keydown", (event) => {
