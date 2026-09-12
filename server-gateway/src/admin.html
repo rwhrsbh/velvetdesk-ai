@@ -124,6 +124,16 @@
     <main>
       <section id="upstreams" class="on">
         <div class="card">
+          <h2>Очередь</h2>
+          <p class="muted" id="queue-line">Загружаю…</p>
+          <p class="muted">
+            Одновременных вызовов к провайдерам — ограничено, остальные ждут в очереди;
+            на одну лицензию своя доля, чтобы пачка запросов одного оператора не заняла
+            весь шлюз. Кто не дождался — получает 503 и Retry-After, а не оборванное
+            соединение.
+          </p>
+        </div>
+        <div class="card">
           <h2>Провайдеры и ключи</h2>
           <div id="upstream-list" class="muted">Загружаю…</div>
         </div>
@@ -302,6 +312,10 @@
       async function drawUpstreams() {
         const data = await call("/admin/overview");
         $("credit-usd").textContent = "$" + data.credit_usd;
+        const q = data.queue;
+        $("queue-line").textContent =
+          `В работе ${q.inflight} из ${q.max_inflight} · ждут ${q.queued} из ${q.max_queued} · ` +
+          `на лицензию не больше ${q.max_per_license}`;
         const rows = await Promise.all(
           data.upstreams.map(async (up) => {
             const keys = await call(`/admin/upstreams/${encodeURIComponent(up.id)}/keys`);

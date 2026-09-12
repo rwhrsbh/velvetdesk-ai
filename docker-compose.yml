@@ -1,0 +1,44 @@
+# The gateway, start to finish:
+#
+#   docker compose up -d --build
+#
+# One service, one volume. The database, the config and anything else the
+# gateway writes live in ./gateway-data on the host, so moving the whole
+# service to another machine is: stop it, copy that folder, start it there.
+#
+# Before the first start, set VD_ADMIN_TOKEN — without it the admin page is
+# closed rather than open, and there is no way in to add providers or keys.
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: server-gateway/Dockerfile
+    image: velvetdesk/gateway:latest
+    container_name: velvetdesk-gateway
+    restart: unless-stopped
+    environment:
+      # Inside the container there is nothing else on the network namespace,
+      # so listening on every interface is the isolation the port mapping
+      # below controls.
+      VD_BIND: 0.0.0.0:8787
+      VD_DB_PATH: /data/gateway.db
+      VD_GATEWAY_CONFIG: /data/gateway.json
+      # The key licences are checked against: the public half that
+      # `velvetdesk-gateway keygen` prints. Without it every request is
+      # refused, which is the safe way round.
+      VD_LICENSE_PUBLIC_KEY: ${VD_LICENSE_PUBLIC_KEY:-}
+      # The admin page's password. Empty closes the page entirely.
+      VD_ADMIN_TOKEN: ${VD_ADMIN_TOKEN:-}
+      RUST_LOG: ${RUST_LOG:-info}
+    ports:
+      # Loopback only: put caddy or nginx in front for TLS. Change to
+      # "8787:8787" to expose it directly, and only behind a firewall.
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - ./gateway-data:/data
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/velvetdesk-gateway", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

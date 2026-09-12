@@ -131,6 +131,15 @@ async fn overview(
         "upstreams": upstreams,
         "models": registry.models,
         "tiers": registry.tiers,
+        // The waiting room, so an operator watching a slow evening can see
+        // whether the gateway is queueing or the upstream is simply slow.
+        "queue": {
+            "inflight": state.queue.inflight(),
+            "queued": state.queue.queued(),
+            "max_inflight": state.queue.limits().inflight,
+            "max_per_license": state.queue.limits().per_license,
+            "max_queued": state.queue.limits().queued,
+        },
     })))
 }
 

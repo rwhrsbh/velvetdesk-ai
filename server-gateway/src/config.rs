@@ -33,6 +33,20 @@ pub struct GatewayConfig {
     /// Budgets per tier, by the `tier` in the licence.
     #[serde(default)]
     pub tiers: HashMap<String, Tier>,
+    /// How many upstream calls may run at once. The rest queue.
+    #[serde(default = "default_inflight")]
+    pub max_inflight: usize,
+    /// How many of those one licence may hold, so a batch from one operator
+    /// cannot fill the gateway.
+    #[serde(default = "default_per_license")]
+    pub max_per_license: usize,
+    /// How many callers may wait. Past this the answer is an immediate
+    /// "come back in a moment" rather than a held connection.
+    #[serde(default = "default_queued")]
+    pub max_queued: usize,
+    /// Seconds a request may wait for a slot before it is turned away.
+    #[serde(default = "default_queue_wait")]
+    pub queue_wait_seconds: u64,
 }
 
 /// One provider the gateway may spend on: where it is, which keys open it,
@@ -107,6 +121,10 @@ impl Default for Tier {
 }
 
 fn default_bind() -> String {
+    // Loopback by default: a gateway on a VPS sits behind nginx or caddy, and
+    // a fresh install should not be on the public internet by accident. The
+    // container image sets VD_BIND to 0.0.0.0, where the isolation is the
+    // network namespace rather than the interface.
     "127.0.0.1:8787".into()
 }
 
@@ -118,6 +136,22 @@ fn default_credit_usd() -> f64 {
     // A tenth of a cent a credit: a thousand credits is a dollar of cost, so
     // a tier's budget reads as money without a calculator.
     0.001
+}
+
+fn default_inflight() -> usize {
+    crate::queue::DEFAULT_INFLIGHT
+}
+
+fn default_per_license() -> usize {
+    crate::queue::DEFAULT_PER_LICENSE
+}
+
+fn default_queued() -> usize {
+    crate::queue::DEFAULT_QUEUED
+}
+
+fn default_queue_wait() -> u64 {
+    crate::queue::DEFAULT_WAIT_SECONDS
 }
 
 fn default_peers() -> u32 {
@@ -144,7 +178,82 @@ impl Upstream {
 impl GatewayConfig {
     pub fn load(path: &Path) -> std::io::Result<GatewayConfig> {
         let text = std::fs::read_to_string(path)?;
-        serde_json::from_str(&text).map_err(std::io::Error::other)
+        let mut cfg: GatewayConfig = serde_json::from_str(&text).map_err(std::io::Error::other)?;
+        cfg.apply_environment();
+        Ok(cfg)
+    }
+
+    /// The config a container starts with when the volume is empty.
+    ///
+    /// A first run should not need a file to be written by hand on the host:
+    /// the gateway comes up, the admin page is reachable, and providers,
+    /// keys, models and tiers are added there. Everything it decides is
+    /// written to the database in the same directory, so the whole service
+    /// moves by copying one folder.
+    pub fn starter() -> GatewayConfig {
+        GatewayConfig {
+            bind: default_bind(),
+            db_path: default_db(),
+            license_public_key: String::new(),
+            credit_usd: default_credit_usd(),
+            upstreams: vec![],
+            tiers: HashMap::from([
+                (
+                    "solo".to_string(),
+                    Tier {
+                        credits_5h: 300.0,
+                        credits_week: 4_000.0,
+                        max_peers: 1,
+                    },
+                ),
+                (
+                    "pro".to_string(),
+                    Tier {
+                        credits_5h: 1_200.0,
+                        credits_week: 20_000.0,
+                        max_peers: 2,
+                    },
+                ),
+                (
+                    "business".to_string(),
+                    Tier {
+                        credits_5h: 6_000.0,
+                        credits_week: 120_000.0,
+                        max_peers: 10,
+                    },
+                ),
+            ]),
+            max_inflight: default_inflight(),
+            max_per_license: default_per_license(),
+            max_queued: default_queued(),
+            queue_wait_seconds: default_queue_wait(),
+        }
+    }
+
+    /// Let the environment win over the file, for the things a deployment
+    /// decides rather than the operator: the address to listen on, where the
+    /// database goes, and the licence key to check against.
+    pub fn apply_environment(&mut self) {
+        if let Ok(bind) = std::env::var("VD_BIND") {
+            if !bind.trim().is_empty() {
+                self.bind = bind;
+            }
+        }
+        if let Ok(db) = std::env::var("VD_DB_PATH") {
+            if !db.trim().is_empty() {
+                self.db_path = db;
+            }
+        }
+        if let Ok(key) = std::env::var("VD_LICENSE_PUBLIC_KEY") {
+            if !key.trim().is_empty() {
+                self.license_public_key = key.trim().to_string();
+            }
+        }
+    }
+
+    pub fn save(&self, path: &Path) -> std::io::Result<()> {
+        let text = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
+        std::fs::write(path, text)
     }
 }
 

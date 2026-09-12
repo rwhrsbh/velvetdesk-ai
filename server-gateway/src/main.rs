@@ -7,6 +7,7 @@
 mod admin;
 mod config;
 mod db;
+mod queue;
 mod quota;
 mod registry;
 mod routes;
@@ -31,9 +32,10 @@ fn main() -> std::io::Result<()> {
         Some("keygen") => keygen(),
         Some("mint") => mint(&args[1..]),
         Some("serve") | None => serve(),
+        Some("healthcheck") => healthcheck(),
         Some(other) => {
             eprintln!("unknown command: {other}");
-            eprintln!("usage: velvetdesk-gateway [serve|keygen|mint]");
+            eprintln!("usage: velvetdesk-gateway [serve|keygen|mint|healthcheck]");
             std::process::exit(2);
         }
     }
@@ -51,10 +53,39 @@ fn key_path() -> PathBuf {
         .into()
 }
 
+/// Is the gateway answering? Used by Docker's healthcheck, which has no curl
+/// to call and should not need one installed.
+#[tokio::main]
+async fn healthcheck() -> std::io::Result<()> {
+    let cfg = GatewayConfig::load(&config_path()).unwrap_or_else(|_| GatewayConfig::starter());
+    let host = cfg.bind.replace("0.0.0.0", "127.0.0.1");
+    let url = format!("http://{host}/health");
+    match reqwest::get(&url).await {
+        Ok(response) if response.status().is_success() => Ok(()),
+        Ok(response) => {
+            eprintln!("{url}: HTTP {}", response.status());
+            std::process::exit(1);
+        }
+        Err(err) => {
+            eprintln!("{url}: {err}");
+            std::process::exit(1);
+        }
+    }
+}
+
 #[tokio::main]
 async fn serve() -> std::io::Result<()> {
-    let cfg = GatewayConfig::load(&config_path()).inspect_err(|err| {
-        log::error!("cannot read {}: {err}", config_path().display());
+    // A container starts with an empty volume and no config file. Writing a
+    // starter one is friendlier than refusing to boot: the gateway comes up,
+    // the admin page is reachable, and the rest is added there.
+    let path = config_path();
+    if !path.exists() {
+        let starter = GatewayConfig::starter();
+        starter.save(&path)?;
+        log::info!("wrote a starting config to {}", path.display());
+    }
+    let cfg = GatewayConfig::load(&path).inspect_err(|err| {
+        log::error!("cannot read {}: {err}", path.display());
     })?;
     let bind = cfg.bind.clone();
     let db = Db::open(&cfg.db_path).map_err(std::io::Error::other)?;

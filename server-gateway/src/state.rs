@@ -40,6 +40,9 @@ pub struct AppState {
     /// sealed frames between them and can read none of it: the key that opens
     /// a frame never leaves the devices that were paired.
     pub rooms: Arc<Mutex<HashMap<String, RoomChannel>>>,
+    /// Admission control: how many upstream calls run at once, and who is
+    /// waiting for a turn.
+    pub queue: Arc<crate::queue::Queue>,
 }
 
 impl AppState {
@@ -48,6 +51,12 @@ impl AppState {
         // for what belongs to the box itself — the port, the database path,
         // the public key licences are checked against.
         Registry::seed_if_empty(&db, &cfg)?;
+        let limits = (
+            cfg.max_inflight,
+            cfg.max_per_license,
+            cfg.max_queued,
+            cfg.queue_wait_seconds,
+        );
         let registry = Registry::load(&db, None)?;
         let verifier = public_key_from_base64(&cfg.license_public_key);
         Ok(AppState {
@@ -58,6 +67,12 @@ impl AppState {
             verifier,
             admin_token: std::env::var("VD_ADMIN_TOKEN").unwrap_or_default(),
             rooms: Arc::new(Mutex::new(HashMap::new())),
+            queue: Arc::new(crate::queue::Queue::new(crate::queue::Limits {
+                inflight: limits.0,
+                per_license: limits.1,
+                queued: limits.2,
+                wait: std::time::Duration::from_secs(limits.3),
+            })),
         })
     }
 

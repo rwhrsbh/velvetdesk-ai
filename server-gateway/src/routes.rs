@@ -49,6 +49,12 @@ pub enum ApiError {
     BadRequest(String),
     OutOfCredits(Allowance),
     Upstream(String),
+    /// The gateway is full. Not the caller's fault and not permanent, so it
+    /// travels as 503 with a Retry-After rather than as a failure.
+    Busy {
+        message: String,
+        retry_after: u64,
+    },
 }
 
 impl IntoResponse for ApiError {
@@ -84,6 +90,23 @@ impl IntoResponse for ApiError {
                 StatusCode::BAD_GATEWAY,
                 json!({ "error": { "type": "upstream", "message": message } }),
             ),
+            ApiError::Busy {
+                message,
+                retry_after,
+            } => {
+                let body = json!({
+                    "error": {
+                        "type": "overloaded",
+                        "message": message,
+                        "retry_after": retry_after,
+                    }
+                });
+                let mut response = (StatusCode::SERVICE_UNAVAILABLE, Json(body)).into_response();
+                if let Ok(value) = HeaderValue::from_str(&retry_after.to_string()) {
+                    response.headers_mut().insert("retry-after", value);
+                }
+                return response;
+            }
         };
         (status, Json(body)).into_response()
     }
@@ -143,6 +166,22 @@ fn authenticate(
     }
     let tier = state.registry.read().tier(&license.tier);
     Ok(Caller { license, tier })
+}
+
+/// Wait for a slot in the gateway, or turn the caller away politely.
+///
+/// Every call that costs an upstream request passes through here, so a burst
+/// of operators becomes a queue instead of a wall of refusals from the
+/// provider behind it.
+async fn admit(state: &AppState, license_id: &str) -> Result<crate::queue::Slot, ApiError> {
+    state
+        .queue
+        .admit(license_id)
+        .await
+        .map_err(|rejected| ApiError::Busy {
+            message: rejected.message().to_string(),
+            retry_after: state.queue.retry_after(),
+        })
 }
 
 fn now() -> i64 {
@@ -256,6 +295,8 @@ async fn chat_completions(
         return Err(ApiError::OutOfCredits(before));
     }
 
+    let slot = admit(&state, &caller.license.license_id).await?;
+
     let request: translate::OaiRequest = serde_json::from_value(body)
         .map_err(|err| ApiError::BadRequest(format!("cannot read the request: {err}")))?;
     let wanted = request.model.clone();
@@ -270,6 +311,7 @@ async fn chat_completions(
             .await
             .map_err(|err| ApiError::Upstream(err.to_string()))?;
         let after = charge_for(&state, &caller, &model, &response)?;
+        drop(slot);
         let body = translate::oai_completion(&id, created, &model, &response);
         return Ok((credit_headers(&after), Json(body)).into_response());
     }
@@ -280,6 +322,9 @@ async fn chat_completions(
     let tier = caller.tier;
     tokio::spawn(async move {
         let sender = tx.clone();
+        // The slot belongs to the call, not to the handler that started
+        // it: a streamed answer occupies the gateway until its last token.
+        let _slot = slot;
         let chunk_id = id.clone();
         let chunk_model = wanted.clone();
         // Every piece of text goes out the moment it arrives: the operator
@@ -376,6 +421,8 @@ async fn transcriptions(
         )));
     }
 
+    let _slot = admit(&state, &caller.license.license_id).await?;
+
     use base64::Engine;
     let encoded = base64::engine::general_purpose::STANDARD.encode(&clip);
     let (model, price, text) = state
@@ -406,6 +453,8 @@ async fn gemini_generate(
         return Err(ApiError::OutOfCredits(before));
     }
 
+    let slot = admit(&state, &caller.license.license_id).await?;
+
     // `gemini-2.5-flash:streamGenerateContent` — the model, then the verb.
     let (wanted, action) = tail
         .split_once(':')
@@ -419,6 +468,7 @@ async fn gemini_generate(
             .call(&wanted, &chat, &|_| {})
             .await
             .map_err(|err| ApiError::Upstream(err.to_string()))?;
+        drop(slot);
         let after = charge_for(&state, &caller, &model, &response)?;
         let body = translate::gemini_response(&model, &response);
         return Ok((credit_headers(&after), Json(body)).into_response());
