@@ -130,6 +130,7 @@ const ru: Dict = {
   "sec.safe.hint": "Записи сразу, удаления — с подтверждением",
   "sec.full.hint": "Без подтверждений",
 
+  "nav.menu": "Меню",
   "nav.pending": "Очередь подтверждений",
   "nav.master": "Мастер-агент и глобальный поиск",
   "nav.doctor": "Доктор: проверка данных",
@@ -814,6 +815,7 @@ const en: Dict = {
   "sec.safe.hint": "Writes apply, deletions need confirmation",
   "sec.full.hint": "No confirmations",
 
+  "nav.menu": "Menu",
   "nav.pending": "Approval queue",
   "nav.master": "Master agent and global search",
   "nav.doctor": "Doctor: data integrity",

@@ -1370,6 +1370,25 @@ function bindTopbar() {
     });
   });
 
+  // Everything the row of icons does, for a window with no room for the row.
+  // The entries press the buttons themselves rather than repeating what each
+  // of them is bound to, so the two can never drift apart.
+  const burger = $("btnMenu");
+  burger.addEventListener("click", () => {
+    const waiting = store.pending.length;
+    const entries: MenuEntry[] = [
+      { id: "btnPending", label: waiting ? `${t("nav.pending")} · ${waiting}` : t("nav.pending") },
+      { id: "btnMaster", label: t("nav.master") },
+      { id: "btnDoctor", label: t("nav.doctor") },
+      { id: "btnTemporary", label: t("topbar.temporary") },
+      { id: "btnGuide", label: t("nav.guide") },
+      { id: "btnLang", label: t("nav.lang") },
+      { id: "btnKeys", label: t("nav.keys") },
+    ].map((item) => ({ label: item.label, onSelect: () => $(item.id).click() }));
+    const box = burger.getBoundingClientRect();
+    openContextMenu(box.right - 8, box.bottom + 6, entries);
+  });
+
   // The narrow-window versions of the same two choices.
   const modeSelect = $("modeSelect") as HTMLSelectElement;
   modeSelect.addEventListener("change", () => {
@@ -1545,33 +1564,68 @@ function bindReordering(listId: string, attribute: "profile" | "man", save: (ids
   /** The folder under the pointer, when the card is over one. */
   let overFolder: string | null = null;
 
-  // Where everything was when the drag began, or when the list last changed.
+  // The list as it stood when the drag began.
   //
-  // Measuring the list is the expensive part of this: asking an element for
-  // its position forces the browser to work out the layout, and doing that
-  // for forty cards on every mouse event — a hundred times a second — is how
-  // moving one card came to cost a fifth of a core. The positions only change
-  // when the card is actually moved, so they are measured then and reused.
-  type Spot = { el: HTMLElement; top: number; middle: number; bottom: number; folder: string | null };
+  // Nothing in it is moved while the card is being carried: the gap is opened
+  // by sliding the neighbours with a transform, which the compositor does on
+  // its own without the page being laid out again. Moving cards in the list
+  // instead — which is what this used to do — made the browser measure every
+  // card afresh several times a second, and that was most of the cost.
+  type Spot = { el: HTMLElement; middle: number; shifted: number };
   let spots: Spot[] = [];
+  /** Folder headings: a card dropped on one goes in rather than beside it. */
+  type Head = { el: HTMLElement; top: number; bottom: number; folder: string };
+  let heads: Head[] = [];
+  /** Where the held card came from, and how far one place is. */
+  let from = 0;
+  let slot = 0;
+  /** Where it would land, counted in the list with the held card taken out. */
+  let landing = 0;
 
   let frame = 0;
   let pointerY = 0;
   let pointerX = 0;
 
-  const cards = () => Array.from(list.querySelectorAll<HTMLElement>(`[data-${attribute}]`));
-
   function measure() {
     spots = [];
+    heads = [];
     for (const el of list.querySelectorAll<HTMLElement>(`[data-${attribute}], .folder-head`)) {
       const box = el.getBoundingClientRect();
-      spots.push({
-        el,
-        top: box.top,
-        middle: box.top + box.height / 2,
-        bottom: box.bottom,
-        folder: el.classList.contains("folder-head") ? (el.dataset.folder ?? "") : null,
-      });
+      if (el.classList.contains("folder-head")) {
+        heads.push({ el, top: box.top, bottom: box.bottom, folder: el.dataset.folder ?? "" });
+        continue;
+      }
+      spots.push({ el, middle: box.top + box.height / 2, shifted: 0 });
+    }
+    from = spots.findIndex((spot) => spot.el === card);
+    // One place is the distance between two neighbours' middles — the card's
+    // own height plus whatever sits between them.
+    const held = spots[from];
+    const after = spots[from + 1];
+    const before = spots[from - 1];
+    slot = after
+      ? after.middle - held.middle
+      : before
+        ? held.middle - before.middle
+        : card!.getBoundingClientRect().height;
+    landing = from;
+  }
+
+  /** Open the gap at `target`, sliding only the cards that have to move. */
+  function place(target: number) {
+    if (target === landing) return;
+    landing = target;
+    for (let i = 0; i < spots.length; i += 1) {
+      if (i === from) continue;
+      const spot = spots[i];
+      // Where this card sits once the held one is lifted out of the list.
+      const without = i < from ? i : i - 1;
+      let shift = 0;
+      if (i > from && without < target) shift = -slot;
+      else if (i < from && without >= target) shift = slot;
+      if (shift === spot.shifted) continue;
+      spot.shifted = shift;
+      spot.el.style.transform = shift === 0 ? "" : `translate3d(0, ${shift}px, 0)`;
     }
   }
 
@@ -1584,10 +1638,11 @@ function bindReordering(listId: string, attribute: "profile" | "man", save: (ids
     card = null;
     moved = false;
     overFolder = null;
+    for (const spot of spots) spot.el.style.transform = "";
+    for (const head of heads) head.el.classList.remove("taking");
     spots = [];
-    for (const head of list.querySelectorAll<HTMLElement>(".folder-head.taking")) {
-      head.classList.remove("taking");
-    }
+    heads = [];
+    list.classList.remove("reordering");
     setDragging(false);
   };
 
@@ -1603,36 +1658,24 @@ function bindReordering(listId: string, attribute: "profile" | "man", save: (ids
     }
 
     let folder: string | null = null;
-    let before: HTMLElement | null = null;
-    for (const spot of spots) {
-      if (spot.el === card) continue;
-      if (spot.folder !== null) {
-        if (pointerY >= spot.top && pointerY <= spot.bottom) folder = spot.folder;
-        continue;
-      }
-      if (before === null && pointerY < spot.middle) before = spot.el;
+    for (const head of heads) {
+      if (pointerY >= head.top && pointerY <= head.bottom) folder = head.folder;
     }
-
     if (folder !== overFolder) {
-      for (const head of list.querySelectorAll<HTMLElement>(".folder-head.taking")) {
-        head.classList.remove("taking");
-      }
-      if (folder !== null) {
-        const head = spots.find((spot) => spot.folder === folder)?.el;
-        head?.classList.add("taking");
-      }
+      for (const head of heads) head.el.classList.toggle("taking", head.folder === folder);
       overFolder = folder;
+      // Over a folder the card is going in, not between: the gap closes.
+      if (folder !== null) place(from);
     }
     if (folder !== null) return;
 
-    // Nothing to do unless the gap has actually moved: the list is only
-    // touched when the card changes places, not on every frame.
-    const next = before ?? null;
-    const now = card.nextElementSibling;
-    if (next === now || (next === null && now === null)) return;
-    if (next) list.insertBefore(card, next);
-    else list.appendChild(card);
-    measure();
+    // Counted against where the cards started, not where they are now: the
+    // answer then does not depend on the gap it is deciding.
+    let target = 0;
+    for (let i = 0; i < spots.length; i += 1) {
+      if (i !== from && spots[i].middle < pointerY) target += 1;
+    }
+    place(target);
   }
 
   list.addEventListener("pointerdown", (event) => {
@@ -1671,6 +1714,7 @@ function bindReordering(listId: string, attribute: "profile" | "man", save: (ids
       ghost.style.width = `${box.width}px`;
       document.body.appendChild(ghost);
       card.classList.add("dragging");
+      list.classList.add("reordering");
       list.setPointerCapture?.(event.pointerId);
       measure();
     }
@@ -1684,12 +1728,15 @@ function bindReordering(listId: string, attribute: "profile" | "man", save: (ids
 
   const finish = () => {
     if (!card) return;
+    const held = card;
     const wasDragged = moved;
-    const dropped = card.dataset[attribute] ?? "";
+    const dropped = held.dataset[attribute] ?? "";
     const folder = overFolder;
-    const ids = cards()
-      .map((item) => item.dataset[attribute] ?? "")
-      .filter(Boolean);
+    const target = landing;
+    const startedAt = from;
+    const others = spots.filter((spot) => spot.el !== held);
+    const ids = others.map((spot) => spot.el.dataset[attribute] ?? "").filter(Boolean);
+    const before = others[target]?.el ?? null;
     cleanUp();
     if (!wasDragged) return;
     // The click that follows the release belongs to the drag, not to the
@@ -1699,14 +1746,21 @@ function bindReordering(listId: string, attribute: "profile" | "man", save: (ids
       file(attribute, dropped, folder);
       return;
     }
+    if (target === startedAt || !dropped) return;
+    // The list is put in its new order once, here, rather than on every frame
+    // of the drag — and before the save, so nothing jumps back while the
+    // gateway is answering.
+    if (before) list.insertBefore(held, before);
+    else list.appendChild(held);
+    ids.splice(target, 0, dropped);
     save(ids);
   };
 
-  window.addEventListener("pointerup", finish, { passive: true });
+  window.addEventListener("pointerup", finish);
   // A drag interrupted — the window lost focus, the pointer was cancelled —
   // leaves the list as it stands rather than snapping back, and saves it:
   // what is on screen is what the operator arranged.
-  window.addEventListener("pointercancel", finish, { passive: true });
+  window.addEventListener("pointercancel", finish);
 }
 
 function bindPanels() {

@@ -1,4 +1,5 @@
 import { $, avatarHtml, escapeHtml, formatDate } from "./dom";
+import { syncSelect } from "./dropdown";
 import { contactWord, keyWord, t } from "./i18n";
 import {
   activeMan,
@@ -49,16 +50,26 @@ export function renderTopbar() {
     dot.className = "dot off";
   }
 
-  const count = $("pendingCount");
-  count.textContent = String(store.pending.length);
-  count.className = store.pending.length ? "count" : "count zero";
+  // Both the shield and the menu that replaces it on a narrow window carry
+  // the number waiting: whichever of the two is on screen, it is the same one.
+  for (const id of ["pendingCount", "menuCount"]) {
+    const count = $(id);
+    count.textContent = String(store.pending.length);
+    count.className = store.pending.length ? "count" : "count zero";
+  }
 
   // Whichever control the operator used, both show the same thing afterwards.
+  // The select is dressed in a button of ours, and that button only redraws
+  // when told to: assigning `.value` fires nothing.
   const modeSelect = document.getElementById("modeSelect") as HTMLSelectElement | null;
-  if (modeSelect && modeSelect.value !== store.mode) modeSelect.value = store.mode;
+  if (modeSelect && modeSelect.value !== store.mode) {
+    modeSelect.value = store.mode;
+    syncSelect(modeSelect);
+  }
   const securitySelect = document.getElementById("securitySelect") as HTMLSelectElement | null;
   if (securitySelect && securitySelect.value !== store.security) {
     securitySelect.value = store.security;
+    syncSelect(securitySelect);
   }
 
   document.querySelectorAll<HTMLButtonElement>("#modeControl .segmented-btn").forEach((btn) => {

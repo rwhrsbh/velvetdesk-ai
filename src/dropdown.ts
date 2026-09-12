@@ -28,6 +28,12 @@ export function dressSelect(select: HTMLSelectElement) {
   button.className = "btn btn-secondary select-button";
   const title = select.getAttribute("title");
   if (title) button.title = title;
+  // The select itself is hidden from here on: any class that decides whether
+  // the control is on screen has to travel to the button that replaced it,
+  // or a rule meant to hide it would hide nothing.
+  for (const name of select.classList) {
+    if (name.startsWith("topbar-")) button.classList.add(name);
+  }
   // The label is read from the option, which is where translation lands.
   select.after(button);
   select.classList.add("dressed");
@@ -140,7 +146,14 @@ export function dressCombo(input: HTMLInputElement, options: readonly string[]) 
 }
 
 /** Put the chosen option's words on the button. */
-function syncSelect(select: HTMLSelectElement) {
+/**
+ * Put on the button whatever the select now holds.
+ *
+ * Exported because setting `select.value` from code fires no `change` event,
+ * and the button is what the operator reads: without this the security level
+ * could be "full" while the button still said "ask".
+ */
+export function syncSelect(select: HTMLSelectElement) {
   const button = dressed.get(select);
   if (!button) return;
   const chosen = select.options[select.selectedIndex];

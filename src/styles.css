@@ -673,6 +673,12 @@ input[type="range"] {
 }
 
 /* The gap the card left behind: still in the list, holding its place. */
+/* While a card is being carried its neighbours are moved by transform only,
+   so the slide costs the compositor a frame and the page no layout at all. */
+.reordering .row-card {
+  transition: transform 0.12s ease;
+}
+
 .row-card.dragging {
   opacity: 0.35;
   cursor: grabbing;
@@ -2346,13 +2352,58 @@ details.advanced[open] {
   color: var(--accent);
 }
 
-/* Wide enough for the rows of buttons: the dropdowns stay out of the way. */
-.topbar-compact {
+/* Wide enough for the icons: the menu that stands in for them is hidden. */
+.topbar-burger {
+  display: none;
+}
+
+/* A window this narrow — a phone, or the app squeezed into a corner — cannot
+   hold seven icons, a title and two dropdowns on one line: they used to sit on
+   top of one another. The icons move into the menu, the title gives up its
+   text, and what is left fits. */
+@media (max-width: 760px) {
+  .topbar-right > .icon-btn:not(.topbar-burger) {
+    display: none;
+  }
+
+  .topbar-burger {
+    display: inline-flex;
+  }
+
+  .app-title span,
+  .app-title-text {
+    display: none;
+  }
+
+  .topbar {
+    gap: 6px;
+    padding: 0 8px;
+  }
+
+  /* A flex item will not shrink below its content unless it is allowed to,
+     which is why these used to run over one another instead of narrowing. */
+  .topbar-left,
+  .topbar-center {
+    min-width: 0;
+  }
+
+  .topbar-left .status-chip {
+    max-width: 96px;
+  }
+
+  .topbar-center .topbar-compact {
+    max-width: 104px;
+  }
+}
+
+/* Wide enough for the rows of buttons: the dropdowns stay out of the way.
+   Named through the bar so the rule outranks the one that makes every dressed
+   select's button a flex box. */
+.topbar-center .topbar-compact {
   display: none;
   width: auto;
   max-width: 150px;
   font-size: 12px;
-  padding: 4px 8px;
 }
 
 /* Not wide enough. The buttons wrapped onto a second line here and landed on
@@ -2364,8 +2415,11 @@ details.advanced[open] {
     display: none;
   }
 
-  .topbar-compact {
-    display: block;
+  /* The button, not the select behind it: naming the select here would out-rank
+     the rule that hides a dressed one and put the platform's own control back
+     on the screen next to ours. */
+  .topbar-center button.topbar-compact {
+    display: inline-flex;
   }
 }
 
