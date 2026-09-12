@@ -45,6 +45,7 @@ pub fn router() -> Router<AppState> {
         .route("/admin/upstreams/{id}/catalog", get(catalog))
         .route("/admin/licenses/{id}/devices", get(list_devices))
         .route("/admin/licenses/{id}/mailbox", delete(clear_mailbox))
+        .route("/admin/licenses/{id}/credits", post(add_credits))
         .route(
             "/admin/licenses/{id}/devices/{device}",
             delete(forget_device),
@@ -445,6 +446,44 @@ async fn forget_device(
     admin(&state, &headers)?;
     state.db.forget_device(&id, &device)?;
     Ok(Json(json!({ "released": device })))
+}
+
+#[derive(Deserialize)]
+struct CreditsBody {
+    /// Credits to sell. Negative takes them back — a refund, or a mistake
+    /// being undone.
+    credits: f64,
+}
+
+/// Sell credits against a licence key.
+///
+/// These sit outside the plan's windows and none of them is spent while the
+/// included allowance still has room: an operator who tops up on Thursday
+/// keeps what they bought until the week's budget is actually gone.
+async fn add_credits(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<CreditsBody>,
+) -> Result<Json<Value>, ApiError> {
+    admin(&state, &headers)?;
+    if !body.credits.is_finite() || body.credits.abs() > 10_000_000.0 {
+        return Err(ApiError::BadRequest(
+            "that is not a number of credits".into(),
+        ));
+    }
+    let known = state
+        .db
+        .list_licenses()?
+        .into_iter()
+        .any(|row| row.license_id == id);
+    if !known {
+        return Err(ApiError::BadRequest(format!("no licence called {id}")));
+    }
+    let left = state
+        .db
+        .wallet_add(&id, body.credits, crate::registry::now())?;
+    Ok(Json(json!({ "license_id": id, "credits_left": left })))
 }
 
 #[derive(Deserialize)]

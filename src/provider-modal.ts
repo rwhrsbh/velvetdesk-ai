@@ -615,6 +615,9 @@ export async function openKeysModal(deps: ModalDeps) {
         } else if (!status.problem) {
           parts.push(t("keys.cloudOffline"));
         }
+        if ((status.credits_extra ?? 0) > 0) {
+          parts.push(t("keys.cloudExtra", { n: Math.round(status.credits_extra!) }));
+        }
         line.textContent = parts.join(" · ");
       } catch (error) {
         line.textContent = errorText(error);

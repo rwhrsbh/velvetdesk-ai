@@ -334,6 +334,8 @@ export interface CloudStatus {
   /** What the plan allows in each window, for reading the rest as a share. */
   credits_5h: number | null;
   credits_week: number | null;
+  /** Bought on top of the plan; spent only when both windows are empty. */
+  credits_extra: number | null;
   reset_at: number | null;
 }
 

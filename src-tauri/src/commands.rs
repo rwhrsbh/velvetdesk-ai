@@ -1065,6 +1065,8 @@ pub struct CloudStatus {
     /// share of it rather than as a bare number.
     pub credits_5h: Option<f64>,
     pub credits_week: Option<f64>,
+    /// Credits bought on top of the plan, spent only once the windows empty.
+    pub credits_extra: Option<f64>,
     pub reset_at: Option<i64>,
 }
 
@@ -1263,6 +1265,7 @@ pub async fn cloud_status(state: State<'_, AppState>) -> Result<CloudStatus> {
         credits_left_week: None,
         credits_5h: None,
         credits_week: None,
+        credits_extra: None,
         reset_at: None,
     };
 
@@ -1343,6 +1346,7 @@ pub async fn cloud_status(state: State<'_, AppState>) -> Result<CloudStatus> {
     status.credits_left_week = body.get("credits_left_week").and_then(Value::as_f64);
     status.credits_5h = body.get("credits_5h").and_then(Value::as_f64);
     status.credits_week = body.get("credits_week").and_then(Value::as_f64);
+    status.credits_extra = body.get("credits_extra").and_then(Value::as_f64);
     status.reset_at = body.get("reset_at").and_then(Value::as_i64);
     if status.license_id.is_empty() {
         status.license_id = body

@@ -84,7 +84,7 @@ impl IntoResponse for ApiError {
                     "error": {
                         "type": "rate_limit",
                         "reason": "window",
-                        "message": "the licence has spent its credits for this window",
+                        "message": "this licence has spent its credits for now —                                     wait for the window to reopen, or buy more",
                         "reset_at": state.reset_at,
                         "credits_left": state.left(),
                     }
@@ -392,6 +392,9 @@ async fn usage(
         // nobody can place: 5988 credits means nothing without the 6000.
         "credits_5h": caller.tier.credits_5h,
         "credits_week": caller.tier.credits_week,
+        // Bought on top of the plan, and spent only once the plan's windows
+        // are empty.
+        "credits_extra": state_now.wallet,
         "reset_at": state_now.reset_at,
     })))
 }
@@ -950,6 +953,7 @@ mod tests {
         let state = Allowance {
             left_5h: 12.5,
             left_week: 900.0,
+            wallet: 0.0,
             reset_at: 1_700_000_000,
         };
         let map = credit_headers(&state);

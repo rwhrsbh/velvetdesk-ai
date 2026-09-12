@@ -199,25 +199,40 @@ impl GatewayConfig {
             upstreams: vec![],
             // What is sold, as of now: pro is $10 a month for two people on
             // two machines, business is $150 a month or $1000 a year for a
-            // team of ten. A credit is a tenth of a cent of cost, so the
-            // budgets below are what each plan may spend before it stops
-            // paying for itself — 20 000 credits is $20 of upstream calls
-            // against a $10 subscription, which is the shape of a plan whose
-            // users mostly do not run it flat out.
+            // team of ten.
+            //
+            // A credit is a tenth of a cent of upstream cost, so a weekly
+            // budget is a monthly bill divided by 4.33 and multiplied by a
+            // thousand. These numbers are chosen so that a subscription is
+            // still profitable when it is used to the limit, which is the
+            // only case worth planning for:
+            //
+            //   pro       1 500/week = $1.50 = $6.50 a month against $10
+            //   business 20 000/week = $20   = $87   a month against $150
+            //
+            // Business is the better deal per seat — 2 000 credits a week
+            // each against pro's 750 — which is the point: a pair who work
+            // properly outgrow pro and move up rather than quietly costing
+            // more than they pay.
+            //
+            // The five-hour window is deliberately loose compared with the
+            // week. It exists to stop one runaway loop emptying a month in
+            // an afternoon, not to pace anybody's shift; the week is the
+            // real ceiling.
             tiers: HashMap::from([
                 (
                     "pro".to_string(),
                     Tier {
-                        credits_5h: 1_200.0,
-                        credits_week: 20_000.0,
+                        credits_5h: 400.0,
+                        credits_week: 1_500.0,
                         max_peers: 2,
                     },
                 ),
                 (
                     "business".to_string(),
                     Tier {
-                        credits_5h: 6_000.0,
-                        credits_week: 120_000.0,
+                        credits_5h: 5_000.0,
+                        credits_week: 20_000.0,
                         max_peers: 10,
                     },
                 ),

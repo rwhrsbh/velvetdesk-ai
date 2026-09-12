@@ -107,8 +107,12 @@ pub fn cloud_base_url() -> String {
     CLOUD_BASE_URL.trim().trim_end_matches('/').to_string()
 }
 
-/// Model calls a free copy may make in a day.
-pub const FREE_REQUESTS_PER_DAY: u32 = 100;
+/// Actions a free copy may take in a day.
+///
+/// An action, not a model call: one reply is one, however many turns of
+/// tools it needed. Thirty is a morning's work — enough to see what the app
+/// does with a real correspondence, and short of a shift.
+pub const FREE_REQUESTS_PER_DAY: u32 = 30;
 /// Profiles a free copy may hold.
 pub const FREE_PROFILES: usize = 10;
 /// Men per profile a free copy may hold.

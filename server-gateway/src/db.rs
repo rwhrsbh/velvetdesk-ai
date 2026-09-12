@@ -128,6 +128,20 @@ impl Db {
                  issued_at INTEGER NOT NULL,
                  note TEXT NOT NULL DEFAULT ''
              );
+             -- Credits bought on top of a plan.
+             --
+             -- A plan's windows refill on their own; this does not. It is
+             -- what an operator buys on the Thursday their week runs out,
+             -- and it waits until a window is actually empty before any of
+             -- it is spent — nobody should burn a purchase while their
+             -- included allowance still has room in it.
+             CREATE TABLE IF NOT EXISTS wallet (
+                 license_id TEXT PRIMARY KEY,
+                 credits REAL NOT NULL DEFAULT 0,
+                 spent REAL NOT NULL DEFAULT 0,
+                 updated_at INTEGER NOT NULL DEFAULT 0
+             );
+
              -- Sealed records waiting for whoever has not collected them.
              --
              -- Two devices that are never online at the same time can still
@@ -252,6 +266,52 @@ impl Db {
             )
             .optional()?;
         Ok(found.filter(|peers| *peers > 0).map(|peers| peers as u32))
+    }
+
+    // --------------------------------------------------------------- wallet
+
+    /// Sell credits to a licence. Negative takes them back.
+    pub fn wallet_add(&self, license_id: &str, credits: f64, now: i64) -> rusqlite::Result<f64> {
+        self.conn.lock().execute(
+            "INSERT INTO wallet (license_id, credits, spent, updated_at)
+             VALUES (?1, ?2, 0, ?3)
+             ON CONFLICT(license_id) DO UPDATE SET
+                 credits = MAX(0, wallet.credits + excluded.credits),
+                 updated_at = excluded.updated_at",
+            rusqlite::params![license_id, credits, now],
+        )?;
+        self.wallet_left(license_id)
+    }
+
+    /// What is left of what was bought.
+    pub fn wallet_left(&self, license_id: &str) -> rusqlite::Result<f64> {
+        let left: Option<f64> = self
+            .conn
+            .lock()
+            .query_row(
+                "SELECT MAX(0, credits - spent) FROM wallet WHERE license_id = ?1",
+                [license_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(left.unwrap_or(0.0))
+    }
+
+    /// Take credits out of the wallet, and say how many were actually there.
+    ///
+    /// Spending more than was bought is not an error to refuse — the answer
+    /// has already been produced by then — so the wallet empties and the
+    /// difference is simply not covered.
+    pub fn wallet_spend(&self, license_id: &str, credits: f64, now: i64) -> rusqlite::Result<f64> {
+        let available = self.wallet_left(license_id)?;
+        let taken = credits.min(available).max(0.0);
+        if taken > 0.0 {
+            self.conn.lock().execute(
+                "UPDATE wallet SET spent = spent + ?2, updated_at = ?3 WHERE license_id = ?1",
+                rusqlite::params![license_id, taken, now],
+            )?;
+        }
+        Ok(taken)
     }
 
     // -------------------------------------------------------------- mailbox

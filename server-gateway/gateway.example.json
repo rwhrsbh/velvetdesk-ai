@@ -4,9 +4,8 @@
   "license_public_key": "PUT THE KEYGEN OUTPUT HERE",
   "credit_usd": 0.001,
   "tiers": {
-    "solo": { "credits_5h": 300, "credits_week": 4000, "max_peers": 1 },
-    "pro": { "credits_5h": 1200, "credits_week": 20000, "max_peers": 2 },
-    "business": { "credits_5h": 6000, "credits_week": 120000, "max_peers": 10 }
+    "pro": { "credits_5h": 400, "credits_week": 1500, "max_peers": 2 },
+    "business": { "credits_5h": 5000, "credits_week": 20000, "max_peers": 10 }
   },
   "upstreams": [
     {

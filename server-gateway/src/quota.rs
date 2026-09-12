@@ -64,6 +64,9 @@ pub fn charge_flat(
     credits: f64,
     now: i64,
 ) -> rusqlite::Result<Allowance> {
+    if allowance(db, license_id, tier, now)?.on_the_wallet() && credits > 0.0 {
+        db.wallet_spend(license_id, credits, now)?;
+    }
     db.record(
         &crate::db::Spend {
             license_id: license_id.to_string(),
@@ -81,14 +84,23 @@ pub fn charge_flat(
 pub struct Allowance {
     pub left_5h: f64,
     pub left_week: f64,
+    /// Credits bought on top of the plan, which no window refills.
+    pub wallet: f64,
     /// Unix seconds at which the exhausted window first has room. Zero when
     /// nothing is exhausted.
     pub reset_at: i64,
 }
 
 impl Allowance {
+    /// Nothing left in either window, and nothing bought to cover it.
     pub fn exhausted(&self) -> bool {
-        self.left_5h <= 0.0 || self.left_week <= 0.0
+        (self.left_5h <= 0.0 || self.left_week <= 0.0) && self.wallet <= 0.0
+    }
+
+    /// True when the next answer comes out of what was bought rather than
+    /// out of the plan.
+    pub fn on_the_wallet(&self) -> bool {
+        (self.left_5h <= 0.0 || self.left_week <= 0.0) && self.wallet > 0.0
     }
 
     /// What the client gets to show the operator: the tighter of the two.
@@ -125,6 +137,7 @@ pub fn allowance(db: &Db, license_id: &str, tier: Tier, now: i64) -> rusqlite::R
     Ok(Allowance {
         left_5h,
         left_week,
+        wallet: db.wallet_left(license_id)?,
         reset_at,
     })
 }
@@ -151,11 +164,20 @@ pub struct Bill<'a> {
 }
 
 /// Record what an answer cost, and say what is left after it.
+///
+/// An answer produced while the plan's windows were already empty is paid
+/// for out of the wallet — credits the operator bought for exactly this. The
+/// spend is recorded either way, so the reports show the whole picture; the
+/// wallet only decides who covered it.
 pub fn charge(db: &Db, bill: &Bill<'_>) -> rusqlite::Result<Allowance> {
     let spent = bill
         .priced
         .map(|model| credits(model, bill.usage, bill.credit_usd))
         .unwrap_or(0.0);
+    let before = allowance(db, bill.license_id, bill.tier, bill.now)?;
+    if before.on_the_wallet() && spent > 0.0 {
+        db.wallet_spend(bill.license_id, spent, bill.now)?;
+    }
     db.record(
         &crate::db::Spend {
             license_id: bill.license_id.to_string(),
@@ -171,6 +193,36 @@ pub fn charge(db: &Db, bill: &Bill<'_>) -> rusqlite::Result<Allowance> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A plan that is spent is not the end of it when credits were bought:
+    /// the request goes through and the wallet pays for it.
+    #[test]
+    fn a_bought_credit_covers_a_spent_window() {
+        let empty = Allowance {
+            left_5h: 0.0,
+            left_week: -3.0,
+            wallet: 250.0,
+            reset_at: 1,
+        };
+        assert!(!empty.exhausted(), "credits were bought for exactly this");
+        assert!(empty.on_the_wallet());
+
+        let nothing_left = Allowance {
+            wallet: 0.0,
+            ..empty
+        };
+        assert!(nothing_left.exhausted());
+        assert!(!nothing_left.on_the_wallet());
+
+        // With room in the plan, a purchase waits its turn.
+        let plenty = Allowance {
+            left_5h: 100.0,
+            left_week: 900.0,
+            wallet: 250.0,
+            reset_at: 0,
+        };
+        assert!(!plenty.on_the_wallet());
+    }
 
     /// A real price beats a remembered one.
     #[test]

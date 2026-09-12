@@ -730,6 +730,7 @@
                 <td style="text-align:right" class="row" style="justify-content:flex-end">
                   <button class="ghost" data-devices="${esc(row.license_id)}">устройства</button>
                   <button class="ghost" data-mailbox="${esc(row.license_id)}">очистить обмен</button>
+                  <button class="ghost" data-credits="${esc(row.license_id)}">+ кредиты</button>
                   <button class="ghost ${row.revoked ? "" : "danger"}" data-revoke="${esc(row.license_id)}" data-on="${row.revoked}">
                     ${row.revoked ? "вернуть" : "отозвать"}
                   </button>
@@ -816,6 +817,25 @@
         // Everything in a mailbox is sealed and unreadable here; clearing it
         // reclaims the space and makes every device start the exchange again
         // from what it holds locally.
+        // Credits sold on top of a plan. They sit outside the windows and
+        // are spent only once the included allowance is gone.
+        document.querySelectorAll("[data-credits]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            const id = button.dataset.credits;
+            const typed = prompt(`Сколько кредитов добавить лицензии ${id}? (минус — списать)`, "1000");
+            if (typed === null) return;
+            try {
+              const out = await call(`/admin/licenses/${encodeURIComponent(id)}/credits`, {
+                method: "POST",
+                body: JSON.stringify({ credits: num(typed) }),
+              });
+              toast(`Докуплено. Остаток сверх тарифа: ${Math.round(out.credits_left)}`);
+            } catch (error) {
+              toast(error.message, true);
+            }
+          });
+        });
+
         document.querySelectorAll("[data-mailbox]").forEach((button) => {
           button.addEventListener("click", async () => {
             const id = button.dataset.mailbox;
