@@ -369,7 +369,10 @@ export async function openKeysModal(deps: ModalDeps) {
       </div>
 
       <div class="field" ${isLocal ? 'style="display:none"' : ""} id="cloudSpeech">
-        <select class="field-input" id="speechProvider">
+        ${
+          isCloud
+            ? `<div class="hint-inline">${t("keys.voiceThroughCloud")}</div>`
+            : `<select class="field-input" id="speechProvider">
           <option value="">${t("keys.voiceSameProvider")}</option>
           ${settings.providers
             .map(
@@ -395,7 +398,8 @@ export async function openKeysModal(deps: ModalDeps) {
                 }" />`
           }
         </div>
-        <div class="hint-inline">${t("keys.voiceHelp")}</div>
+        <div class="hint-inline">${t("keys.voiceHelp")}</div>`
+        }
       </div>
 
       <div class="field" ${isLocal ? "" : 'style="display:none"'} id="localSpeech">

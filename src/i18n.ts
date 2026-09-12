@@ -15,6 +15,7 @@ const ru: Dict = {
   "license.noGateway": "Шлюз не отвечает: {error}",
   "license.refusedBy": "Шлюз не принял ключ: {message}",
   // ---- подписка и пределы бесплатной версии
+  "keys.voiceThroughCloud": "Диктовка идёт через наш сервер: модель и ключи там же, выбирать нечего. Нужен свой — переключитесь на «На устройстве».",
   "plan.chip": "Free · {left} из {cap}",
   "plan.freeTitle": "Бесплатная версия",
   "plan.freeBadge": "без подписки",
@@ -650,6 +651,7 @@ const en: Dict = {
   "license.noGateway": "The gateway did not answer: {error}",
   "license.refusedBy": "The gateway refused the key: {message}",
   // ---- the subscription, and the edges of the free version
+  "keys.voiceThroughCloud": "Dictation runs through our server: the model and the keys live there, so there is nothing to choose. Want your own — switch to \"On this device\".",
   "plan.chip": "Free · {left} of {cap}",
   "plan.freeTitle": "Free version",
   "plan.freeBadge": "no subscription",

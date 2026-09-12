@@ -1225,10 +1225,15 @@ pub async fn cloud_status(state: State<'_, AppState>) -> Result<CloudStatus> {
         .first()
         .cloned()
         .unwrap_or_default();
-    let base_url = settings
-        .provider(CLOUD_PROVIDER)
-        .map(|p| p.base_url.trim_end_matches('/').to_string())
-        .unwrap_or_default();
+    // Same rule as activation: the build decides where the subscription is,
+    // and a stale address in the settings file does not get a vote.
+    let mut base_url = entitlement::cloud_base_url();
+    if base_url.is_empty() {
+        base_url = settings
+            .provider(CLOUD_PROVIDER)
+            .map(|p| p.base_url.trim_end_matches('/').to_string())
+            .unwrap_or_default();
+    }
 
     let mut status = CloudStatus {
         valid: false,
@@ -1397,12 +1402,18 @@ pub async fn activate_license(
 
 /// Ask the gateway whether this licence is good, and remember what it said.
 async fn confirm_with_gateway(state: &AppState, token: &str) -> Result<()> {
-    let base_url = state
-        .settings
-        .read()
-        .provider(entitlement::CLOUD_PROVIDER)
-        .map(|p| p.base_url.trim_end_matches('/').to_string())
-        .unwrap_or_default();
+    // The settings file may carry an address written by an older build —
+    // including an empty one — so the build's own address is what counts,
+    // and what is on disk is only a fallback for it.
+    let mut base_url = entitlement::cloud_base_url();
+    if base_url.is_empty() {
+        base_url = state
+            .settings
+            .read()
+            .provider(entitlement::CLOUD_PROVIDER)
+            .map(|p| p.base_url.trim_end_matches('/').to_string())
+            .unwrap_or_default();
+    }
     if base_url.is_empty() {
         return Err(AppError::message("license.buildHasNoGateway", json!({})));
     }
