@@ -1061,6 +1061,10 @@ pub struct CloudStatus {
     /// Filled in only when the gateway answered.
     pub credits_left_5h: Option<f64>,
     pub credits_left_week: Option<f64>,
+    /// What the plan allows in each window, so what is left can be read as a
+    /// share of it rather than as a bare number.
+    pub credits_5h: Option<f64>,
+    pub credits_week: Option<f64>,
     pub reset_at: Option<i64>,
 }
 
@@ -1250,6 +1254,8 @@ pub async fn cloud_status(state: State<'_, AppState>) -> Result<CloudStatus> {
         problem: String::new(),
         credits_left_5h: None,
         credits_left_week: None,
+        credits_5h: None,
+        credits_week: None,
         reset_at: None,
     };
 
@@ -1258,29 +1264,20 @@ pub async fn cloud_status(state: State<'_, AppState>) -> Result<CloudStatus> {
         return Ok(status);
     }
 
-    // The key the signature is checked against is baked into the binary, so
-    // there is nothing here for the operator to configure or to get wrong. A
-    // build made without one verifies nothing and says so.
-    let public_key = entitlement::public_key();
-    match vd_license::public_key_from_base64(&public_key) {
-        Some(public_key) => match vd_license::verify(&token, &public_key) {
-            Ok(license) => {
-                let now = chrono::Utc::now().timestamp();
-                status.license_id = license.license_id.clone();
-                status.tier = license.tier.clone();
-                status.expires_at = license.expires_at;
-                status.max_peers = license.max_peers;
-                status.valid = !license.expired_at(now);
-                if !status.valid {
-                    status.problem = "license.expired".into();
-                }
-            }
-            Err(err) => {
-                status.problem = format!("license.invalid:{err}");
-                return Ok(status);
-            }
-        },
-        None => status.problem = "license.noPublicKey".into(),
+    // The signature is checked against the key baked into this binary, and
+    // when there is none — a development build — the gateway's own answer
+    // stands in for it. Reporting "the signature does not match" to somebody
+    // holding a licence the gateway accepts was the worst of both: true
+    // about this build, useless about their subscription.
+    let entitlement = entitlement::read_here(&state.paths, &token);
+    status.license_id = entitlement.license_id.clone();
+    status.tier = entitlement.tier.clone();
+    status.expires_at = entitlement.expires_at;
+    status.max_peers = entitlement.limits.devices;
+    status.valid = entitlement.valid;
+    status.problem = entitlement.problem.clone();
+    if !entitlement.valid && entitlement.problem.starts_with("license.invalid") {
+        return Ok(status);
     }
 
     if base_url.is_empty() {
@@ -1337,6 +1334,8 @@ pub async fn cloud_status(state: State<'_, AppState>) -> Result<CloudStatus> {
     };
     status.credits_left_5h = body.get("credits_left_5h").and_then(Value::as_f64);
     status.credits_left_week = body.get("credits_left_week").and_then(Value::as_f64);
+    status.credits_5h = body.get("credits_5h").and_then(Value::as_f64);
+    status.credits_week = body.get("credits_week").and_then(Value::as_f64);
     status.reset_at = body.get("reset_at").and_then(Value::as_i64);
     if status.license_id.is_empty() {
         status.license_id = body

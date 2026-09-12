@@ -190,6 +190,7 @@ async function selectMan(manId: string | null) {
   renderMen();
   renderScope();
   void refreshContextGauge();
+  void refreshCloudGauge();
 }
 
 async function persistSettings(patch: Partial<Settings>) {
@@ -1031,6 +1032,7 @@ async function dispatchMessage(
     // A run that failed costs nothing, and the count on screen should show
     // that rather than leaving the operator to wonder.
     void refreshPlanChip();
+    void refreshCloudGauge();
   }
 }
 
@@ -1955,6 +1957,44 @@ async function refreshContextGauge() {
 }
 
 /**
+ * What the subscription has left, beside the context gauge.
+ *
+ * The two numbers an operator on a shift actually needs are here rather than
+ * three clicks away: how much of this five hours is left, and how much of the
+ * week. Both are shares — the credit counts underneath them mean nothing
+ * without their ceilings, and the ceilings are a plan detail.
+ */
+async function refreshCloudGauge() {
+  const gauge = $("cloudGauge");
+  const provider = store.settings?.active_provider;
+  if (provider !== "velvetdesk-cloud") {
+    gauge.hidden = true;
+    return;
+  }
+  try {
+    const status = await api.cloudStatus();
+    if (status.credits_left_5h === null || status.credits_left_week === null) {
+      gauge.hidden = true;
+      return;
+    }
+    const share = (left: number, cap: number | null) =>
+      cap && cap > 0 ? Math.max(0, Math.min(100, Math.round((left / cap) * 100))) : null;
+    const five = share(status.credits_left_5h, status.credits_5h);
+    const week = share(status.credits_left_week, status.credits_week);
+    if (five === null || week === null) {
+      gauge.hidden = true;
+      return;
+    }
+    gauge.hidden = false;
+    gauge.classList.toggle("warn", Math.min(five, week) <= 15);
+    $("cloudLabel").textContent = t("composer.cloudLeft", { five, week });
+    gauge.title = t("composer.cloudLeftHint", { five, week });
+  } catch {
+    gauge.hidden = true;
+  }
+}
+
+/**
  * The commands the composer understands, in the order they are offered.
  *
  * One list: what the menu shows, what the search filters, and what /help
@@ -2224,6 +2264,7 @@ async function sendToMaster(
     // A run that failed costs nothing, and the count on screen should show
     // that rather than leaving the operator to wonder.
     void refreshPlanChip();
+    void refreshCloudGauge();
   }
 }
 

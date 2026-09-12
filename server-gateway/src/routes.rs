@@ -384,6 +384,10 @@ async fn usage(
         "devices_used": state.db.device_count(&caller.license.license_id)?,
         "credits_left_5h": state_now.left_5h,
         "credits_left_week": state_now.left_week,
+        // The ceilings, so a client can say "92% left" instead of a number
+        // nobody can place: 5988 credits means nothing without the 6000.
+        "credits_5h": caller.tier.credits_5h,
+        "credits_week": caller.tier.credits_week,
         "reset_at": state_now.reset_at,
     })))
 }

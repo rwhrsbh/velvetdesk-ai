@@ -331,6 +331,9 @@ export interface CloudStatus {
   /** Null when the gateway could not be reached. */
   credits_left_5h: number | null;
   credits_left_week: number | null;
+  /** What the plan allows in each window, for reading the rest as a share. */
+  credits_5h: number | null;
+  credits_week: number | null;
   reset_at: number | null;
 }
 

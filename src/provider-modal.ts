@@ -90,6 +90,17 @@ function watchDownloads() {
 
 let watching = false;
 
+/**
+ * What is left, as a percentage of what the plan allows.
+ *
+ * Falls back to the raw number when the gateway is older than this build and
+ * does not send the ceiling — better a number than a blank.
+ */
+function sharePercent(left: number, cap: number | null): string {
+  if (!cap || cap <= 0) return String(Math.max(0, Math.round(left)));
+  return `${Math.max(0, Math.min(100, Math.round((left / cap) * 100)))}%`;
+}
+
 /** How much of a limited allowance is left, as a bar. */
 function meterBar(used: number, cap: number): string {
   const share = cap > 0 ? Math.min(1, used / cap) : 0;
@@ -594,10 +605,11 @@ export async function openKeysModal(deps: ModalDeps) {
           );
         }
         if (status.credits_left_5h !== null && status.credits_left_week !== null) {
+          // A share, not a count: "5988 credits" places nobody, "100%" does.
           parts.push(
             t("keys.cloudCredits", {
-              n5: Math.max(0, Math.round(status.credits_left_5h)),
-              nw: Math.max(0, Math.round(status.credits_left_week)),
+              n5: sharePercent(status.credits_left_5h, status.credits_5h),
+              nw: sharePercent(status.credits_left_week, status.credits_week),
             }),
           );
         } else if (!status.problem) {
