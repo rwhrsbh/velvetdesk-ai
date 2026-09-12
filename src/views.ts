@@ -408,14 +408,18 @@ export function renderChat() {
       // Ask again, or ask differently: the same pair of buttons every chat
       // interface has, on the operator's own message and on the answer to it.
       // Both rewind to that message — what came after it is being replaced.
+      // Drawn as icons: two words of Russian or English on every message is
+      // a lot of furniture for two things nobody reads twice. The label
+      // survives as the tooltip, so nothing is lost to somebody who has not
+      // seen the icon before.
       const again = entry.transient
         ? ""
-        : `<button data-act="retry" data-entry="${escapeHtml(entry.id)}" title="${escapeHtml(
-            t("chat.retryHint"),
-          )}">${t("chat.retry")}</button>` +
-          `<button data-act="edit" data-entry="${escapeHtml(entry.id)}" title="${escapeHtml(
-            t("chat.editHint"),
-          )}">${t("chat.edit")}</button>`;
+        : `<button class="msg-icon" data-act="retry" data-entry="${escapeHtml(entry.id)}" title="${escapeHtml(
+            `${t("chat.retry")} — ${t("chat.retryHint")}`,
+          )}" aria-label="${escapeHtml(t("chat.retry"))}">${RETRY_ICON}</button>` +
+          `<button class="msg-icon" data-act="edit" data-entry="${escapeHtml(entry.id)}" title="${escapeHtml(
+            `${t("chat.edit")} — ${t("chat.editHint")}`,
+          )}" aria-label="${escapeHtml(t("chat.edit"))}">${PENCIL_ICON}</button>`;
 
       const asked =
         entry.sender === "user" && again
@@ -504,6 +508,18 @@ const FOLD_AT = 1200;
  * on — filing it, copying it — and because a draft that reads as part of the
  * commentary is a draft the operator sends with the commentary still in it.
  */
+/** Circular arrow: ask the model the same thing again. */
+const RETRY_ICON =
+  '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" ' +
+  'stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<path d="M13.5 8a5.5 5.5 0 1 1-1.7-3.97" /><path d="M13.6 2.4v3.2h-3.2" /></svg>';
+
+/** Pencil: send the same thing again, worded differently. */
+const PENCIL_ICON =
+  '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" ' +
+  'stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<path d="M11.2 2.3a1.6 1.6 0 0 1 2.3 2.3L5.4 12.7l-3 .7.7-3z" /><path d="M10.2 3.3l2.3 2.3" /></svg>';
+
 function bubbleText(
   entry: { sender: string; text: string; id: string },
   replyKey?: string,

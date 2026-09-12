@@ -859,6 +859,37 @@ input[type="range"] {
   border-color: var(--text-faint);
 }
 
+/* Retry and edit are icons: small, square, and quiet until the pointer is on
+   them. The words they replaced are in the tooltip. */
+.msg-actions button.msg-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 6px;
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-faint);
+}
+
+.msg-actions button.msg-icon:hover {
+  color: var(--text);
+  background: var(--surface-hi);
+  border-color: var(--line);
+}
+
+.msg.user .msg-actions button.msg-icon {
+  color: rgb(255 255 255 / 0.75);
+}
+
+.msg.user .msg-actions button.msg-icon:hover {
+  color: #fff;
+  background: rgb(255 255 255 / 0.16);
+  border-color: rgb(255 255 255 / 0.28);
+}
+
 /* Retry and edit sit on the operator's own messages, out of the way until the
    pointer is on the one they belong to.
    Hidden means gone, not merely transparent: at opacity alone the row still
