@@ -258,8 +258,20 @@ fn user_content(msg: &LlmMessage) -> Value {
 /// without an explicit breakpoint they cache nothing at all, and the system
 /// prompt with a dossier in it is paid for again on every turn of the shift.
 fn wants_cache_breakpoint(provider: &ProviderConfig) -> bool {
+    if provider.dialect() != "openrouter" {
+        return false;
+    }
     let model = provider.model.to_lowercase();
-    provider.dialect() == "openrouter" && (model.contains("claude") || model.contains("anthropic"))
+    // Most endpoints cache by themselves: send the same opening tokens twice
+    // and the second request is cheaper without anyone asking. Two families
+    // do not, and want the breakpoint spelled out — Anthropic, and Alibaba's
+    // Qwen line (which DeepSeek v3.2 is served under). Marking a model that
+    // caches implicitly costs nothing; failing to mark one of these means
+    // paying full price for the same dossier on every turn.
+    model.contains("claude")
+        || model.contains("anthropic")
+        || model.contains("qwen")
+        || model.contains("deepseek-v3.2")
 }
 
 /// The system prompt, marked as the end of the part worth caching.
@@ -528,6 +540,28 @@ mod tests {
         let system = &body["messages"][0]["content"][0];
         assert_eq!(system["text"], "rules and a dossier");
         assert_eq!(system["cache_control"]["type"], "ephemeral");
+    }
+
+    /// Alibaba's line is the other one that caches nothing on its own: the
+    /// docs put qwen and deepseek-v3.2 on the same explicit footing as
+    /// Anthropic, and without the mark a long dossier is paid for in full on
+    /// every single turn.
+    #[test]
+    fn qwen_through_openrouter_gets_one_too() {
+        for model in [
+            "qwen/qwen3-max",
+            "qwen/qwen3-coder-flash",
+            "deepseek/deepseek-v3.2",
+        ] {
+            let mut p = provider();
+            p.base_url = "https://openrouter.ai/api/v1".into();
+            p.model = model.into();
+            let body = build_body(&p, &ChatRequest::new("rules and a dossier"));
+            assert_eq!(
+                body["messages"][0]["content"][0]["cache_control"]["type"], "ephemeral",
+                "{model} needs to be told where the stable part ends"
+            );
+        }
     }
 
     /// Everyone else caches the head of the prompt by themselves, and a shape
