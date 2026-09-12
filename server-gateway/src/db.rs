@@ -673,6 +673,7 @@ mod tests {
                 completion_tokens: 100,
                 total_tokens: 1100,
                 cached_tokens: 600,
+                upstream_cost: None,
             },
         }
     }

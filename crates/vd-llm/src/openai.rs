@@ -224,11 +224,19 @@ fn read_usage(meta: Option<&Value>) -> Usage {
         .and_then(|d| d.get("cached_tokens"))
         .and_then(|v| v.as_u64())
         .unwrap_or(0) as u32;
+    // What the answer really cost, when the endpoint says so. OpenRouter
+    // reports it on every response; nobody else does, and then this is None
+    // and the gateway falls back to its own prices.
+    let cost = meta
+        .and_then(|m| m.get("cost"))
+        .and_then(|v| v.as_f64())
+        .filter(|dollars| *dollars >= 0.0);
     Usage {
         prompt_tokens: field("prompt_tokens"),
         completion_tokens: field("completion_tokens"),
         total_tokens: field("total_tokens"),
         cached_tokens: cached,
+        upstream_cost: cost,
     }
 }
 

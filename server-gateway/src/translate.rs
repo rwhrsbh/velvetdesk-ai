@@ -554,6 +554,7 @@ mod tests {
                 completion_tokens: 5,
                 total_tokens: 15,
                 cached_tokens: 6,
+                upstream_cost: None,
             },
             finish_reason: String::new(),
             key_index: 0,

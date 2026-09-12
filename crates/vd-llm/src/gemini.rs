@@ -713,6 +713,9 @@ fn read_usage(meta: Option<&Value>) -> Usage {
         cached_tokens: field("cachedContentTokenCount"),
         completion_tokens: field("candidatesTokenCount"),
         total_tokens: field("totalTokenCount"),
+        // Google quotes prices in a table and not in the response, so the
+        // gateway's own prices are the only thing to bill on here.
+        upstream_cost: None,
     }
 }
 

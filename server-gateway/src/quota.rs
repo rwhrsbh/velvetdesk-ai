@@ -21,6 +21,16 @@ pub const WINDOW_WEEK: i64 = 7 * 24 * 60 * 60;
 /// cached rate and the rest at the full one; a model with no cache prices
 /// both the same, so nothing is discounted that nobody discounted for us.
 pub fn credits(model: &ModelRow, usage: &Usage, credit_usd: f64) -> f64 {
+    // When the upstream says what it charged, that is what gets billed. A
+    // price table is a copy of somebody else's prices and goes stale the day
+    // they change one — and the first sign of that is a month of answers
+    // sold below cost.
+    if let Some(dollars) = usage.upstream_cost {
+        if credit_usd <= 0.0 {
+            return 0.0;
+        }
+        return (dollars / credit_usd).max(0.0);
+    }
     let cached = usage.cached_tokens.min(usage.prompt_tokens) as f64;
     let fresh = usage.prompt_tokens as f64 - cached;
     let out = usage.completion_tokens as f64;
@@ -162,6 +172,21 @@ pub fn charge(db: &Db, bill: &Bill<'_>) -> rusqlite::Result<Allowance> {
 mod tests {
     use super::*;
 
+    /// A real price beats a remembered one.
+    #[test]
+    fn the_upstream_bill_wins_when_there_is_one() {
+        let usage = Usage {
+            prompt_tokens: 1_000_000,
+            completion_tokens: 0,
+            total_tokens: 1_000_000,
+            cached_tokens: 0,
+            upstream_cost: Some(0.5),
+        };
+        // The table says $0.28 for a million prompt tokens; the provider
+        // says it charged fifty cents, and fifty cents is what is billed.
+        assert_eq!(credits(&model(), &usage, 0.001), 500.0);
+    }
+
     fn model() -> ModelRow {
         ModelRow {
             name: "deepseek-chat".into(),
@@ -184,6 +209,7 @@ mod tests {
             completion_tokens: out,
             total_tokens: prompt + out,
             cached_tokens: cached,
+            upstream_cost: None,
         }
     }
 

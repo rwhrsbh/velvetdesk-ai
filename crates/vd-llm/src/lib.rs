@@ -196,6 +196,15 @@ pub struct Usage {
     pub completion_tokens: u32,
     #[serde(default)]
     pub total_tokens: u32,
+    /// Dollars the upstream actually charged for this answer, when it says.
+    ///
+    /// OpenRouter reports this on every response. It is worth more than any
+    /// price table we keep: a table goes stale the day a provider changes a
+    /// price, and the first sign of that is a month of answers billed below
+    /// cost. When it is present the gateway bills on it and the table is
+    /// only a fallback.
+    #[serde(default)]
+    pub upstream_cost: Option<f64>,
     /// Prompt tokens the provider served from its own cache, when it says so.
     ///
     /// Worth carrying because it is priced differently — an order of magnitude
