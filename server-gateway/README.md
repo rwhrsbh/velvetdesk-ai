@@ -101,3 +101,37 @@ WantedBy=multi-user.target
 
 TLS терминирует nginx или caddy перед ним; сам шлюз слушает по HTTP на
 localhost.
+
+
+## Docker
+
+```sh
+export VD_ADMIN_TOKEN='что-нибудь длинное'
+export VD_LICENSE_PUBLIC_KEY='вывод keygen'
+docker compose up -d --build
+```
+
+Всё состояние — в `./gateway-data`: база, конфиг, ключи. Переезд на другой
+сервер: остановить, скопировать папку, поднять там. Порт открыт только на
+loopback — TLS ставится впереди (caddy, nginx).
+
+Первый запуск с пустым томом работает: шлюз пишет стартовый конфиг и
+поднимается, а провайдеры, ключи, модели и тарифы добавляются в `/admin`.
+
+Ключ для подписи лицензий делается один раз и лежит вне контейнера:
+
+```sh
+docker compose run --rm gateway keygen     # приватный ключ — в ./gateway-data
+docker compose run --rm gateway mint acme-1 business 365 10
+```
+
+## Очередь
+
+`max_inflight`, `max_per_license`, `max_queued`, `queue_wait_seconds` в
+конфиге. Текущее состояние — на вкладке «Провайдеры и ключи» в админке.
+
+## Голос
+
+Модель с флагом `voice` обслуживает `POST /v1/audio/transcriptions`
+(multipart, как у OpenAI) и не предлагается в чате. Считается по
+`price_request` — цене за клип в долларах.

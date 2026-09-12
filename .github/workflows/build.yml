@@ -126,9 +126,13 @@ jobs:
         # The signing key turns the desktop bundles into updater artifacts: the
         # app only installs what this key signed. Without the secret the build
         # still succeeds — it simply produces nothing the updater will accept.
+        #
+        # The licence key is baked in the same way. A build without it is a
+        # free build for everyone: nothing verifies, so nothing unlocks.
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          VD_LICENSE_PUBLIC_KEY: ${{ secrets.VD_LICENSE_PUBLIC_KEY }}
         run: npx tauri build --target ${{ matrix.target }} --ci
 
       - name: Collect artifacts
@@ -222,6 +226,8 @@ jobs:
           node scripts/patch-android.mjs
 
       - name: Build release APK
+        env:
+          VD_LICENSE_PUBLIC_KEY: ${{ secrets.VD_LICENSE_PUBLIC_KEY }}
         run: npx tauri android build --apk --target aarch64 armv7
 
       - name: Sign APKs

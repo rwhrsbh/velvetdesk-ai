@@ -17,3 +17,6 @@ target/
 license-signing.key
 gateway.json
 gateway.db*
+
+# The local test gateway keeps its database and keys here.
+gateway-data/
