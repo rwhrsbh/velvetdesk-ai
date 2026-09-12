@@ -1211,7 +1211,14 @@ pub async fn sync_now(state: State<'_, AppState>) -> Result<crate::sync::Report>
     let pairing = crate::sync::pair::Pairing::load(&state.paths)?
         .ok_or_else(|| AppError::message("sync.notPaired", json!({})))?;
     let license = license_key(&state);
-    crate::sync::transport::run_round(&state.paths, &pairing, &license).await
+    crate::sync::mailbox::run_round(
+        &state.llm.http,
+        &state.paths,
+        &pairing,
+        &license,
+        &crate::hwid::device_id(&state.paths),
+    )
+    .await
 }
 
 /// The plan, the day's meter and what is left of both.

@@ -134,7 +134,15 @@ pub fn run() {
                             secrets.for_provider("velvetdesk-cloud").first().cloned()
                         })
                         .unwrap_or_default();
-                    match sync::transport::run_round(&sync_paths, &pairing, &license).await {
+                    // Through the mailbox rather than the live relay: the
+                    // other machine is usually not awake at the same second,
+                    // and a round that needs both of them is a round that
+                    // mostly does not happen.
+                    let http = reqwest::Client::new();
+                    let device = crate::hwid::device_id(&sync_paths);
+                    match sync::mailbox::run_round(&http, &sync_paths, &pairing, &license, &device)
+                        .await
+                    {
                         Ok(report) if report.pulled + report.pushed > 0 => {
                             log::info!(
                                 "sync: {} in, {} out, {} conflicts",

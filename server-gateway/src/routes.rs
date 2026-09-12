@@ -37,6 +37,10 @@ pub fn router(state: AppState) -> Router {
         // Two paired devices meeting. The gateway moves sealed bytes between
         // them and reads none of it.
         .route("/sync/ws", get(sync_ws))
+        // The same exchange for devices that are never awake together: one
+        // leaves sealed records, the other collects them whenever it starts.
+        .route("/sync/push", post(sync_push))
+        .route("/sync/pull", get(sync_pull))
         .merge(crate::admin::router())
         .with_state(state)
 }
@@ -646,6 +650,184 @@ async fn gemini_generate(
 }
 
 // ---------------------------------------------------------------------- sync
+
+/// The most one device may leave in a single push.
+const MAX_ITEMS: usize = 256;
+/// The most one sealed record may weigh: a long correspondence with pictures
+/// referenced rather than embedded, with room to spare.
+const MAX_ITEM_BYTES: usize = 2 * 1024 * 1024;
+/// How much one licence may keep waiting in the mailbox.
+const MAX_ROOM_BYTES: i64 = 256 * 1024 * 1024;
+/// Records nobody has collected in this long are dropped: a device that has
+/// been gone three months will be rebuilt from its peer rather than from a
+/// mailbox kept for it forever.
+const MAILBOX_TTL: i64 = 90 * 24 * 3600;
+
+#[derive(serde::Deserialize)]
+struct PushBody {
+    room: String,
+    #[serde(default)]
+    device: String,
+    items: Vec<PushItem>,
+}
+
+#[derive(serde::Deserialize)]
+struct PushItem {
+    item: String,
+    #[serde(default)]
+    rev: i64,
+    #[serde(default)]
+    updated_at: i64,
+    /// The record, sealed by the device and base64'd for the wire.
+    sealed: String,
+}
+
+/// The room a licence is entitled to.
+///
+/// Derived from the licence itself, exactly as the devices derive it, so a
+/// device cannot read or write anybody else's mailbox by naming their room:
+/// the name is checked against the token that was presented, not taken on
+/// trust.
+fn room_for_token(headers: &HeaderMap, query: &HashMap<String, String>) -> Option<String> {
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64URL;
+    use base64::Engine as _;
+    use sha2::{Digest as _, Sha256};
+
+    let token = token(headers, query)?;
+    let mut secret = Sha256::new();
+    secret.update(b"velvetdesk-sync-secret/v1");
+    secret.update(token.trim().as_bytes());
+    let secret = secret.finalize();
+
+    let mut room = Sha256::new();
+    room.update(b"velvetdesk-sync-room/v1");
+    room.update(secret);
+    Some(B64URL.encode(&room.finalize()[..16]))
+}
+
+/// Check the room the caller named is the one their licence gives them.
+fn allowed_room(
+    named: &str,
+    headers: &HeaderMap,
+    query: &HashMap<String, String>,
+) -> Result<String, ApiError> {
+    let mine = room_for_token(headers, query)
+        .ok_or_else(|| ApiError::Unauthorized("no licence key was sent".into()))?;
+    // A pairing made by invite has a room of its own, which the licence
+    // cannot predict; those devices still relay live and simply do not use
+    // the mailbox. Anything else is somebody reaching into a room that is
+    // not theirs.
+    if named != mine {
+        return Err(ApiError::Forbidden(
+            "this room does not belong to this licence".into(),
+        ));
+    }
+    Ok(mine)
+}
+
+/// Leave sealed records for the other devices on this licence.
+async fn sync_push(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<HashMap<String, String>>,
+    Json(body): Json<PushBody>,
+) -> Result<Json<Value>, ApiError> {
+    let caller = authenticate(&state, &headers, &query)?;
+    seat(&state, &caller, &headers)?;
+    let room = allowed_room(&body.room, &headers, &query)?;
+    if body.items.len() > MAX_ITEMS {
+        return Err(ApiError::BadRequest(format!(
+            "at most {MAX_ITEMS} records at a time"
+        )));
+    }
+
+    let (_, bytes) = state.db.mailbox_size(&room)?;
+    if bytes > MAX_ROOM_BYTES {
+        return Err(ApiError::Forbidden(
+            "this licence's sync store is full; the oldest records expire on their own".into(),
+        ));
+    }
+
+    use base64::engine::general_purpose::STANDARD as B64;
+    use base64::Engine as _;
+    let mut stored = 0usize;
+    for item in &body.items {
+        let sealed = B64
+            .decode(item.sealed.as_bytes())
+            .map_err(|_| ApiError::BadRequest("a record was not readable base64".into()))?;
+        if sealed.len() > MAX_ITEM_BYTES {
+            return Err(ApiError::BadRequest(format!(
+                "a record is larger than {} MB",
+                MAX_ITEM_BYTES / (1024 * 1024)
+            )));
+        }
+        if item.item.is_empty() || item.item.len() > 200 {
+            return Err(ApiError::BadRequest("a record name is out of range".into()));
+        }
+        if state.db.mailbox_put(&crate::registry::MailDrop {
+            room: &room,
+            item: &item.item,
+            rev: item.rev,
+            updated_at: item.updated_at,
+            device: &body.device,
+            sealed: &sealed,
+            now: now(),
+        })? {
+            stored += 1;
+        }
+    }
+
+    // Housekeeping on the way past: cheap, and it keeps a long-abandoned
+    // room from being somebody else's problem later.
+    let _ = state.db.mailbox_expire(now() - MAILBOX_TTL);
+    Ok(Json(json!({ "stored": stored, "seen": body.items.len() })))
+}
+
+/// Collect everything left since the sequence number this device last saw.
+async fn sync_pull(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<HashMap<String, String>>,
+) -> Result<Json<Value>, ApiError> {
+    let caller = authenticate(&state, &headers, &query)?;
+    seat(&state, &caller, &headers)?;
+    let named = query
+        .get("room")
+        .cloned()
+        .ok_or_else(|| ApiError::BadRequest("a room is required".into()))?;
+    let room = allowed_room(&named, &headers, &query)?;
+    let since: i64 = query.get("since").and_then(|s| s.parse().ok()).unwrap_or(0);
+    let limit: usize = query
+        .get("limit")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(64)
+        .clamp(1, MAX_ITEMS);
+
+    use base64::engine::general_purpose::STANDARD as B64;
+    use base64::Engine as _;
+    let rows = state.db.mailbox_since(&room, since, limit)?;
+    let cursor = rows.last().map(|row| row.seq).unwrap_or(since);
+    let items: Vec<Value> = rows
+        .into_iter()
+        .map(|row| {
+            json!({
+                "seq": row.seq,
+                "item": row.item,
+                "rev": row.rev,
+                "updated_at": row.updated_at,
+                "device": row.device,
+                "sealed": B64.encode(row.sealed),
+            })
+        })
+        .collect();
+    Ok(Json(json!({
+        "items": items,
+        "cursor": cursor,
+        // True when there is more behind this page: the device comes straight
+        // back rather than waiting for the next round.
+        "more": items.len() == limit,
+    })))
+}
 
 async fn sync_ws(
     State(state): State<AppState>,

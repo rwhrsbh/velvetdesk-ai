@@ -16,7 +16,9 @@ use vd_llm::provider::ProviderKind;
 use vd_llm::Usage;
 
 use crate::config::Tier;
-use crate::registry::{DeviceRow, DeviceVerdict, KeyRow, LicenseRow, ModelRow, UpstreamRow};
+use crate::registry::{
+    DeviceRow, DeviceVerdict, KeyRow, LicenseRow, MailDrop, MailItem, ModelRow, UpstreamRow,
+};
 
 #[derive(Clone)]
 pub struct Db {
@@ -126,6 +128,30 @@ impl Db {
                  issued_at INTEGER NOT NULL,
                  note TEXT NOT NULL DEFAULT ''
              );
+             -- Sealed records waiting for whoever has not collected them.
+             --
+             -- Two devices that are never online at the same time can still
+             -- agree through here: each leaves its latest version of a
+             -- record, each collects what it has not seen. The gateway holds
+             -- ciphertext and a key name it cannot read anything from — it
+             -- can say when a row changed, and nothing else about it.
+             --
+             -- One row per record, not a log: what anybody needs is the
+             -- newest version, and keeping every intermediate one would grow
+             -- without end for no reader.
+             CREATE TABLE IF NOT EXISTS mailbox (
+                 seq INTEGER PRIMARY KEY AUTOINCREMENT,
+                 room TEXT NOT NULL,
+                 item TEXT NOT NULL,
+                 rev INTEGER NOT NULL DEFAULT 0,
+                 updated_at INTEGER NOT NULL DEFAULT 0,
+                 device TEXT NOT NULL DEFAULT '',
+                 sealed BLOB NOT NULL,
+                 stored_at INTEGER NOT NULL,
+                 UNIQUE(room, item)
+             );
+             CREATE INDEX IF NOT EXISTS mailbox_by_room ON mailbox(room, seq);
+
              -- The machines a licence is actually used from. A seat is taken
              -- by the first device that appears and kept until the operator
              -- releases it, because a seat that frees itself is not a seat
@@ -225,6 +251,96 @@ impl Db {
             )
             .optional()?;
         Ok(found.filter(|peers| *peers > 0).map(|peers| peers as u32))
+    }
+
+    // -------------------------------------------------------------- mailbox
+
+    /// Leave a record for the other devices, if this is newer than what is
+    /// already there.
+    ///
+    /// Newer means a higher revision, or the same revision written later —
+    /// the same rule the devices apply to each other, kept here so a stale
+    /// copy uploaded by a machine that was off for a week cannot walk over
+    /// what happened while it was away.
+    pub fn mailbox_put(&self, drop: &MailDrop<'_>) -> rusqlite::Result<bool> {
+        let changed = self.conn.lock().execute(
+            "INSERT INTO mailbox (room, item, rev, updated_at, device, sealed, stored_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(room, item) DO UPDATE SET
+                 rev = excluded.rev,
+                 updated_at = excluded.updated_at,
+                 device = excluded.device,
+                 sealed = excluded.sealed,
+                 stored_at = excluded.stored_at,
+                 seq = (SELECT IFNULL(MAX(seq), 0) + 1 FROM mailbox)
+             WHERE excluded.rev > mailbox.rev
+                OR (excluded.rev = mailbox.rev AND excluded.updated_at > mailbox.updated_at)",
+            rusqlite::params![
+                drop.room,
+                drop.item,
+                drop.rev,
+                drop.updated_at,
+                drop.device,
+                drop.sealed,
+                drop.now,
+            ],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// Everything in this room that appeared after `since`, oldest first.
+    ///
+    /// `since` is the sequence number the caller last saw, which is the
+    /// gateway's own counter rather than a clock: two devices with wrong
+    /// clocks still collect everything exactly once.
+    pub fn mailbox_since(
+        &self,
+        room: &str,
+        since: i64,
+        limit: usize,
+    ) -> rusqlite::Result<Vec<MailItem>> {
+        let conn = self.conn.lock();
+        let mut statement = conn.prepare(
+            "SELECT seq, item, rev, updated_at, device, sealed FROM mailbox
+             WHERE room = ?1 AND seq > ?2 ORDER BY seq LIMIT ?3",
+        )?;
+        let rows = statement
+            .query_map(rusqlite::params![room, since, limit as i64], |row| {
+                Ok(MailItem {
+                    seq: row.get(0)?,
+                    item: row.get(1)?,
+                    rev: row.get(2)?,
+                    updated_at: row.get(3)?,
+                    device: row.get(4)?,
+                    sealed: row.get(5)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// How much one room is holding, in rows and in bytes.
+    pub fn mailbox_size(&self, room: &str) -> rusqlite::Result<(i64, i64)> {
+        self.conn.lock().query_row(
+            "SELECT COUNT(*), IFNULL(SUM(LENGTH(sealed)), 0) FROM mailbox WHERE room = ?1",
+            [room],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+    }
+
+    /// Forget a room's mailbox: the licence was revoked, or the operator
+    /// asked for it.
+    pub fn mailbox_clear(&self, room: &str) -> rusqlite::Result<usize> {
+        self.conn
+            .lock()
+            .execute("DELETE FROM mailbox WHERE room = ?1", [room])
+    }
+
+    /// Drop what nobody has collected in a long time.
+    pub fn mailbox_expire(&self, older_than: i64) -> rusqlite::Result<usize> {
+        self.conn
+            .lock()
+            .execute("DELETE FROM mailbox WHERE stored_at < ?1", [older_than])
     }
 
     // -------------------------------------------------------------- devices

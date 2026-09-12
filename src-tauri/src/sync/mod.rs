@@ -11,6 +11,7 @@
 //! that was off for a minute, and a round that dies halfway leaves nothing to
 //! reconcile, because the next round will ask again.
 
+pub mod mailbox;
 pub mod pair;
 pub mod transport;
 pub mod wire;

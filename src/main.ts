@@ -2001,7 +2001,7 @@ async function refreshCloudGauge() {
  * prints are the same thing, so a command can never be offered and then not
  * work — or work and never be mentioned.
  */
-const COMMANDS = ["clear", "compact", "help"] as const;
+const COMMANDS = ["clear", "compact", "sync", "help"] as const;
 
 /** Which command the menu has under the pointer, when it is open. */
 let slashAt = 0;
@@ -2098,6 +2098,28 @@ async function runSlashCommand(raw: string): Promise<boolean> {
 
   if (command === "help") {
     pushEntry(systemNote("cmd.help"));
+    renderChat();
+    return true;
+  }
+
+  // Sync belongs to the whole install, not to whichever dossier is open, so
+  // it runs before the check for one below.
+  if (command === "sync") {
+    pushEntry(systemNote("cmd.syncing"));
+    renderChat();
+    try {
+      const report = await api.syncNow();
+      await deps.refresh();
+      pushEntry(
+        systemNote("cmd.synced", {
+          out: report.pushed,
+          inn: report.pulled,
+          conflicts: report.conflicts,
+        }),
+      );
+    } catch (error) {
+      pushEntry(systemNote("cmd.syncFailed", { message: errorText(error) }));
+    }
     renderChat();
     return true;
   }

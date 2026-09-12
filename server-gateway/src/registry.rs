@@ -278,6 +278,33 @@ impl Registry {
     }
 }
 
+/// A record on its way to the other devices, as the gateway holds it.
+#[derive(Debug, Clone, Serialize)]
+pub struct MailItem {
+    /// The gateway's own counter: what a device passes back as "since".
+    pub seq: i64,
+    /// Which record this is — `chat/<model>/<man>` and the like. A name, not
+    /// content: the gateway needs something to key on and learns nothing
+    /// from it beyond how the client organises itself.
+    pub item: String,
+    pub rev: i64,
+    pub updated_at: i64,
+    pub device: String,
+    /// The record itself, sealed by the devices. Ciphertext here, always.
+    pub sealed: Vec<u8>,
+}
+
+/// One record being left for the others.
+pub struct MailDrop<'a> {
+    pub room: &'a str,
+    pub item: &'a str,
+    pub rev: i64,
+    pub updated_at: i64,
+    pub device: &'a str,
+    pub sealed: &'a [u8],
+    pub now: i64,
+}
+
 /// One machine a licence is used from.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceRow {
