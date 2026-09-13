@@ -422,6 +422,9 @@ export interface DoctorIssue {
   message: string;
   fixable: boolean;
   fixed: boolean;
+  /** Dictionary key under `doctor.issue.` and what it fills in. */
+  code?: string;
+  args?: Record<string, string | number>;
 }
 
 export interface DoctorReport {

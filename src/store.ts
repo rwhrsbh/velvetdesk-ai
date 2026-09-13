@@ -88,6 +88,11 @@ export function setDragging(value: boolean) {
   dragging = value;
 }
 
+/** Whether a card is being carried right now. */
+export function isDragging(): boolean {
+  return dragging;
+}
+
 export const store: AppStore = {
   plan: null,
   info: null,

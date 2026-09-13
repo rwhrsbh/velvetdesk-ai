@@ -10,6 +10,17 @@ import type { Backup, DoctorReport, PendingAction } from "./types";
 // Doctor
 // ---------------------------------------------------------------------------
 
+/**
+ * A finding in the operator's language. The core sends a code and the values
+ * for it; a code this build has no words for falls back to the core's English.
+ */
+function issueText(issue: DoctorReport["issues"][number]): string {
+  if (!issue.code) return issue.message;
+  const key = `doctor.issue.${issue.code}`;
+  const text = t(key, issue.args ?? {});
+  return text === key ? issue.message : text;
+}
+
 function doctorBody(report: DoctorReport): string {
   const counts = [
     t("doctor.models", { n: report.models_checked }),
@@ -22,7 +33,7 @@ function doctorBody(report: DoctorReport): string {
       (issue) =>
         `<div class="doctor-line">` +
         `<span class="lvl ${issue.level}">${issue.level.toUpperCase()}</span>` +
-        `<span class="doctor-text">${escapeHtml(issue.message)}${issue.fixed ? t("doctor.wasFixed") : ""}` +
+        `<span class="doctor-text">${escapeHtml(issueText(issue))}${issue.fixed ? t("doctor.wasFixed") : ""}` +
         `<span class="doctor-path">${escapeHtml(issue.path)}</span></span>` +
         `</div>`,
     )

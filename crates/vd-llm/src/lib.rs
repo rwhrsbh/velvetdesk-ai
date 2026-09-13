@@ -498,6 +498,7 @@ impl LlmClient {
                     }
                     on_event(serde_json::json!({
                         "kind": "llm_wait",
+                        "seconds": wait.as_secs().max(1),
                         "message": format!("all keys cooling down, waiting {}s", wait.as_secs().max(1)),
                     }));
                     tokio::time::sleep(wait).await;

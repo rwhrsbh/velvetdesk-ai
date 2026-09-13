@@ -22,6 +22,14 @@ pub struct Issue {
     pub level: Level,
     pub scope: String,
     pub path: String,
+    /// What was found, as a key the interface translates (`doctor.issue.<code>`),
+    /// with the values it fills in. The core has no business choosing the
+    /// operator's language — a finding written in Russian here reached an
+    /// English interface as Russian.
+    pub code: String,
+    pub args: serde_json::Value,
+    /// The same finding in English, for logs and for an interface that does
+    /// not know the code.
     pub message: String,
     pub fixable: bool,
     #[serde(default)]
@@ -38,11 +46,14 @@ pub struct DoctorReport {
 }
 
 impl DoctorReport {
+    #[allow(clippy::too_many_arguments)]
     fn push(
         &mut self,
         level: Level,
         scope: &str,
         path: &Path,
+        code: &str,
+        args: serde_json::Value,
         message: impl Into<String>,
         fixable: bool,
     ) {
@@ -50,6 +61,8 @@ impl DoctorReport {
             level,
             scope: scope.to_string(),
             path: path.display().to_string(),
+            code: code.to_string(),
+            args,
             message: message.into(),
             fixable,
             fixed: false,
@@ -153,6 +166,8 @@ pub fn run(paths: &Paths, apply_fixes: bool) -> Result<DoctorReport> {
                             Level::Warn,
                             "profile",
                             &profile_path,
+                            "profileIdMismatch",
+                            serde_json::json!({ "id": profile.id, "folder": model_id }),
                             format!(
                                 "profile id {} does not match folder {}",
                                 profile.id, model_id
@@ -173,6 +188,8 @@ pub fn run(paths: &Paths, apply_fixes: bool) -> Result<DoctorReport> {
                             Level::Error,
                             "profile",
                             &profile_path,
+                            "profileMissing",
+                            serde_json::json!({}),
                             "profile.json missing for existing folder",
                             true,
                         );
@@ -199,6 +216,8 @@ pub fn run(paths: &Paths, apply_fixes: bool) -> Result<DoctorReport> {
                             Level::Warn,
                             "man",
                             &path,
+                            "manIdMismatch",
+                            serde_json::json!({ "id": man.id, "file": man_id }),
                             format!("man id {} does not match file name {}", man.id, man_id),
                             true,
                         );
@@ -210,6 +229,8 @@ pub fn run(paths: &Paths, apply_fixes: bool) -> Result<DoctorReport> {
                             Level::Warn,
                             "man",
                             &path,
+                            "manWrongModel",
+                            serde_json::json!({ "model": man.model_id, "folder": model_id }),
                             format!(
                                 "man belongs to model {} but sits in {}",
                                 man.model_id, model_id
@@ -220,7 +241,15 @@ pub fn run(paths: &Paths, apply_fixes: bool) -> Result<DoctorReport> {
                         dirty = true;
                     }
                     if man.name.trim().is_empty() {
-                        report.push(Level::Warn, "man", &path, "man has no name", true);
+                        report.push(
+                            Level::Warn,
+                            "man",
+                            &path,
+                            "manNoName",
+                            serde_json::json!({}),
+                            "man has no name",
+                            true,
+                        );
                         man.name = format!("Unknown {man_id}");
                         dirty = true;
                     }
@@ -231,7 +260,15 @@ pub fn run(paths: &Paths, apply_fixes: bool) -> Result<DoctorReport> {
                     known_men.push(man_id.clone());
                 }
                 None => {
-                    report.push(Level::Error, "man", &path, "unreadable dossier", false);
+                    report.push(
+                        Level::Error,
+                        "man",
+                        &path,
+                        "manUnreadable",
+                        serde_json::json!({}),
+                        "unreadable dossier",
+                        false,
+                    );
                 }
             }
         }
@@ -254,6 +291,8 @@ pub fn run(paths: &Paths, apply_fixes: bool) -> Result<DoctorReport> {
                                 Level::Warn,
                                 "chat",
                                 &path,
+                                "chatOrphan",
+                                serde_json::json!({ "id": stem }),
                                 format!("chat history has no matching dossier ({stem})"),
                                 true,
                             );
@@ -273,7 +312,15 @@ pub fn run(paths: &Paths, apply_fixes: bool) -> Result<DoctorReport> {
                             }
                         }
                         if thread.man_id != stem || thread.model_id != model_id {
-                            report.push(Level::Warn, "chat", &path, "chat header mismatch", true);
+                            report.push(
+                                Level::Warn,
+                                "chat",
+                                &path,
+                                "chatHeaderMismatch",
+                                serde_json::json!({}),
+                                "chat header mismatch",
+                                true,
+                            );
                             if apply_fixes {
                                 thread.man_id = stem.to_string();
                                 thread.model_id = model_id.clone();
@@ -286,6 +333,8 @@ pub fn run(paths: &Paths, apply_fixes: bool) -> Result<DoctorReport> {
                         Level::Error,
                         "chat",
                         &path,
+                        "chatUnreadable",
+                        serde_json::json!({}),
                         "unreadable chat history",
                         false,
                     ),
@@ -312,6 +361,8 @@ pub fn run(paths: &Paths, apply_fixes: bool) -> Result<DoctorReport> {
                         Level::Warn,
                         "attachment",
                         &entry.path(),
+                        "attachmentOrphan",
+                        serde_json::json!({ "name": name }),
                         format!("attachment {name} is not linked to any dossier"),
                         true,
                     );
@@ -330,6 +381,8 @@ pub fn run(paths: &Paths, apply_fixes: bool) -> Result<DoctorReport> {
                 Level::Warn,
                 "profile",
                 &scope.base,
+                "modelNoProfile",
+                serde_json::json!({}),
                 "model folder without a valid profile",
                 true,
             );
@@ -348,6 +401,8 @@ pub fn run(paths: &Paths, apply_fixes: bool) -> Result<DoctorReport> {
             Level::Warn,
             "index",
             &index_path,
+            "indexStale",
+            serde_json::json!({}),
             "global index missing or stale",
             true,
         );
@@ -362,7 +417,9 @@ pub fn run(paths: &Paths, apply_fixes: bool) -> Result<DoctorReport> {
             level: Level::Ok,
             scope: "all".into(),
             path: paths.root.display().to_string(),
-            message: "все схемы валидны, битых ссылок нет".into(),
+            code: "allGood".into(),
+            args: serde_json::json!({}),
+            message: "every schema is valid, no broken links".into(),
             fixable: false,
             fixed: false,
         });
@@ -395,6 +452,8 @@ fn load_or_repair<T: serde::de::DeserializeOwned + serde::Serialize>(
                 Level::Error,
                 scope,
                 path,
+                "malformedJson",
+                serde_json::json!({ "error": err.to_string() }),
                 format!("malformed JSON: {err}"),
                 true,
             );

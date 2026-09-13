@@ -15,6 +15,8 @@ import {
   whenFree,
   promptDialog,
   showPane,
+  isPhoneLayout,
+  modalIsOpen,
 } from "./dom";
 import {
   copyText,
@@ -36,6 +38,7 @@ import {
   makeEntry,
   outgoingText,
   pushEntry,
+  isDragging,
   setDragging,
   store,
   visibleMen,
@@ -183,13 +186,12 @@ function leaveOverlayChat() {
  *
  * On a wide window the lit button in the top bar says it. On a phone that
  * button is folded into the menu, and a temporary chat looked exactly like
- * the real one — so the whole chat pane carries the mark, and so does the
- * menu button.
+ * the real one — so the chat pane carries the mark. The menu button does not:
+ * lit, it read as a button stuck from the last press.
  */
 function markOverlayChat() {
   document.body.classList.toggle("chat-temporary", store.temporary);
   document.body.classList.toggle("chat-master", store.master);
-  $("btnMenu").classList.toggle("active", store.temporary || store.master);
 }
 
 async function selectMan(manId: string | null) {
@@ -2324,9 +2326,30 @@ async function logAsOutgoing(text: string) {
 }
 
 function bindContextMenus() {
+  // How the last press was made. A long press on a phone raises the same
+  // event a right click does, but it also starts the system's own selection,
+  // with its handles and its copy bar — and a menu of ours opened on top of
+  // that sat right where the handles are dragged, so every attempt to widen
+  // the selection hit the menu instead.
+  let pressedBy = "mouse";
+  document.addEventListener(
+    "pointerdown",
+    (event) => {
+      pressedBy = event.pointerType;
+    },
+    true,
+  );
+
   document.addEventListener("contextmenu", (event) => {
     const target = event.target as HTMLElement | null;
     if (!target) return;
+
+    if (pressedBy === "touch") {
+      // Text being selected, or a field being edited: the system's bar does
+      // that job and does it where the thumb expects it.
+      const selecting = !(window.getSelection()?.isCollapsed ?? true);
+      if (selecting || target.closest("input, textarea")) return;
+    }
 
     // Text fields get the editing menu, including inside modals.
     const field = target.closest<HTMLInputElement | HTMLTextAreaElement>("input, textarea");
@@ -3046,6 +3069,71 @@ function bindTabs() {
     tab.addEventListener("click", () => showPane(tab.dataset.pane as Pane));
   });
   showPane("paneChat");
+  bindSwipes();
+}
+
+/**
+ * On a phone, a sideways swipe moves to the next pane, in the order of the tabs.
+ *
+ * Only a deliberate swipe counts: mostly sideways, long enough, and quick. A
+ * swipe that begins on something that scrolls sideways itself, in a field, on
+ * a card being dragged, or while text is selected is left to that thing.
+ */
+function bindSwipes() {
+  const ORDER = ["paneProfiles", "paneChat", "paneMen"] as const;
+  const workspace = document.querySelector<HTMLElement>(".workspace");
+  if (!workspace) return;
+
+  let startX = 0;
+  let startY = 0;
+  let startedAt = 0;
+  let tracking = false;
+
+  const scrollsSideways = (element: HTMLElement | null): boolean => {
+    for (let node = element; node && node !== workspace; node = node.parentElement) {
+      if (node.scrollWidth > node.clientWidth + 2) {
+        const overflow = getComputedStyle(node).overflowX;
+        if (overflow === "auto" || overflow === "scroll") return true;
+      }
+    }
+    return false;
+  };
+
+  workspace.addEventListener(
+    "touchstart",
+    (event) => {
+      tracking = false;
+      if (!isPhoneLayout() || event.touches.length !== 1 || modalIsOpen()) return;
+      const target = event.target as HTMLElement;
+      if (target.closest("input, textarea, select, .ctx-menu") || scrollsSideways(target)) return;
+      const touch = event.touches[0];
+      startX = touch.clientX;
+      startY = touch.clientY;
+      startedAt = Date.now();
+      tracking = true;
+    },
+    { passive: true },
+  );
+
+  workspace.addEventListener(
+    "touchend",
+    (event) => {
+      if (!tracking) return;
+      tracking = false;
+      if (isDragging() || !(window.getSelection()?.isCollapsed ?? true)) return;
+      const touch = event.changedTouches[0];
+      const dx = touch.clientX - startX;
+      const dy = touch.clientY - startY;
+      if (Date.now() - startedAt > 700) return;
+      if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.8) return;
+
+      const active = ORDER.findIndex((id) => $(id).classList.contains("pane-active"));
+      const next = active + (dx < 0 ? 1 : -1);
+      if (active === -1 || next < 0 || next >= ORDER.length) return;
+      showPane(ORDER[next], dx < 0 ? "left" : "right");
+    },
+    { passive: true },
+  );
 }
 
 /**
@@ -3235,14 +3323,21 @@ function bindAgentEvents() {
       if (!step) return;
       meta.steps = [...(meta.steps ?? []), step];
     } else if (kind === "llm_retry") {
-      meta.note = `${t("chat.key", { n: Number(payload.key_index ?? 0) + 1 })}: ${payload.verdict}`;
+      const verdict = String(payload.verdict ?? "");
+      const worded = t(`chat.verdict.${verdict}`);
+      meta.note = `${t("chat.key", { n: Number(payload.key_index ?? 0) + 1 })}: ${
+        worded === `chat.verdict.${verdict}` ? verdict : worded
+      }`;
     } else if (kind === "compacting") {
       meta.note = t("cmd.autoCompacting", {
         used: Number(payload.used ?? 0),
         window: Number(payload.window ?? 0),
       });
     } else if (kind === "llm_wait") {
-      meta.note = String(payload.message ?? "");
+      meta.note =
+        payload.seconds === undefined
+          ? String(payload.message ?? "")
+          : t("chat.keysWaiting", { s: Number(payload.seconds) });
     } else {
       return;
     }

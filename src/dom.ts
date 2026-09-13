@@ -203,9 +203,23 @@ export function isPhoneLayout(): boolean {
  * something in another pane can take the operator there instead of leaving
  * them to go looking for it.
  */
-export function showPane(paneId: "paneProfiles" | "paneChat" | "paneMen") {
+export function showPane(
+  paneId: "paneProfiles" | "paneChat" | "paneMen",
+  /** Which way a swipe went, so the pane slides in from the side it came. */
+  from?: "left" | "right",
+) {
   for (const id of ["paneProfiles", "paneChat", "paneMen"]) {
-    document.getElementById(id)?.classList.toggle("pane-active", id === paneId);
+    const pane = document.getElementById(id);
+    if (!pane) continue;
+    const entering = id === paneId && !pane.classList.contains("pane-active");
+    pane.classList.toggle("pane-active", id === paneId);
+    pane.classList.remove("slide-from-left", "slide-from-right");
+    if (entering && from) {
+      // Restarted on every swipe: removing and adding the class in the same
+      // frame would not replay the animation.
+      void pane.offsetWidth;
+      pane.classList.add(from === "left" ? "slide-from-right" : "slide-from-left");
+    }
   }
   for (const tab of document.querySelectorAll<HTMLElement>(".tab-btn")) {
     tab.classList.toggle("active", tab.dataset.pane === paneId);
