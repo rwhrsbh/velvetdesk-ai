@@ -200,12 +200,15 @@ export function renderScope() {
     return;
   }
   if (!profile) {
-    $("scopeLabel").textContent = t("scope.none");
+    $("scopeLabel").textContent = store.temporary ? t("scope.temporary") : t("scope.none");
     $("scopePath").textContent = "—";
     return;
   }
   const man = activeMan();
-  $("scopeLabel").textContent = man ? `${profile.name} → ${man.name}` : profile.name;
+  const where = man ? `${profile.name} → ${man.name}` : profile.name;
+  // Said in words as well as by the frame around the pane: a temporary chat
+  // looks like any other until its messages are gone.
+  $("scopeLabel").textContent = store.temporary ? `${t("scope.temporary")} · ${where}` : where;
   $("scopePath").textContent = `profiles/${profile.id}/`;
 }
 

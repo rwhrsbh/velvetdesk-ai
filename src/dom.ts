@@ -190,6 +190,28 @@ export function openModal(html: string, onClose?: () => void, sticky = false) {
   return card;
 }
 
+/** Whether the window is laid out as a phone: one pane at a time, tabs below. */
+export function isPhoneLayout(): boolean {
+  return window.matchMedia("(max-width: 900px)").matches;
+}
+
+/**
+ * Bring a pane forward on a phone.
+ *
+ * On a wide window every pane is on screen and this changes nothing anyone can
+ * see; on a phone it is the same as pressing the tab, so an action that opens
+ * something in another pane can take the operator there instead of leaving
+ * them to go looking for it.
+ */
+export function showPane(paneId: "paneProfiles" | "paneChat" | "paneMen") {
+  for (const id of ["paneProfiles", "paneChat", "paneMen"]) {
+    document.getElementById(id)?.classList.toggle("pane-active", id === paneId);
+  }
+  for (const tab of document.querySelectorAll<HTMLElement>(".tab-btn")) {
+    tab.classList.toggle("active", tab.dataset.pane === paneId);
+  }
+}
+
 export function closeModal() {
   $("modalOverlay").classList.remove("open");
   $("modalCard").innerHTML = "";

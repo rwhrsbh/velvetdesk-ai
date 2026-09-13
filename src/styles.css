@@ -82,7 +82,7 @@ a {
 
 /* ---------- top bar ---------- */
 .topbar {
-  height: 48px;
+  height: calc(48px + env(safe-area-inset-top));
   flex: 0 0 auto;
   background: var(--panel-blur);
   backdrop-filter: saturate(180%) blur(24px);
@@ -832,6 +832,26 @@ input[type="range"] {
   width: 0;
   height: 0;
   outline: 0;
+}
+
+/* A step that asks for a tap: the window stays usable where the hole is. */
+.tour.tour-tap {
+  pointer-events: none;
+}
+
+.tour.tour-tap .tour-card {
+  pointer-events: auto;
+}
+
+.tour.tour-tap .tour-hole {
+  animation: tour-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes tour-pulse {
+  50% {
+    outline-offset: 5px;
+    outline-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  }
 }
 
 .tour-card {
@@ -2491,6 +2511,24 @@ details.advanced[open] {
   }
 }
 
+@media (max-width: 560px) {
+  .topbar-left .status-chip {
+    display: none;
+  }
+
+  .topbar-center {
+    flex: 1 1 auto;
+    justify-content: center;
+    gap: 6px;
+  }
+
+  .topbar-center .topbar-compact {
+    max-width: none;
+    flex: 0 1 132px;
+    justify-content: space-between;
+  }
+}
+
 /* Wide enough for the rows of buttons: the dropdowns stay out of the way.
    Named through the bar so the rule outranks the one that makes every dressed
    select's button a flex box. */
@@ -2518,7 +2556,91 @@ details.advanced[open] {
   }
 }
 
+/* A chat that will not be kept, marked on the pane itself: on a phone the
+   button that says so is folded away in the menu. */
+.chat-temporary .center-header {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  box-shadow: inset 0 -1px 0 var(--accent);
+}
+
+.chat-temporary .composer-box {
+  border-style: dashed;
+}
+
+.chat-temporary #scopeDot {
+  background: transparent;
+  border: 1.5px dashed var(--accent);
+}
+
+/* The menu button carries a mark while one of the chats inside it is open. */
+.topbar-burger.active {
+  color: var(--accent);
+}
+
 @media (max-width: 900px) {
+
+  /* The composer on a phone: the same controls, sized for a thumb and a
+     narrow screen rather than a desktop's spare width. */
+  .composer {
+    padding: 6px 8px;
+    padding-bottom: 6px;
+  }
+
+  .composer-box {
+    padding: 6px 8px;
+    gap: 6px;
+  }
+
+  .composer-input {
+    height: 44px;
+    min-height: 38px;
+    max-height: 150px;
+  }
+
+  .composer-bar {
+    gap: 6px;
+    flex-wrap: nowrap;
+    align-items: flex-end;
+  }
+
+  .composer-left {
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .composer-left .btn,
+  .composer-left .select-button {
+    height: 30px;
+    padding: 0 8px;
+    font-size: 12px;
+  }
+
+  .composer-left .btn-mic-menu {
+    padding: 0 6px;
+  }
+
+  /* The microphone speaks for itself; its word is the widest thing in the row. */
+  #micLabel {
+    display: none;
+  }
+
+  .composer-left .toggle {
+    font-size: 11.5px;
+  }
+
+  .composer-right {
+    gap: 6px;
+    flex: 0 0 auto;
+  }
+
+  .composer-right .ctx-gauge {
+    display: none;
+  }
+
+  #btnSend {
+    height: 34px;
+    padding: 0 12px;
+  }
 
   .rail,
   .center {

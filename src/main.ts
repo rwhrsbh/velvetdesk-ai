@@ -14,6 +14,7 @@ import {
   toast,
   whenFree,
   promptDialog,
+  showPane,
 } from "./dom";
 import {
   copyText,
@@ -173,7 +174,22 @@ function leaveOverlayChat() {
   store.master = false;
   $("btnTemporary").classList.remove("active");
   $("btnMaster").classList.remove("active");
+  markOverlayChat();
   if (wasTemporary) toast(t("cmd.temporaryEnded"), "info");
+}
+
+/**
+ * Say, where it can be seen, that the chat on screen is not the saved one.
+ *
+ * On a wide window the lit button in the top bar says it. On a phone that
+ * button is folded into the menu, and a temporary chat looked exactly like
+ * the real one — so the whole chat pane carries the mark, and so does the
+ * menu button.
+ */
+function markOverlayChat() {
+  document.body.classList.toggle("chat-temporary", store.temporary);
+  document.body.classList.toggle("chat-master", store.master);
+  $("btnMenu").classList.toggle("active", store.temporary || store.master);
 }
 
 async function selectMan(manId: string | null) {
@@ -1377,15 +1393,33 @@ function bindTopbar() {
   const burger = $("btnMenu");
   burger.addEventListener("click", () => {
     const waiting = store.pending.length;
-    const entries: MenuEntry[] = [
+    const on = (flag: boolean, label: string) => (flag ? `✓ ${label}` : label);
+    const items: { id: string; label: string }[] = [];
+    // On a phone the provider and the plan give up their place in the bar to
+    // the two dropdowns, and are listed here first instead.
+    const visible = (id: string) => {
+      const element = document.getElementById(id);
+      return Boolean(element && !element.hidden && element.getClientRects().length);
+    };
+    if (!visible("providerChip")) {
+      items.push({ id: "providerChip", label: $("providerLabel").textContent?.trim() || t("nav.keys") });
+    }
+    if (!($("planChip") as HTMLButtonElement).hidden && !visible("planChip")) {
+      items.push({ id: "planChip", label: $("planChipText").textContent?.trim() ?? "" });
+    }
+    items.push(
       { id: "btnPending", label: waiting ? `${t("nav.pending")} · ${waiting}` : t("nav.pending") },
-      { id: "btnMaster", label: t("nav.master") },
+      { id: "btnMaster", label: on(store.master, t("nav.master")) },
+      { id: "btnTemporary", label: on(store.temporary, t("scope.temporary")) },
       { id: "btnDoctor", label: t("nav.doctor") },
-      { id: "btnTemporary", label: t("topbar.temporary") },
       { id: "btnGuide", label: t("nav.guide") },
       { id: "btnLang", label: t("nav.lang") },
       { id: "btnKeys", label: t("nav.keys") },
-    ].map((item) => ({ label: item.label, onSelect: () => $(item.id).click() }));
+    );
+    const entries: MenuEntry[] = items.map((item) => ({
+      label: item.label,
+      onSelect: () => $(item.id).click(),
+    }));
     const box = burger.getBoundingClientRect();
     openContextMenu(box.right - 8, box.bottom + 6, entries);
   });
@@ -1834,6 +1868,10 @@ function bindPanels() {
     if (card.dataset.profile === store.activeModelId) {
       void openProfileForm(deps, activeProfile());
     } else {
+      // On a phone the next thing after a profile is one of its men, and the
+      // list of them is a tab away: go there rather than stay on a list that
+      // has just done its job.
+      showPane("paneMen");
       void selectProfile(card.dataset.profile);
     }
   });
@@ -1898,6 +1936,7 @@ function bindPanels() {
     if (card.dataset.man === store.activeManId) {
       void openManForm(deps, activeMan());
     } else {
+      showPane("paneChat");
       void selectMan(card.dataset.man);
     }
   });
@@ -2106,7 +2145,13 @@ function profileEntries(modelId: string): MenuEntry[] {
   const profile = store.profiles.find((p) => p.id === modelId);
   if (!profile) return [];
   return [
-    { label: t("ctx.openChat"), onSelect: () => void selectProfile(modelId) },
+    {
+      label: t("ctx.openChat"),
+      onSelect: () => {
+        showPane("paneChat");
+        void selectProfile(modelId);
+      },
+    },
     {
       label: t("ctx.openProfile"),
       onSelect: async () => {
@@ -2157,7 +2202,13 @@ function manEntries(manId: string): MenuEntry[] {
   return [
     // Two different things, and naming both "open" made one of them look
     // broken: his chat is what the rail switches to, his dossier is a card.
-    { label: t("ctx.openChat"), onSelect: () => void selectMan(manId) },
+    {
+      label: t("ctx.openChat"),
+      onSelect: () => {
+        showPane("paneChat");
+        void selectMan(manId);
+      },
+    },
     {
       label: t("ctx.openDossier"),
       onSelect: async () => {
@@ -2592,6 +2643,7 @@ async function runSlashCommand(raw: string): Promise<boolean> {
  * itself leaves no trace.
  */
 async function toggleTemporaryChat() {
+  showPane("paneChat");
   store.temporary = !store.temporary;
   // The two overlay chats are alternatives, never both at once.
   if (store.temporary) store.master = false;
@@ -2609,6 +2661,8 @@ async function toggleTemporaryChat() {
     toast(t("cmd.temporaryEnded"), "info");
   }
   renderChat();
+  renderScope();
+  markOverlayChat();
 }
 
 /**
@@ -2619,6 +2673,7 @@ async function toggleTemporaryChat() {
  * still obey the security level, and a folder grant still needs an answer.
  */
 async function toggleMasterChat() {
+  showPane("paneChat");
   store.master = !store.master;
   if (store.master) store.temporary = false;
   $("btnMaster").classList.toggle("active", store.master);
@@ -2642,6 +2697,7 @@ async function toggleMasterChat() {
     await loadChat();
   }
   renderAll();
+  markOverlayChat();
 }
 
 async function sendToMaster(
@@ -2984,15 +3040,11 @@ async function saveProviderThinking(providerId: string, effort: string) {
 }
 
 function bindTabs() {
-  const tabs = document.querySelectorAll<HTMLButtonElement>(".tab-btn");
-  const apply = (paneId: string) => {
-    ["paneProfiles", "paneChat", "paneMen"].forEach((id) => {
-      $(id).classList.toggle("pane-active", id === paneId);
-    });
-    tabs.forEach((tab) => tab.classList.toggle("active", tab.dataset.pane === paneId));
-  };
-  tabs.forEach((tab) => tab.addEventListener("click", () => apply(tab.dataset.pane!)));
-  apply("paneChat");
+  type Pane = Parameters<typeof showPane>[0];
+  document.querySelectorAll<HTMLButtonElement>(".tab-btn").forEach((tab) => {
+    tab.addEventListener("click", () => showPane(tab.dataset.pane as Pane));
+  });
+  showPane("paneChat");
 }
 
 /**

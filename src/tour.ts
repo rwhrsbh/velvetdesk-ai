@@ -9,8 +9,13 @@
  *
  * The first step asks for a language, and it is not a separate setting: it is
  * the app's own switch, so answering it turns the whole interface over.
+ *
+ * A phone shows one pane at a time and folds the icons into a menu, so the
+ * same tour there is a different walk: it points at the tab to press, waits
+ * for the press, and only then explains what opened. Controls that live in the
+ * menu on a phone are pointed at through the menu button.
  */
-import { escapeHtml } from "./dom";
+import { escapeHtml, isPhoneLayout, showPane } from "./dom";
 import { lang, setLang, t, type Lang } from "./i18n";
 
 export interface TourDeps {
@@ -21,34 +26,53 @@ export interface TourDeps {
 }
 
 interface Step {
-  /** Which control this step is about; centred on the screen when absent. */
-  target?: string;
+  /**
+   * Which control this step is about, as a list: the first one actually on
+   * screen is used, so one step can name the button on a wide window and the
+   * dropdown or the menu that stands in for it on a narrow one. Centred on the
+   * screen when none is there.
+   */
+  target?: string[];
   /** Dictionary key of the wording: `<key>.title` and `<key>.body`. */
   key: string;
   /** The language picker belongs to the first step only. */
   languages?: boolean;
+  /** A phone-only step: points at a tab and waits for it to be pressed. */
+  tap?: "paneProfiles" | "paneChat" | "paneMen";
+  /** Shown only when the controls are folded into the menu. */
+  phoneOnly?: boolean;
 }
 
-const STEPS: Step[] = [
+const MENU = "#btnMenu";
+const tab = (pane: string) => `.tab-btn[data-pane="${pane}"]`;
+
+const ALL_STEPS: Step[] = [
   { key: "tour.welcome", languages: true },
-  { target: "#providerChip", key: "tour.provider" },
-  { target: "#btnKeys", key: "tour.keys" },
-  { target: "#paneProfiles", key: "tour.profiles" },
-  { target: "#paneMen", key: "tour.men" },
-  { target: "#messages", key: "tour.chat" },
-  { target: "#composerInput", key: "tour.composer" },
-  { target: ".composer-left", key: "tour.tools" },
-  { target: '#modeControl [data-mode="auto"]', key: "tour.auto" },
-  { target: '#modeControl [data-mode="act"]', key: "tour.act" },
-  { target: '#modeControl [data-mode="memorize"]', key: "tour.memorize" },
-  { target: '#modeControl [data-mode="letters"]', key: "tour.letters" },
-  { target: "#securityControl", key: "tour.security" },
-  { target: "#btnPending", key: "tour.pending" },
-  { target: "#btnMaster", key: "tour.master" },
-  { target: "#btnTemporary", key: "tour.temporary" },
-  { target: "#btnDoctor", key: "tour.doctor" },
-  { target: "#btnGuide", key: "tour.again" },
+  { target: [MENU], key: "tour.menu", phoneOnly: true },
+  { target: ["#providerChip", MENU], key: "tour.provider" },
+  { target: ["#btnKeys", MENU], key: "tour.keys" },
+  { target: [tab("paneProfiles")], key: "tour.tapProfiles", tap: "paneProfiles" },
+  { target: ["#paneProfiles"], key: "tour.profiles" },
+  { target: [tab("paneMen")], key: "tour.tapMen", tap: "paneMen" },
+  { target: ["#paneMen"], key: "tour.men" },
+  { target: [tab("paneChat")], key: "tour.tapChat", tap: "paneChat" },
+  { target: ["#messages"], key: "tour.chat" },
+  { target: ["#composerInput"], key: "tour.composer" },
+  { target: [".composer-left"], key: "tour.tools" },
+  { target: ['#modeControl [data-mode="auto"]', "#modeSelect + .select-button"], key: "tour.auto" },
+  { target: ['#modeControl [data-mode="act"]', "#modeSelect + .select-button"], key: "tour.act" },
+  { target: ['#modeControl [data-mode="memorize"]', "#modeSelect + .select-button"], key: "tour.memorize" },
+  { target: ['#modeControl [data-mode="letters"]', "#modeSelect + .select-button"], key: "tour.letters" },
+  { target: ["#securityControl", "#securitySelect + .select-button"], key: "tour.security" },
+  { target: ["#btnPending", MENU], key: "tour.pending" },
+  { target: ["#btnMaster", MENU], key: "tour.master" },
+  { target: ["#btnTemporary", MENU], key: "tour.temporary" },
+  { target: ["#btnDoctor", MENU], key: "tour.doctor" },
+  { target: ["#btnGuide", MENU], key: "tour.again" },
 ];
+
+/** The walk for the window as it is laid out when the tour opens. */
+let STEPS: Step[] = ALL_STEPS;
 
 let at = 0;
 let deps: TourDeps | null = null;
@@ -58,6 +82,11 @@ let overlay: HTMLElement | null = null;
 export function startTour(next: TourDeps) {
   deps = next;
   at = 0;
+  const phone = isPhoneLayout();
+  // Tabs are pressed only where there are tabs; the menu is introduced only
+  // where there is a menu.
+  STEPS = ALL_STEPS.filter((each) => (each.tap || each.phoneOnly ? phone : true));
+  if (phone) showPane("paneChat");
   if (!overlay) {
     overlay = document.createElement("div");
     overlay.className = "tour";
@@ -66,6 +95,9 @@ export function startTour(next: TourDeps) {
     overlay.addEventListener("click", onClick);
     window.addEventListener("resize", place);
     window.addEventListener("keydown", onKey, true);
+    // Capturing, so it hears the press before the tab does — and before
+    // anything else on the page, which a waiting step must not let through.
+    window.addEventListener("click", onWaitingTap, true);
   }
   overlay.hidden = false;
   draw();
@@ -77,8 +109,29 @@ export function tourRunning(): boolean {
 }
 
 function close() {
-  if (overlay) overlay.hidden = true;
+  if (overlay) {
+    overlay.hidden = true;
+    overlay.classList.remove("tour-tap");
+  }
   deps?.onDone();
+}
+
+/**
+ * While a step waits for a tab to be pressed, only that tab and the tour's own
+ * card answer. The press on the tab goes through — it is what opens the pane —
+ * and the tour moves on once it has.
+ */
+function onWaitingTap(event: MouseEvent) {
+  if (!tourRunning() || !STEPS[at]?.tap) return;
+  const hit = event.target as HTMLElement;
+  if (document.getElementById("tourCard")?.contains(hit)) return;
+  const wanted = target();
+  if (wanted?.contains(hit)) {
+    window.setTimeout(() => step(1), 0);
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
 }
 
 function onKey(event: KeyboardEvent) {
@@ -116,23 +169,57 @@ function onClick(event: MouseEvent) {
 }
 
 function step(by: number) {
-  const next = at + by;
+  let next = at + by;
+  // Going back over a tap is not asking to press the tab again: the pane the
+  // step before it explains is brought forward by `draw` in any case.
+  while (by < 0 && next > 0 && STEPS[next]?.tap) next -= 1;
   if (next < 0) return;
   if (next >= STEPS.length) return close();
   at = next;
   draw();
 }
 
+function onScreen(element: HTMLElement): boolean {
+  const box = element.getBoundingClientRect();
+  return box.width > 0 && box.height > 0;
+}
+
 /** The element this step is about, when it is on screen. */
 function target(): HTMLElement | null {
-  const selector = STEPS[at].target;
-  if (!selector) return null;
-  return document.querySelector<HTMLElement>(selector);
+  const selectors = STEPS[at].target;
+  if (!selectors) return null;
+  for (const selector of selectors) {
+    const element = document.querySelector<HTMLElement>(selector);
+    if (element && onScreen(element)) return element;
+  }
+  return null;
+}
+
+/**
+ * On a phone, the pane a step is about has to be the one showing. A tap step
+ * gets there by the operator's own press; stepping back, or a step whose
+ * control is inside a pane, gets there here.
+ */
+function bringForward(current: Step) {
+  if (!isPhoneLayout() || current.tap || !current.target) return;
+  for (const selector of current.target) {
+    const element = document.querySelector<HTMLElement>(selector);
+    const pane = element?.closest<HTMLElement>("#paneProfiles, #paneChat, #paneMen");
+    if (!pane) continue;
+    if (!pane.classList.contains("pane-active")) {
+      showPane(pane.id as "paneProfiles" | "paneChat" | "paneMen");
+    }
+    return;
+  }
 }
 
 function draw() {
   if (!overlay) return;
   const step = STEPS[at];
+  bringForward(step);
+  // A waiting step lets the press through to the tab, and has no "next": the
+  // press is the next.
+  overlay.classList.toggle("tour-tap", Boolean(step.tap));
   const languages = step.languages
     ? `<div class="tour-langs">${(["ru", "en"] as Lang[])
         .map(
@@ -156,9 +243,11 @@ function draw() {
     (at > 0
       ? `<button class="btn btn-secondary" data-tour="back">${escapeHtml(t("tour.back"))}</button>`
       : "") +
-    `<button class="btn btn-primary" data-tour="next">${escapeHtml(
-      t(at + 1 === STEPS.length ? "tour.finish" : "tour.next"),
-    )}</button>` +
+    (step.tap
+      ? ""
+      : `<button class="btn btn-primary" data-tour="next">${escapeHtml(
+          t(at + 1 === STEPS.length ? "tour.finish" : "tour.next"),
+        )}</button>`) +
     `</div></div>`;
   place();
 }
