@@ -13,6 +13,7 @@ import {
   openModal,
   toast,
   whenFree,
+  promptDialog,
 } from "./dom";
 import {
   copyText,
@@ -1535,11 +1536,18 @@ function bindFolderHeads(listId: string, rail: "profile" | "man") {
     if (menu) {
       event.stopPropagation();
       const name = menu.dataset.folderMenu ?? "";
-      const renamed = prompt(t("folder.renamePrompt", { name }), name);
-      if (renamed === null) return;
-      // An empty name means "take it apart": the cards come back out, and
-      // saying so in a prompt is clearer than a second button nobody reads.
-      void folderAction(rail, name, renamed.trim());
+      void promptDialog({
+        title: t("folder.renameTitle"),
+        label: t("folder.renameNote", { name }),
+        value: name,
+        confirmLabel: t("common.save"),
+        // Taking the folder apart is its own button rather than a name left
+        // empty: nobody guesses that, and it reads as a slip when it works.
+        extra: { label: t("folder.dissolve"), answer: "", danger: true },
+      }).then((renamed) => {
+        if (renamed === null) return;
+        void folderAction(rail, name, renamed);
+      });
       return;
     }
     const head = target.closest<HTMLElement>(".folder-head");
@@ -1561,8 +1569,10 @@ function bindReordering(listId: string, attribute: "profile" | "man", save: (ids
   let grabY = 0;
   let grabX = 0;
   let moved = false;
-  /** The folder under the pointer, when the card is over one. */
-  let overFolder: string | null = null;
+  /** The folder the card came out of; "" is the top level, which is one too. */
+  let cameFrom = "";
+  /** The folder it would go into if it were let go now. */
+  let goingTo = "";
 
   // The list as it stood when the drag began.
   //
@@ -1573,9 +1583,11 @@ function bindReordering(listId: string, attribute: "profile" | "man", save: (ids
   // card afresh several times a second, and that was most of the cost.
   type Spot = { el: HTMLElement; middle: number; shifted: number };
   let spots: Spot[] = [];
-  /** Folder headings: a card dropped on one goes in rather than beside it. */
-  type Head = { el: HTMLElement; top: number; bottom: number; folder: string };
-  let heads: Head[] = [];
+  // A folder is a place, not a line: its heading and its contents together are
+  // one target, and so is the unfiled area at the top. Aiming used to mean
+  // hitting the heading itself, which is a few pixels tall.
+  type Zone = { name: string; top: number; bottom: number; parts: HTMLElement[] };
+  let zones: Zone[] = [];
   /** Where the held card came from, and how far one place is. */
   let from = 0;
   let slot = 0;
@@ -1588,15 +1600,32 @@ function bindReordering(listId: string, attribute: "profile" | "man", save: (ids
 
   function measure() {
     spots = [];
-    heads = [];
-    for (const el of list.querySelectorAll<HTMLElement>(`[data-${attribute}], .folder-head`)) {
+    for (const el of list.querySelectorAll<HTMLElement>(`[data-${attribute}]`)) {
       const box = el.getBoundingClientRect();
-      if (el.classList.contains("folder-head")) {
-        heads.push({ el, top: box.top, bottom: box.bottom, folder: el.dataset.folder ?? "" });
-        continue;
-      }
       spots.push({ el, middle: box.top + box.height / 2, shifted: 0 });
     }
+
+    zones = [];
+    const zoneFor = (name: string) => {
+      let zone = zones.find((each) => each.name === name);
+      if (!zone) {
+        zone = { name, top: Infinity, bottom: -Infinity, parts: [] };
+        zones.push(zone);
+      }
+      return zone;
+    };
+    for (const el of list.querySelectorAll<HTMLElement>(".folder-head, [data-folder-body]")) {
+      const name = el.classList.contains("folder-head")
+        ? (el.dataset.folder ?? "")
+        : (el.dataset.folderBody ?? "");
+      const box = el.getBoundingClientRect();
+      const zone = zoneFor(name);
+      zone.top = Math.min(zone.top, box.top);
+      zone.bottom = Math.max(zone.bottom, box.bottom);
+      zone.parts.push(el);
+    }
+    cameFrom = card?.closest<HTMLElement>("[data-folder-body]")?.dataset.folderBody ?? "";
+    goingTo = cameFrom;
     from = spots.findIndex((spot) => spot.el === card);
     // One place is the distance between two neighbours' middles — the card's
     // own height plus whatever sits between them.
@@ -1637,11 +1666,14 @@ function bindReordering(listId: string, attribute: "profile" | "man", save: (ids
     card?.classList.remove("dragging");
     card = null;
     moved = false;
-    overFolder = null;
+    cameFrom = "";
+    goingTo = "";
     for (const spot of spots) spot.el.style.transform = "";
-    for (const head of heads) head.el.classList.remove("taking");
+    for (const zone of zones) {
+      for (const part of zone.parts) part.classList.remove("taking");
+    }
     spots = [];
-    heads = [];
+    zones = [];
     list.classList.remove("reordering");
     setDragging(false);
   };
@@ -1657,17 +1689,35 @@ function bindReordering(listId: string, attribute: "profile" | "man", save: (ids
       ghost.style.transform = `translate3d(${pointerX - grabX}px, ${pointerY - grabY}px, 0) rotate(-1.5deg)`;
     }
 
-    let folder: string | null = null;
-    for (const head of heads) {
-      if (pointerY >= head.top && pointerY <= head.bottom) folder = head.folder;
+    // Which folder the pointer is over. Outside all of them — the padding
+    // under the last card — the card stays where it came from rather than
+    // being filed somewhere by accident.
+    let over = cameFrom;
+    let matched = false;
+    let lowest = -Infinity;
+    for (const zone of zones) {
+      lowest = Math.max(lowest, zone.bottom);
+      if (pointerY >= zone.top && pointerY <= zone.bottom) {
+        over = zone.name;
+        matched = true;
+      }
     }
-    if (folder !== overFolder) {
-      for (const head of heads) head.el.classList.toggle("taking", head.folder === folder);
-      overFolder = folder;
-      // Over a folder the card is going in, not between: the gap closes.
-      if (folder !== null) place(from);
+    // The empty tail below the last folder is the top level: dropping a card
+    // on the floor of the rail is how one asks for it to come out again.
+    if (!matched && pointerY > lowest) over = "";
+    if (over !== goingTo) {
+      for (const zone of zones) {
+        const lit = zone.name === over && over !== cameFrom;
+        for (const part of zone.parts) part.classList.toggle("taking", lit);
+      }
+      goingTo = over;
     }
-    if (folder !== null) return;
+    // Bound for another folder: the card is going in, not between, so the gap
+    // where it came from closes again.
+    if (goingTo !== cameFrom) {
+      place(from);
+      return;
+    }
 
     // Counted against where the cards started, not where they are now: the
     // answer then does not depend on the gap it is deciding.
@@ -1731,7 +1781,8 @@ function bindReordering(listId: string, attribute: "profile" | "man", save: (ids
     const held = card;
     const wasDragged = moved;
     const dropped = held.dataset[attribute] ?? "";
-    const folder = overFolder;
+    const from_ = cameFrom;
+    const into = goingTo;
     const target = landing;
     const startedAt = from;
     const others = spots.filter((spot) => spot.el !== held);
@@ -1742,16 +1793,19 @@ function bindReordering(listId: string, attribute: "profile" | "man", save: (ids
     // The click that follows the release belongs to the drag, not to the
     // card it landed on: without this, moving a dossier also opens it.
     swallowNextClick = true;
-    if (folder !== null && dropped) {
-      file(attribute, dropped, folder);
+    // Into another folder, or back out to the top level, which "" means.
+    if (into !== from_ && dropped) {
+      file(attribute, dropped, into);
       return;
     }
     if (target === startedAt || !dropped) return;
     // The list is put in its new order once, here, rather than on every frame
     // of the drag — and before the save, so nothing jumps back while the
-    // gateway is answering.
-    if (before) list.insertBefore(held, before);
-    else list.appendChild(held);
+    // gateway is answering. Inside the box it already lives in: a card moved
+    // out of its folder is filed, not reordered.
+    const home = before?.parentElement ?? held.parentElement ?? list;
+    if (before) home.insertBefore(held, before);
+    else home.appendChild(held);
     ids.splice(target, 0, dropped);
     save(ids);
   };
@@ -1788,8 +1842,14 @@ function bindPanels() {
   bindFolderHeads("menList", "man");
 
   $("btnAddProfileFolder").addEventListener("click", () => {
-    const name = prompt(t("folder.newPrompt"), t("folder.newDefault"));
-    if (name?.trim()) void folderAction("profile", name.trim(), null);
+    void promptDialog({
+      title: t("folder.newTitle"),
+      label: t("folder.newPrompt"),
+      value: t("folder.newDefault"),
+      confirmLabel: t("common.save"),
+    }).then((name) => {
+      if (name) void folderAction("profile", name, null);
+    });
   });
 
   $("btnAddManFolder").addEventListener("click", () => {
@@ -1797,8 +1857,14 @@ function bindPanels() {
       toast(t("toast.pickProfile"), "error");
       return;
     }
-    const name = prompt(t("folder.newPrompt"), t("folder.newDefault"));
-    if (name?.trim()) void folderAction("man", name.trim(), null);
+    void promptDialog({
+      title: t("folder.newTitle"),
+      label: t("folder.newPrompt"),
+      value: t("folder.newDefault"),
+      confirmLabel: t("common.save"),
+    }).then((name) => {
+      if (name) void folderAction("man", name, null);
+    });
   });
 
   bindReordering("profileList", "profile", (ids) => {

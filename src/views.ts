@@ -140,7 +140,12 @@ function grouped<T extends { folder?: string }>(
   // A folder that was deleted on another device leaves its cards behind; they
   // are shown at the top level rather than disappearing with it.
   const orphans = cards.filter((card) => card.folder && !known.has(card.folder));
-  let html = [...loose, ...orphans].map(draw).join("");
+  // The unfiled cards live in a box of their own, unmarked on screen. It is
+  // there so that the top level is somewhere a card can be dropped: without
+  // it there was no way to take a card out of a folder again.
+  let html = `<div class="loose-body" data-folder-body="">${[...loose, ...orphans]
+    .map(draw)
+    .join("")}</div>`;
 
   for (const name of folders) {
     const inside = cards.filter((card) => card.folder === name);

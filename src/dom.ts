@@ -258,12 +258,24 @@ export function confirmDialog(options: {
   });
 }
 
+/**
+ * Ask for one line, or a paragraph, in the app's own dialog.
+ *
+ * Used wherever the webview's `prompt` used to be: that one is a grey box
+ * titled with the address the app is served from — "tauri localhost" — which
+ * looks like something else's window asking the question.
+ *
+ * A third button can be offered for an answer that is not a name at all, such
+ * as taking a folder apart; it resolves with whatever `answer` says.
+ */
 export function promptDialog(options: {
   title: string;
   label: string;
   placeholder?: string;
   value?: string;
   multiline?: boolean;
+  confirmLabel?: string;
+  extra?: { label: string; answer: string; danger?: boolean };
 }): Promise<string | null> {
   return new Promise((resolve) => {
     let settled = false;
@@ -284,8 +296,17 @@ export function promptDialog(options: {
       `<h3>${escapeHtml(options.title)}</h3>
        <div class="field"><label>${escapeHtml(options.label)}</label>${input}</div>
        <div class="modal-actions">
+         ${
+           options.extra
+             ? `<button class="btn ${
+                 options.extra.danger ? "btn-danger" : "btn-secondary"
+               }" data-act="extra">${escapeHtml(options.extra.label)}</button>`
+             : ""
+         }
          <button class="btn btn-secondary" data-act="cancel">${t("common.cancel")}</button>
-         <button class="btn btn-primary" data-act="ok">${t("common.ok")}</button>
+         <button class="btn btn-primary" data-act="ok">${escapeHtml(
+           options.confirmLabel ?? t("common.ok"),
+         )}</button>
        </div>`,
       () => done(null),
     );
@@ -296,11 +317,16 @@ export function promptDialog(options: {
       done(value.length ? value : null);
       closeModal();
     };
+    field?.select();
     card.querySelector<HTMLButtonElement>('[data-act="cancel"]')?.addEventListener("click", () => {
       done(null);
       closeModal();
     });
     card.querySelector<HTMLButtonElement>('[data-act="ok"]')?.addEventListener("click", submit);
+    card.querySelector<HTMLButtonElement>('[data-act="extra"]')?.addEventListener("click", () => {
+      done(options.extra!.answer);
+      closeModal();
+    });
     field?.addEventListener("keydown", (raw) => {
       const event = raw as KeyboardEvent;
       if (event.key === "Enter" && (!options.multiline || event.ctrlKey)) submit();

@@ -673,6 +673,101 @@ input[type="range"] {
 }
 
 /* The gap the card left behind: still in the list, holding its place. */
+/* Folders on a rail.
+   The heading is a drop target, so it is the height of a row rather than of a
+   line of text, and the whole folder — heading and contents together — takes
+   what is dropped on it. Aiming at a two-pixel line was the old way. */
+.folder-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  margin-top: 5px;
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  font-size: 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+}
+
+.folder-head:hover {
+  color: var(--text);
+  border-color: var(--text-faint);
+}
+
+.folder-caret {
+  width: 9px;
+  font-size: 10px;
+  flex: 0 0 auto;
+}
+
+.folder-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.folder-count {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.folder-edit {
+  flex: 0 0 auto;
+  opacity: 0;
+}
+
+.folder-head:hover .folder-edit,
+.folder-head.taking .folder-edit {
+  opacity: 1;
+}
+
+.folder-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 22px;
+  margin-left: 7px;
+  padding: 3px 0 3px 9px;
+  border-left: 1px solid var(--line);
+  border-radius: 0 0 var(--r-sm) var(--r-sm);
+}
+
+.loose-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 22px;
+  border-radius: var(--r-sm);
+}
+
+/* Where the held card would go. The whole folder lights up, not a hairline,
+   and the top level lights up the same way when a card is on its way out. */
+.folder-head.taking,
+.folder-body.taking,
+.loose-body.taking {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--sunken));
+}
+
+.loose-body.taking,
+.folder-body.taking {
+  outline: 1px dashed var(--accent);
+  outline-offset: -2px;
+}
+
 /* While a card is being carried its neighbours are moved by transform only,
    so the slide costs the compositor a frame and the page no layout at all. */
 .reordering .row-card {
