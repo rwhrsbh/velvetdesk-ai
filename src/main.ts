@@ -2443,6 +2443,7 @@ async function refreshCloudGauge() {
     gauge.hidden = false;
     gauge.classList.toggle("warn", Math.min(five, week) <= 15);
     $("cloudLabel").textContent = t("composer.cloudLeft", { five, week });
+    $("cloudShort").textContent = t("composer.cloudLeftShort", { five, week });
     gauge.title = t("composer.cloudLeftHint", { five, week });
   } catch {
     gauge.hidden = true;
@@ -2828,7 +2829,7 @@ function markSending(_busy?: boolean) {
   const typed = ($("composerInput") as HTMLTextAreaElement).value.trim();
   const holding = typed.length > 0 || store.attachments.length > 0;
   const stopping = store.busy && !holding;
-  button.textContent = store.busy
+  $("sendLabel").textContent = store.busy
     ? t(holding ? "composer.queue" : "composer.stopRun")
     : t("composer.send");
   button.classList.toggle("btn-danger", stopping);

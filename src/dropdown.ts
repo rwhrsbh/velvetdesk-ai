@@ -1,4 +1,5 @@
 import { closeContextMenu, isContextMenuOpen, openContextMenu, type MenuEntry } from "./context-menu";
+import { t } from "./i18n";
 
 /**
  * The app's own dropdowns, over the browser's.
@@ -157,7 +158,25 @@ export function syncSelect(select: HTMLSelectElement) {
   const button = dressed.get(select);
   if (!button) return;
   const chosen = select.options[select.selectedIndex];
-  button.textContent = chosen?.textContent?.trim() || select.value;
+  const full = chosen?.textContent?.trim() || select.value;
+  // An option can carry a shorter wording for a narrow screen. Both are on the
+  // button and the stylesheet decides which one shows, so turning the phone or
+  // resizing the window needs no code at all.
+  const shortKey = chosen?.dataset.i18nShort;
+  if (shortKey) {
+    button.textContent = "";
+    for (const [className, text] of [
+      ["label-full", full],
+      ["label-short", t(shortKey)],
+    ]) {
+      const span = document.createElement("span");
+      span.className = className;
+      span.textContent = text;
+      button.appendChild(span);
+    }
+  } else {
+    button.textContent = full;
+  }
   const caret = document.createElement("span");
   caret.className = "select-caret";
   caret.textContent = "▾";

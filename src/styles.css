@@ -2556,6 +2556,13 @@ details.advanced[open] {
   }
 }
 
+/* The shorter wording and the send icons belong to a phone; a wide window
+   keeps its words. */
+.label-short,
+.send-icon {
+  display: none;
+}
+
 /* A chat that will not be kept, marked on the pane itself: on a phone the
    button that says so is folded away in the menu. */
 .chat-temporary .center-header {
@@ -2597,49 +2604,115 @@ details.advanced[open] {
     max-height: 150px;
   }
 
+  /* One row, everything on it. Each control gives up its words for an icon or
+     a shorter word, the gauges stack into one column, and if a very narrow
+     screen still runs out the tools scroll sideways rather than wrap. */
   .composer-bar {
     gap: 6px;
     flex-wrap: nowrap;
-    align-items: flex-end;
+    align-items: center;
   }
 
   .composer-left {
     gap: 4px;
     min-width: 0;
+    flex: 1 1 auto;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .composer-left::-webkit-scrollbar {
+    display: none;
+  }
+
+  .composer-left > * {
+    flex: 0 0 auto;
   }
 
   .composer-left .btn,
   .composer-left .select-button {
-    height: 30px;
-    padding: 0 8px;
-    font-size: 12px;
+    height: 28px;
+    padding: 0 7px;
+    gap: 3px;
+    font-size: 11.5px;
+  }
+
+  .composer-left .btn-attach {
+    width: 28px;
+    padding: 0;
   }
 
   .composer-left .btn-mic-menu {
-    padding: 0 6px;
+    padding: 0 5px;
   }
 
-  /* The microphone speaks for itself; its word is the widest thing in the row. */
+  .composer-left .select-caret {
+    margin-left: 0;
+  }
+
+  /* The microphone speaks for itself; its word was the widest thing in the row. */
   #micLabel {
     display: none;
   }
 
   .composer-left .toggle {
+    gap: 3px;
     font-size: 11.5px;
   }
 
-  .composer-right {
-    gap: 6px;
-    flex: 0 0 auto;
-  }
-
-  .composer-right .ctx-gauge {
+  .label-full {
     display: none;
   }
 
+  .label-short {
+    display: inline;
+  }
+
+  .composer-right {
+    flex: 0 0 auto;
+    display: grid;
+    grid-auto-flow: column;
+    grid-template-rows: auto auto;
+    align-items: center;
+    column-gap: 6px;
+    row-gap: 1px;
+  }
+
+  .composer-right .ctx-gauge {
+    gap: 3px;
+    font-size: 10px;
+    line-height: 1.2;
+    justify-content: flex-end;
+  }
+
+  .composer-right .ctx-bar {
+    width: 16px;
+  }
+
   #btnSend {
+    grid-row: 1 / span 2;
+    width: 34px;
     height: 34px;
-    padding: 0 12px;
+    padding: 0;
+    justify-content: center;
+    border-radius: 50%;
+  }
+
+  #btnSend #sendLabel {
+    display: none;
+  }
+
+  #btnSend .send-go {
+    display: block;
+  }
+
+  #btnSend.btn-danger .send-go {
+    display: none;
+  }
+
+  #btnSend.btn-danger .send-stop {
+    display: block;
   }
 
   .rail,

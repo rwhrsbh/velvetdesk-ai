@@ -200,12 +200,12 @@
                   <svg width="18" height="18" viewBox="0 0 16 16"><use href="#i-clip" /></svg>
                 </button>
                 <select class="field-input compact" id="thinkingSelect" data-i18n-title="composer.thinkingHint">
-                  <option value="" data-i18n="thinking.auto">думает: авто</option>
-                  <option value="none" data-i18n="thinking.none">без раздумий</option>
-                  <option value="low" data-i18n="thinking.low">коротко</option>
-                  <option value="medium" data-i18n="thinking.medium">средне</option>
-                  <option value="high" data-i18n="thinking.high">глубоко</option>
-                  <option value="xhigh" data-i18n="thinking.xhigh">максимум</option>
+                  <option value="" data-i18n="thinking.auto" data-i18n-short="thinking.short.auto">думает: авто</option>
+                  <option value="none" data-i18n="thinking.none" data-i18n-short="thinking.short.none">без раздумий</option>
+                  <option value="low" data-i18n="thinking.low" data-i18n-short="thinking.short.low">коротко</option>
+                  <option value="medium" data-i18n="thinking.medium" data-i18n-short="thinking.short.medium">средне</option>
+                  <option value="high" data-i18n="thinking.high" data-i18n-short="thinking.short.high">глубоко</option>
+                  <option value="xhigh" data-i18n="thinking.xhigh" data-i18n-short="thinking.short.xhigh">максимум</option>
                 </select>
                 <select class="field-input compact" id="channelSelect" data-i18n-title="composer.channel">
                   <option value="chat" data-i18n="composer.chat">чат</option>
@@ -213,7 +213,8 @@
                 </select>
                 <label class="toggle" data-i18n-title="composer.logHint">
                   <input type="checkbox" id="logIncoming" />
-                  <span data-i18n="composer.log">записать его письмо</span>
+                  <span class="label-full" data-i18n="composer.log">записать его письмо</span>
+                  <span class="label-short" data-i18n="composer.logShort">его</span>
                 </label>
               </div>
               <div class="composer-right">
@@ -222,9 +223,21 @@
                   <span id="ctxLabel"></span>
                 </span>
                 <span class="ctx-gauge" id="cloudGauge" hidden>
-                  <span id="cloudLabel"></span>
+                  <span class="label-full" id="cloudLabel"></span>
+                  <span class="label-short" id="cloudShort"></span>
                 </span>
-                <button class="btn btn-primary" id="btnSend" data-i18n="composer.send">Выполнить</button>
+                <!-- The label is its own span so the phone can show the icon
+                     alone; the code that says "send", "queue" or "stop" writes
+                     only the words. -->
+                <button class="btn btn-primary" id="btnSend">
+                  <svg class="send-icon send-go" width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" />
+                  </svg>
+                  <svg class="send-icon send-stop" width="13" height="13" viewBox="0 0 16 16">
+                    <rect x="3" y="3" width="10" height="10" rx="2" fill="currentColor" />
+                  </svg>
+                  <span id="sendLabel" data-i18n="composer.send">Выполнить</span>
+                </button>
               </div>
             </div>
           </div>
