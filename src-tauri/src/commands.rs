@@ -627,7 +627,7 @@ pub async fn digest_chat(
     man_id: String,
     keep_last: Option<usize>,
 ) -> Result<agent::DigestPreview> {
-    entitlement::ensure_room(&state.paths)?;
+    entitlement::ensure_room_online(&state.paths, &state.llm.http).await?;
     let settings = state.settings_view();
     let provider = state.active_provider()?;
     let pool = state.pool(&provider.id);
@@ -644,7 +644,7 @@ pub async fn digest_chat(
         cancel: agent::never_cancelled(),
     };
     let preview = agent::digest_preview(&deps, &model_id, &man_id, keep_last.unwrap_or(6)).await?;
-    entitlement::charge(&state.paths)?;
+    entitlement::charge_online(&state.paths, &state.llm.http).await?;
     Ok(preview)
 }
 
@@ -750,7 +750,7 @@ pub async fn run_agent(
     state: State<'_, AppState>,
     input: RunInput,
 ) -> Result<RunOutput> {
-    entitlement::ensure_room(&state.paths)?;
+    entitlement::ensure_room_online(&state.paths, &state.llm.http).await?;
     let settings = state.settings_view();
     let provider = state.active_provider()?;
     let pool = state.pool(&provider.id);
@@ -773,7 +773,7 @@ pub async fn run_agent(
     let output = agent::run(&deps, input).await;
     state.drop_cancel(&run_id);
     let output = output?;
-    entitlement::charge(&state.paths)?;
+    entitlement::charge_online(&state.paths, &state.llm.http).await?;
     // The actions reached the queue as they were made; nothing to add here.
     storage::rebuild_index(&state.paths)?;
     Ok(output)
@@ -860,7 +860,7 @@ pub async fn compact_chat(
     model_id: String,
     man_id: Option<String>,
 ) -> Result<AgentLog> {
-    entitlement::ensure_room(&state.paths)?;
+    entitlement::ensure_room_online(&state.paths, &state.llm.http).await?;
     let settings = state.settings_view();
     let provider = state.active_provider()?;
     let pool = state.pool(&provider.id);
@@ -878,7 +878,7 @@ pub async fn compact_chat(
         cancel: agent::never_cancelled(),
     };
     let log = agent::compact_chat(&deps, &model_id, man_id.as_deref()).await?;
-    entitlement::charge(&state.paths)?;
+    entitlement::charge_online(&state.paths, &state.llm.http).await?;
     Ok(log)
 }
 
@@ -946,7 +946,7 @@ pub async fn master_chat(
     state: State<'_, AppState>,
     input: agent::master::MasterInput,
 ) -> Result<agent::master::MasterOutput> {
-    entitlement::ensure_room(&state.paths)?;
+    entitlement::ensure_room_online(&state.paths, &state.llm.http).await?;
     let settings = state.settings_view();
     let provider = state.active_provider()?;
     let pool = state.pool(&provider.id);
@@ -969,7 +969,7 @@ pub async fn master_chat(
     let output = agent::master::chat(&deps, input).await;
     state.drop_cancel(&run_id);
     let output = output?;
-    entitlement::charge(&state.paths)?;
+    entitlement::charge_online(&state.paths, &state.llm.http).await?;
     // The actions reached the queue as they were made; nothing to add here.
     Ok(output)
 }
@@ -2042,7 +2042,7 @@ pub async fn transcribe(
     }
     // Dictation is a model call like any other, and costs the free plan one
     // — once it has come back with words.
-    entitlement::ensure_room(&state.paths)?;
+    entitlement::ensure_room_online(&state.paths, &state.llm.http).await?;
     let provider = {
         let settings = state.settings.read();
         settings
@@ -2066,7 +2066,7 @@ pub async fn transcribe(
     {
         Ok(text) => {
             pool.report_success(lease.index);
-            entitlement::charge(&state.paths)?;
+            entitlement::charge_online(&state.paths, &state.llm.http).await?;
             Ok(text)
         }
         Err(err) => {

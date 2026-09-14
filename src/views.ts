@@ -442,8 +442,8 @@ function stepHtml(step: RunStep): string {
   const head =
     `<span class="step-caret">›</span>` +
     tool +
-    `<span class="step-text">${escapeHtml(stepText(step))}</span>` +
     badge +
+    `<span class="step-text">${escapeHtml(stepText(step))}</span>` +
     answer;
 
   if (parts.length === 0) {
@@ -538,15 +538,15 @@ export function renderChat() {
         entry.sender === "assistant" && !entry.transient
           ? `<div class="msg-actions">
                ${again}
-               <button data-act="copy" data-entry="${escapeHtml(entry.id)}">${t("chat.copy")}</button>
+               <button data-act="copy" data-entry="${escapeHtml(entry.id)}" title="${escapeHtml(t("chat.copy"))}"><span class="label-full">${t("chat.copy")}</span><span class="label-short">${COPY_ICON}</span></button>
                ${
                  filed
                    ? `<span class="msg-filed">${escapeHtml(t("chat.alreadyLogged"))}</span>`
-                   : `<button data-act="send-as-outgoing" data-entry="${escapeHtml(entry.id)}">${t("chat.asOutgoing")}</button>`
+                   : `<button data-act="send-as-outgoing" data-entry="${escapeHtml(entry.id)}" title="${escapeHtml(t("chat.asOutgoing"))}"><span class="label-full">${t("chat.asOutgoing")}</span><span class="label-short">${t("chat.asOutgoingShort")}</span></button>`
                }
                ${
                  meta.raw
-                   ? `<button data-act="raw" data-entry="${escapeHtml(entry.id)}">${t("chat.raw")}</button>`
+                   ? `<button data-act="raw" data-entry="${escapeHtml(entry.id)}" title="${escapeHtml(t("chat.raw"))}"><span class="label-full">${t("chat.raw")}</span><span class="label-short">${t("chat.rawShort")}</span></button>`
                    : ""
                }
 
@@ -620,6 +620,11 @@ const RETRY_ICON =
   '<path d="M13.5 8a5.5 5.5 0 1 1-1.7-3.97" /><path d="M13.6 2.4v3.2h-3.2" /></svg>';
 
 /** Pencil: send the same thing again, worded differently. */
+const COPY_ICON =
+  '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" ' +
+  'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<rect x="5.5" y="5.5" width="8" height="8" rx="1.6" /><path d="M10.5 3.2V3a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 3v5A1.5 1.5 0 0 0 4 9.5h.2" /></svg>';
+
 const PENCIL_ICON =
   '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" ' +
   'stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +

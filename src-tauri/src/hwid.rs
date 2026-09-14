@@ -27,7 +27,11 @@ static CACHED: OnceLock<String> = OnceLock::new();
 pub fn device_id(paths: &Paths) -> String {
     CACHED
         .get_or_init(|| {
-            let raw = platform_id().unwrap_or_else(|| fallback_id(paths));
+            #[cfg(target_os = "android")]
+            let found = platform_id_in(paths).or_else(platform_id);
+            #[cfg(not(target_os = "android"))]
+            let found = platform_id();
+            let raw = found.unwrap_or_else(|| fallback_id(paths));
             let mut hash = Sha256::new();
             // Labelled, so the same machine id used by something else of
             // ours would not produce the same string.
@@ -87,10 +91,30 @@ fn platform_id() -> Option<String> {
         .map(|uuid| uuid.to_string())
 }
 
+/// Android: the id the system keeps for this app on this handset.
+///
+/// The data directory goes with a reinstall, so an id stored in it counted a
+/// reinstalled phone as a new one. ANDROID_ID survives a reinstall (it changes
+/// only with a factory reset or a different signing key). The activity writes
+/// it beside the app's data before the core starts, because reading it takes
+/// the Java side.
+#[cfg(target_os = "android")]
+fn platform_id_in(paths: &Paths) -> Option<String> {
+    let mut dir = Some(paths.root.as_path());
+    while let Some(here) = dir {
+        if let Ok(text) = std::fs::read_to_string(here.join("android_id")) {
+            let id = text.trim();
+            if !id.is_empty() {
+                return Some(format!("android:{id}"));
+            }
+        }
+        dir = here.parent();
+    }
+    None
+}
+
 #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
 fn platform_id() -> Option<String> {
-    // Phones: the data directory is per-install and cannot be copied to
-    // another handset without root, so the stored id is the honest answer.
     None
 }
 

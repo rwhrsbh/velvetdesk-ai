@@ -27,6 +27,11 @@ pub fn router(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/v1/models", get(models))
         .route("/v1/usage", get(usage))
+        // A copy with no licence: what it has left today, and spending one.
+        // Open, like buying — there is no licence to show — and keyed by the
+        // machine, so a reinstall does not start the day over.
+        .route("/v1/free/meter", get(free_meter))
+        .route("/v1/free/charge", post(free_charge))
         .route("/v1/chat/completions", post(chat_completions))
         // Dictation, in the shape every OpenAI client already speaks, so the
         // desktop needs no special case for it.
@@ -275,6 +280,57 @@ fn device_id(headers: &HeaderMap) -> String {
         .filter(|id| !id.is_empty() && id.len() <= 64)
         .unwrap_or("unnamed")
         .to_string()
+}
+
+/// Actions a machine without a licence gets in a day, by the gateway's clock.
+const FREE_PER_DAY: u32 = 30;
+
+fn free_answer(device: &str, day: i64, used: u32) -> Json<Value> {
+    let now = now();
+    Json(json!({
+        "device": device,
+        "day": day,
+        "used": used,
+        "cap": FREE_PER_DAY,
+        "resets_in": ((day + 1) * 86_400 - now).max(0),
+    }))
+}
+
+/// The machine's standing: nobody's number to set but ours.
+fn free_device(headers: &HeaderMap) -> Result<String, ApiError> {
+    let device = device_id(headers);
+    if device == "unnamed" {
+        return Err(ApiError::Forbidden("a device id is required".into()));
+    }
+    Ok(device)
+}
+
+async fn free_meter(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, ApiError> {
+    let device = free_device(&headers)?;
+    let day = now().div_euclid(86_400);
+    let used = state.db.free_used(&device, day)?;
+    Ok(free_answer(&device, day, used))
+}
+
+async fn free_charge(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError> {
+    let device = free_device(&headers)?;
+    let now = now();
+    let day = now.div_euclid(86_400);
+    // Only a claim about today counts: yesterday's offline count is spent.
+    let claimed = if body.get("day").and_then(Value::as_i64) == Some(day) {
+        body.get("used").and_then(Value::as_u64).unwrap_or(0).min(10_000) as u32
+    } else {
+        0
+    };
+    let used = state.db.free_charge(&device, day, claimed, now)?;
+    Ok(free_answer(&device, day, used))
 }
 
 /// Take a seat on the licence, or explain that they are all taken.

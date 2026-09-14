@@ -76,7 +76,7 @@ if (!activity) {
   process.exit(1);
 }
 const source = readFileSync(activity, "utf8");
-if (source.includes("setOnApplyWindowInsetsListener")) {
+if (source.includes("ANDROID_ID")) {
   console.log("[patch-android] activity already patched");
 } else {
   const pkg = source.match(/^package\s+([\w.]+)/m)?.[1];
@@ -90,6 +90,8 @@ if (source.includes("setOnApplyWindowInsetsListener")) {
 
 import android.graphics.Color
 import android.os.Bundle
+import android.provider.Settings
+import java.io.File
 import android.view.View
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -97,6 +99,14 @@ import androidx.core.view.WindowInsetsCompat
 
 class MainActivity : TauriActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
+    // The machine id the core counts seats and the free allowance by. The
+    // data folder goes with a reinstall; this id does not. Written before the
+    // core starts, which happens inside super.onCreate.
+    try {
+      val id = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
+      if (!id.isNullOrBlank()) File(applicationInfo.dataDir, "android_id").writeText(id)
+    } catch (_: Exception) {
+    }
     super.onCreate(savedInstanceState)
 
     WindowCompat.setDecorFitsSystemWindows(window, false)

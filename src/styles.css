@@ -2761,6 +2761,30 @@ details.advanced[open] {
     display: none;
   }
 
+  /* The buttons under an answer keep one row: copy is its icon, the others
+     take their short words. */
+  .msg-actions {
+    flex-wrap: nowrap;
+    gap: 4px;
+  }
+
+  .msg-actions button {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 8px;
+  }
+
+  .msg-actions .label-short svg {
+    display: block;
+  }
+
+  /* A step: the tool and its badge on the first line, what it did under
+     them at full width, the answer buttons after. */
+  .step-text {
+    flex-basis: 100%;
+    padding-left: 16px;
+  }
+
   #btnSend .send-go {
     display: block;
   }

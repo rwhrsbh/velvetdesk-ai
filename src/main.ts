@@ -988,6 +988,17 @@ async function dispatchMessage(
 ) {
   if (typed.startsWith("/") && (await runSlashCommand(typed))) return;
 
+  // Nothing selected — no profile yet, or none picked — is not a reason to
+  // drop what was typed. The master chat is the one conversation that needs
+  // no profile: it is where the message goes, and it is opened so the answer
+  // is on screen and in its history rather than in a toast nobody read.
+  if (!target.master && !target.modelId) {
+    if (!typed) return;
+    if (!store.master) await toggleMasterChat();
+    await sendToMaster(typed, attached, currentTarget());
+    return;
+  }
+
   // Letters are not a conversation: the brief goes to one man or to a whole
   // list, and each letter comes back as its own card.
   if (store.mode === "letters" && !target.master) {
@@ -3484,6 +3495,10 @@ async function boot() {
 
     const preferred = data.settings.active_model_id ?? data.profiles[0]?.id ?? null;
     if (preferred) await selectProfile(preferred, false);
+    // With no profile at all the chat on screen is the master's: it is the
+    // one that works without one, and the empty "no profile selected" pane
+    // looked like a chat that swallowed whatever was sent to it.
+    else if (!store.master) await toggleMasterChat();
 
     renderAll();
     await refreshPlanChip();

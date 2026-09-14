@@ -427,6 +427,12 @@ pub struct Meter {
     /// it is here so support can tell a broken RTC from a wound-back one.
     #[serde(default)]
     pub rewinds: u32,
+    /// The gateway's day on which this copy last heard its count from the
+    /// gateway. A fresh install has none, and until it has asked it spends
+    /// nothing: otherwise deleting the data folder while offline would be a
+    /// way back to a full day.
+    #[serde(default)]
+    pub synced_day: i64,
 }
 
 fn day_of(unix: i64) -> i64 {
@@ -493,6 +499,117 @@ pub fn charge(paths: &Paths) -> Result<Meter> {
     meter.used = meter.used.saturating_add(1);
     write_json(&paths.meter_file(), &meter)?;
     Ok(meter)
+}
+
+// ------------------------------------------------------------------ gateway
+//
+// The meter above lives on the machine, and so it goes with the machine's
+// data: a reinstall or a cleared folder used to hand out a fresh thirty. The
+// gateway keeps the same count by device id, by its own clock, and the copy
+// here takes whichever is higher. Offline, the copy counts on its own — but
+// only once it has heard from the gateway today, so a wiped install that
+// cannot reach it has nothing to spend.
+
+/// Whether a real gateway was built in. A development build pointed at the
+/// default local address has nobody to ask, and is not held to it.
+fn gateway_counts() -> bool {
+    let base = cloud_base_url();
+    !base.is_empty() && base != DEFAULT_CLOUD_BASE_URL
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+struct Remote {
+    day: i64,
+    used: u32,
+    #[serde(default)]
+    resets_in: i64,
+}
+
+const GATEWAY_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+async fn ask_gateway(
+    http: &reqwest::Client,
+    paths: &Paths,
+    charge: Option<&Meter>,
+) -> Option<Remote> {
+    let base = cloud_base_url();
+    let device = crate::hwid::device_id(paths);
+    let request = match charge {
+        Some(meter) => http
+            .post(format!("{base}/free/charge"))
+            .json(&serde_json::json!({ "day": meter.day, "used": meter.used })),
+        None => http.get(format!("{base}/free/meter")),
+    };
+    let response = request
+        .header(DEVICE_HEADER, device)
+        .timeout(GATEWAY_WAIT)
+        .send()
+        .await
+        .ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    response.json::<Remote>().await.ok()
+}
+
+/// Take the gateway's count where it is higher, and note that we heard it.
+fn adopt(paths: &Paths, remote: Remote) -> Meter {
+    let mut meter = meter(paths);
+    if remote.day >= meter.day {
+        if remote.day > meter.day {
+            meter.day = remote.day;
+            meter.used = 0;
+        }
+        meter.used = meter.used.max(remote.used);
+    }
+    meter.synced_day = remote.day;
+    let _ = write_json(&paths.meter_file(), &meter);
+    meter
+}
+
+fn spent(cap: u32, resets_in: i64) -> AppError {
+    AppError::message(
+        "limit.requestsPerDay",
+        serde_json::json!({ "cap": cap, "resetsIn": resets_in }),
+    )
+}
+
+/// `ensure_room`, with the gateway's count taken into account.
+pub async fn ensure_room_online(paths: &Paths, http: &reqwest::Client) -> Result<()> {
+    let Some(cap) = limits().requests_per_day else {
+        return Ok(());
+    };
+    if !gateway_counts() {
+        return ensure_room(paths);
+    }
+    match ask_gateway(http, paths, None).await {
+        Some(remote) => {
+            let meter = adopt(paths, remote);
+            if meter.used >= cap {
+                return Err(spent(cap, remote.resets_in.max(0)));
+            }
+            Ok(())
+        }
+        None => {
+            let meter = meter(paths);
+            if meter.synced_day != meter.day {
+                return Err(AppError::message("limit.freeNeedsNetwork", serde_json::json!({})));
+            }
+            ensure_room(paths)
+        }
+    }
+}
+
+/// `charge`, and the same count sent to the gateway.
+pub async fn charge_online(paths: &Paths, http: &reqwest::Client) -> Result<Meter> {
+    let meter = charge(paths)?;
+    if limits().requests_per_day.is_none() || !gateway_counts() {
+        return Ok(meter);
+    }
+    Ok(match ask_gateway(http, paths, Some(&meter)).await {
+        Some(remote) => adopt(paths, remote),
+        None => meter,
+    })
 }
 
 /// Seconds until the meter's day rolls over, counted from the high-water mark
@@ -619,6 +736,7 @@ mod tests {
             used: FREE_REQUESTS_PER_DAY,
             high_water: now,
             rewinds: 0,
+            synced_day: 0,
         }
     }
 

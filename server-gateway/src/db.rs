@@ -208,6 +208,17 @@ impl Db {
                  last_seen INTEGER NOT NULL,
                  note TEXT NOT NULL DEFAULT '',
                  PRIMARY KEY (license_id, device_id)
+             );
+             -- What a machine without a licence has spent today. Kept here
+             -- rather than only on the machine, because the machine's copy
+             -- goes with a reinstall or a cleared data folder and a fresh
+             -- thirty came with it.
+             CREATE TABLE IF NOT EXISTS free_meter (
+                 device_id TEXT PRIMARY KEY,
+                 day INTEGER NOT NULL,
+                 used INTEGER NOT NULL,
+                 first_seen INTEGER NOT NULL,
+                 last_seen INTEGER NOT NULL
              );",
         )?;
         Db::add_column(conn, "license", "room", "TEXT NOT NULL DEFAULT ''");
@@ -659,6 +670,57 @@ impl Db {
         Ok(())
     }
 
+    /// A machine's free allowance for `day`: what it has used, a new day
+    /// counting from zero. Reading does not create the row.
+    pub fn free_used(&self, device_id: &str, day: i64) -> rusqlite::Result<u32> {
+        let found: Option<(i64, i64)> = self
+            .conn
+            .lock()
+            .query_row(
+                "SELECT day, used FROM free_meter WHERE device_id = ?1",
+                [device_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        Ok(match found {
+            Some((stored, used)) if stored == day => used.max(0) as u32,
+            _ => 0,
+        })
+    }
+
+    /// Count one action against a machine's free day, and say where it stands.
+    ///
+    /// `at_least` is what the machine itself believes it has used: a copy that
+    /// worked offline for a while reports its count when it is back, and the
+    /// larger of the two is kept — never the smaller, or going offline would
+    /// be a way to spend the day twice.
+    pub fn free_charge(
+        &self,
+        device_id: &str,
+        day: i64,
+        at_least: u32,
+        now: i64,
+    ) -> rusqlite::Result<u32> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT INTO free_meter (device_id, day, used, first_seen, last_seen)
+             VALUES (?1, ?2, MAX(?3, 1), ?4, ?4)
+             ON CONFLICT(device_id) DO UPDATE SET
+                 used = CASE WHEN free_meter.day = excluded.day
+                             THEN MAX(free_meter.used + 1, ?3)
+                             ELSE MAX(1, ?3) END,
+                 day = excluded.day,
+                 last_seen = excluded.last_seen",
+            rusqlite::params![device_id, day, at_least as i64, now],
+        )?;
+        let used: i64 = conn.query_row(
+            "SELECT used FROM free_meter WHERE device_id = ?1",
+            [device_id],
+            |row| row.get(0),
+        )?;
+        Ok(used.max(0) as u32)
+    }
+
     /// How many seats one licence has taken.
     pub fn device_count(&self, license_id: &str) -> rusqlite::Result<u32> {
         let count: i64 = self.conn.lock().query_row(
@@ -1023,6 +1085,26 @@ impl Db {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A reinstall cannot start the day over, an offline count is kept when
+    /// it is higher, and a new day starts from nothing.
+    #[test]
+    fn free_meter_survives_the_machine_forgetting() {
+        let db = Db::memory().unwrap();
+        assert_eq!(db.free_used("dev-a", 100).unwrap(), 0);
+        assert_eq!(db.free_charge("dev-a", 100, 0, 1).unwrap(), 1);
+        assert_eq!(db.free_charge("dev-a", 100, 0, 2).unwrap(), 2);
+        // The machine was reinstalled and believes it has used nothing.
+        assert_eq!(db.free_charge("dev-a", 100, 0, 3).unwrap(), 3);
+        // It worked offline and comes back having spent twelve.
+        assert_eq!(db.free_charge("dev-a", 100, 12, 4).unwrap(), 12);
+        assert_eq!(db.free_used("dev-a", 100).unwrap(), 12);
+        // Tomorrow.
+        assert_eq!(db.free_used("dev-a", 101).unwrap(), 0);
+        assert_eq!(db.free_charge("dev-a", 101, 0, 5).unwrap(), 1);
+        // Another machine is its own.
+        assert_eq!(db.free_used("dev-b", 101).unwrap(), 0);
+    }
 
     fn spend(credits: f64) -> Spend {
         Spend {
