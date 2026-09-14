@@ -19,7 +19,10 @@ COPY server-gateway ./server-gateway
 # replaced by an empty crate of the same name.
 RUN sed -i 's#, "src-tauri"##' Cargo.toml
 
-RUN cargo build --release --locked -p velvetdesk-gateway
+# Not --locked: taking the desktop out of the workspace drops its entries from
+# the lock file, which --locked refuses to write. Every version that remains
+# is still the one Cargo.lock pins — pruning never upgrades anything.
+RUN cargo build --release -p velvetdesk-gateway
 
 FROM debian:bookworm-slim AS runtime
 
