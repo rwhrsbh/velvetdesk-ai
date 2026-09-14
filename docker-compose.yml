@@ -29,6 +29,14 @@ services:
       VD_LICENSE_PUBLIC_KEY: ${VD_LICENSE_PUBLIC_KEY:-}
       # The admin page's password. Empty closes the page entirely.
       VD_ADMIN_TOKEN: ${VD_ADMIN_TOKEN:-}
+      # The private half, for the licences a paid order mints. Kept in the
+      # data folder with everything else the gateway owns.
+      VD_LICENSE_KEY_FILE: /data/license-signing.key
+      # Payments: the NOWPayments API key, the IPN secret notifications are
+      # signed with, and the public address they are posted back to.
+      VD_NOWPAY_KEY: ${VD_NOWPAY_KEY:-}
+      VD_IPN_SECRET: ${VD_IPN_SECRET:-}
+      VD_PUBLIC_URL: ${VD_PUBLIC_URL:-}
       RUST_LOG: ${RUST_LOG:-info}
     ports:
       # Loopback only: the caddy service below is what faces the internet.
