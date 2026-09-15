@@ -325,7 +325,10 @@ async fn free_charge(
     let day = now.div_euclid(86_400);
     // Only a claim about today counts: yesterday's offline count is spent.
     let claimed = if body.get("day").and_then(Value::as_i64) == Some(day) {
-        body.get("used").and_then(Value::as_u64).unwrap_or(0).min(10_000) as u32
+        body.get("used")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+            .min(10_000) as u32
     } else {
         0
     };

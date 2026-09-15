@@ -593,7 +593,10 @@ pub async fn ensure_room_online(paths: &Paths, http: &reqwest::Client) -> Result
         None => {
             let meter = meter(paths);
             if meter.synced_day != meter.day {
-                return Err(AppError::message("limit.freeNeedsNetwork", serde_json::json!({})));
+                return Err(AppError::message(
+                    "limit.freeNeedsNetwork",
+                    serde_json::json!({}),
+                ));
             }
             ensure_room(paths)
         }
