@@ -148,15 +148,35 @@ pub async fn call_streaming(
 
             if let Some(calls) = delta["tool_calls"].as_array() {
                 for call in calls {
-                    let index = call["index"].as_u64().unwrap_or(0) as usize;
+                    // Well-behaved servers number the fragments; some (seen from
+                    // DeepSeek-compatible endpoints) omit `index` entirely, and
+                    // `unwrap_or(0)` then piled every call into slot 0 — two calls
+                    // came out as one with their names glued together
+                    // ("append_chat" + "add_man_note"). When there is no index,
+                    // start a new call on an id change or on a name arriving while
+                    // the current call already has one (a name is sent whole, not
+                    // streamed, so a second name is always a second call).
+                    let name = call["function"]["name"].as_str().unwrap_or("");
+                    let id = call["id"].as_str().unwrap_or("");
+                    let index = if let Some(i) = call["index"].as_u64() {
+                        i as usize
+                    } else {
+                        let starts_new = partial.is_empty()
+                            || (!id.is_empty() && id != partial.last().unwrap().0)
+                            || (!name.is_empty() && !partial.last().unwrap().1.is_empty());
+                        if starts_new {
+                            partial.push((String::new(), String::new(), String::new()));
+                        }
+                        partial.len() - 1
+                    };
                     while partial.len() <= index {
                         partial.push((String::new(), String::new(), String::new()));
                     }
                     let slot = &mut partial[index];
-                    if let Some(id) = call["id"].as_str() {
+                    if !id.is_empty() {
                         slot.0 = id.to_string();
                     }
-                    if let Some(name) = call["function"]["name"].as_str() {
+                    if !name.is_empty() {
                         slot.1.push_str(name);
                     }
                     if let Some(args) = call["function"]["arguments"].as_str() {

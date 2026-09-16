@@ -105,6 +105,32 @@ a {
   min-width: 0;
 }
 
+/* The top bar is one row at every width: its groups shrink and its buttons get
+   smaller rather than wrapping onto a second line the 48px-tall bar has no room
+   for. The mode/security controls use .segmented-control, which wraps by default
+   (that is wanted in the provider modal, not here). */
+.topbar { flex-wrap: nowrap; overflow: hidden; }
+.topbar .segmented-control { flex-wrap: nowrap; }
+.topbar-left { flex: 1 1 auto; overflow: hidden; }
+.topbar-center { flex: 0 1 auto; overflow: hidden; }
+.topbar-right { flex: 0 0 auto; }
+@media (max-width: 1180px) {
+  .topbar { gap: 6px; padding-left: 8px; padding-right: 8px; }
+  .topbar .segmented-btn { padding: 4px 7px; }
+  .status-chip { max-width: 160px; }
+}
+@media (max-width: 1000px) {
+  .topbar { gap: 4px; }
+  .topbar .segmented-btn { padding: 3px 5px; font-size: 11px; }
+  .topbar .icon-btn { padding: 4px; }
+  .status-chip { max-width: 110px; }
+}
+@media (max-width: 860px) {
+  .topbar .segmented-btn { padding: 3px 4px; font-size: 10px; }
+  /* The plan chip is the first thing that can go when space is truly tight. */
+  .topbar-left .status-chip { display: none; }
+}
+
 .app-title {
   font-weight: 600;
   font-size: 13px;
