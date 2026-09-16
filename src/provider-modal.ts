@@ -370,6 +370,14 @@ export async function openKeysModal(deps: ModalDeps) {
           <span class="hint-inline">${t("keys.chainHint")}</span>
         </label>
         <div class="chain-list" id="chainList"></div>
+      </div>
+
+      <div class="field">
+        <label>${t("keys.chainRounds")}
+          <span class="hint-inline">${t("keys.chainRoundsHint")}</span>
+        </label>
+        <input class="field-input" id="chainRounds" type="number" min="1" max="10" step="1"
+               value="${p.chain_rounds || 3}" />
       </div>`
       }
 
@@ -1101,6 +1109,10 @@ export async function openKeysModal(deps: ModalDeps) {
         api_version: card.querySelector<HTMLInputElement>("#apiVersion")?.value.trim() ?? p.api_version,
         temperature: Number(card.querySelector<HTMLInputElement>("#temperature")?.value ?? p.temperature),
         model_chain: chain,
+        chain_rounds: Math.max(
+          1,
+          Number(card.querySelector<HTMLInputElement>("#chainRounds")?.value) || p.chain_rounds || 3,
+        ),
         thinking_budget: numberOrNull("#thinkingBudget"),
         context_tokens: numberOrNull("#contextTokens"),
         max_output_tokens: numberOrNull("#maxOutput"),

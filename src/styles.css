@@ -111,8 +111,13 @@ a {
    (that is wanted in the provider modal, not here). */
 .topbar { flex-wrap: nowrap; overflow: hidden; }
 .topbar .segmented-control { flex-wrap: nowrap; }
-.topbar-left { flex: 1 1 auto; overflow: hidden; }
+/* Left only shrinks, never grows — growing it shoved the centre group (the
+   mode/security controls) off to the right; with space-between the centre sits
+   in the middle again. */
+.topbar-left { flex: 0 1 auto; overflow: hidden; }
 .topbar-center { flex: 0 1 auto; overflow: hidden; }
+/* Streaming answer: a plain growing text node, wrapped like prose. */
+.live-text { white-space: pre-wrap; word-break: break-word; }
 .topbar-right { flex: 0 0 auto; }
 @media (max-width: 1180px) {
   .topbar { gap: 6px; padding-left: 8px; padding-right: 8px; }
@@ -2693,6 +2698,50 @@ details.advanced[open] {
 .chat-temporary #scopeDot {
   background: transparent;
   border: 1.5px dashed var(--accent);
+}
+
+/* The three-pane desktop layout still stands here (that only collapses at 900px
+   below), but the centre pane is narrow — so the composer's controls compact to
+   one row that fits rather than overflowing it: short words, smaller buttons, the
+   mic and attach as icons. */
+@media (max-width: 1120px) {
+  .composer-bar {
+    flex-wrap: nowrap;
+    gap: 6px;
+  }
+  .composer-left {
+    min-width: 0;
+    flex: 1 1 auto;
+    flex-wrap: nowrap;
+    overflow: hidden;
+    gap: 4px;
+  }
+  .composer-left > * {
+    flex: 0 0 auto;
+  }
+  .composer-left .btn,
+  .composer-left .select-button {
+    height: 28px;
+    padding: 0 7px;
+    gap: 3px;
+    font-size: 11.5px;
+  }
+  .composer-left .btn-attach {
+    width: 28px;
+    padding: 0;
+  }
+  .composer-left #micLabel {
+    display: none;
+  }
+  .composer-left .label-full {
+    display: none;
+  }
+  .composer-left .label-short {
+    display: inline;
+  }
+  .composer-right {
+    flex: 0 0 auto;
+  }
 }
 
 @media (max-width: 900px) {

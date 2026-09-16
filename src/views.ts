@@ -573,11 +573,18 @@ function entryHtml(entry: UiEntry): string {
           : "";
 
       // Reasoning is folded away: it is worth having, rarely worth reading.
-      const thinking = meta.thoughts?.trim()
-        ? `<details class="thoughts"><summary>${escapeHtml(
-            t("chat.thoughts", { n: Math.max(1, Math.round((meta.thoughts.length / 400) * 1)) }),
-          )}</summary><div class="thoughts-body">${escapeHtml(meta.thoughts.trim())}</div></details>`
-        : "";
+      // On a live bubble the <details> is always in the DOM (hidden until the
+      // first thought), so streaming fills it in place instead of recreating it
+      // — recreating slammed it shut on every token.
+      const thoughtsText = (meta.thoughts ?? "").trim();
+      const thoughtsSummary = escapeHtml(
+        t("chat.thoughts", { n: Math.max(1, Math.round(thoughtsText.length / 400)) }),
+      );
+      const thinking = meta.live
+        ? `<details class="thoughts live-thoughts"${thoughtsText ? "" : " hidden"}><summary>${thoughtsSummary}</summary><div class="thoughts-body">${escapeHtml(thoughtsText)}</div></details>`
+        : thoughtsText
+          ? `<details class="thoughts"><summary>${thoughtsSummary}</summary><div class="thoughts-body">${escapeHtml(thoughtsText)}</div></details>`
+          : "";
 
       const working = meta.live
         ? `<div class="working"><span class="spinner"></span>` +
@@ -597,10 +604,18 @@ function entryHtml(entry: UiEntry): string {
 
       const picked = store.selecting && store.selected.includes(entry.id);
 
+      // Live: plain streaming text in a stable node, steps in their own box, no
+      // usage line or action buttons yet — all so renderLiveEntry can patch the
+      // pieces in place without rebuilding (and collapsing) the bubble. The final
+      // redraw (once the run ends) renders the proper markdown body below.
+      const bodyHtml = meta.live
+        ? `<div class="live-text">${escapeHtml(entry.text)}</div>`
+        : bubbleText(entry, meta.reply_key);
+      const stepsHtml = meta.live ? `<div class="live-steps">${steps}</div>` : steps;
+      const tail = meta.live ? working : `${working}${usageLine(meta.usage, extras)}${actions}${asked}`;
       return (
         `<div class="msg ${entry.sender}${picked ? " picked" : ""}" data-entry="${escapeHtml(entry.id)}">` +
-        `<div class="bubble">${recipient}${thinking}${shots}${bubbleText(entry, meta.reply_key)}` +
-        `${steps}${working}${usageLine(meta.usage, extras)}${actions}${asked}</div></div>`
+        `<div class="bubble">${recipient}${thinking}${shots}${bodyHtml}${stepsHtml}${tail}</div></div>`
       );
   }
 }
@@ -612,15 +627,52 @@ function entryHtml(entry: UiEntry): string {
 export function renderLiveEntry(entry: UiEntry) {
   const container = $("messages");
   const node = container.querySelector(`.msg[data-entry="${CSS.escape(entry.id)}"]`);
-  if (!node) {
+  const textEl = node?.querySelector<HTMLElement>(".live-text");
+  // First token (or the bubble is not the live layout yet): lay it out once.
+  if (!node || !textEl) {
     renderChat();
     return;
   }
+  const meta = (entry.meta ?? {}) as {
+    thoughts?: string;
+    steps?: RunStep[];
+    note?: string;
+  };
   const stick = container.scrollTop + container.clientHeight >= container.scrollHeight - 48;
-  const holder = document.createElement("div");
-  holder.innerHTML = entryHtml(entry);
-  const fresh = holder.firstElementChild;
-  if (fresh) node.replaceWith(fresh);
+
+  // The growing answer — a text node, so no markdown re-parse per token.
+  if (textEl.textContent !== entry.text) textEl.textContent = entry.text;
+
+  // Thoughts fill the details in place; it is never recreated, so if the operator
+  // opened it, it stays open while more reasoning streams in.
+  const details = node.querySelector<HTMLDetailsElement>(".live-thoughts");
+  if (details) {
+    const thoughts = (meta.thoughts ?? "").trim();
+    details.hidden = thoughts.length === 0;
+    const body = details.querySelector<HTMLElement>(".thoughts-body");
+    if (body && body.textContent !== thoughts) body.textContent = thoughts;
+    const summary = details.querySelector<HTMLElement>("summary");
+    if (summary) {
+      summary.textContent = t("chat.thoughts", { n: Math.max(1, Math.round(thoughts.length / 400)) });
+    }
+  }
+
+  // Steps are appended, never rebuilt, so an open diff from an earlier step is
+  // not slammed shut when the next step arrives.
+  const stepsWrap = node.querySelector<HTMLElement>(".live-steps");
+  if (stepsWrap) {
+    const steps = Array.isArray(meta.steps) ? meta.steps : [];
+    for (let i = stepsWrap.children.length; i < steps.length; i += 1) {
+      const holder = document.createElement("div");
+      holder.innerHTML = stepHtml(steps[i]);
+      const el = holder.firstElementChild;
+      if (el) stepsWrap.appendChild(el);
+    }
+  }
+
+  const noteEl = node.querySelector<HTMLElement>(".working span:last-child");
+  if (noteEl) noteEl.textContent = meta.note || t("chat.working");
+
   if (stick) container.scrollTop = container.scrollHeight;
 }
 

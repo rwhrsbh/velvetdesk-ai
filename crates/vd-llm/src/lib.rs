@@ -291,6 +291,22 @@ impl CallError {
     }
 }
 
+/// A failure that means "this endpoint does not serve that model", not "the key
+/// or the network is bad": a 404, or a body that says the model/function was not
+/// found (NVIDIA answers 404 "Function ... Not found for account" for a model the
+/// account is not entitled to, even though it lists in /v1/models).
+fn is_model_unavailable(err: &LlmError) -> bool {
+    if let LlmError::Provider(message) = err {
+        let lower = message.to_lowercase();
+        return message.contains("HTTP 404")
+            || message.contains("404")
+            || lower.contains("not found")
+            || lower.contains("does not exist")
+            || lower.contains("no such model");
+    }
+    false
+}
+
 /// The reason to report when a turn came back with no text and no tool call.
 ///
 /// The provider's own word for it when there is one, and a plain "empty"
@@ -410,37 +426,66 @@ impl LlmClient {
         // every model in the chain declines, the operator is told that, and
         // told what actually helps — a different model, or a shorter history.
         let mut declined: Vec<String> = vec![];
+        // A model the endpoint does not have (404 / "not found") is not worth a
+        // second round — drop it for the rest of this call so the next round
+        // spends its turns on models that might actually answer.
+        let mut unavailable: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-        for (index, model) in models.iter().enumerate() {
-            if request.cancelled() {
+        // Walk the whole chain, then walk it again up to `chain_rounds` times: a
+        // model that was busy or rate-limited on the first pass may answer on the
+        // next. One pass is the old behaviour.
+        let rounds = provider.chain_rounds.max(1);
+        'rounds: for _ in 0..rounds {
+            let live: Vec<&String> = models.iter().filter(|m| !unavailable.contains(*m)).collect();
+            if live.is_empty() {
                 break;
             }
-            let mut attempt_provider = provider.clone();
-            attempt_provider.model = model.clone();
-
-            match self
-                .chat_one_model(&attempt_provider, pool.clone(), request, on_event)
-                .await
-            {
-                Ok(mut response) => {
-                    response.model = model.clone();
-                    return Ok(response);
+            for (index, model) in live.iter().enumerate() {
+                if request.cancelled() {
+                    break 'rounds;
                 }
-                Err(err) => {
-                    if let LlmError::Blocked { reason } = &err {
-                        declined.push(format!("{model}: {reason}"));
+                let mut attempt_provider = provider.clone();
+                attempt_provider.model = (*model).clone();
+
+                match self
+                    .chat_one_model(&attempt_provider, pool.clone(), request, on_event)
+                    .await
+                {
+                    Ok(mut response) => {
+                        response.model = (*model).clone();
+                        return Ok(response);
                     }
-                    last_error = err;
-                    let Some(next) = models.get(index + 1) else {
-                        break;
-                    };
-                    on_event(serde_json::json!({
-                        "kind": "model_switch",
-                        "from": model,
-                        "to": next,
-                        "reason": last_error.to_string(),
-                    }));
-                    pool.clear_cooldowns();
+                    Err(err) => {
+                        if let LlmError::Blocked { reason } = &err {
+                            declined.push(format!("{model}: {reason}"));
+                        }
+                        // "Not found" is the model, not the key: this endpoint
+                        // simply does not serve it (an unentitled NVIDIA model,
+                        // a retired deployment). Never try it again this call.
+                        if is_model_unavailable(&err) {
+                            unavailable.insert((*model).clone());
+                        }
+                        last_error = err;
+                        let next = live.get(index + 1).map(|m| (*m).as_str());
+                        // Why it left this model, in the log — so a switch that
+                        // looks unprovoked (the model answered, then the chain
+                        // moved on) can be traced to its real cause: an empty
+                        // turn, a decline, a 404.
+                        eprintln!(
+                            "[llm] model {model} -> {} because: {}",
+                            next.unwrap_or("(none left)"),
+                            last_error
+                        );
+                        if let Some(next) = next {
+                            on_event(serde_json::json!({
+                                "kind": "model_switch",
+                                "from": model,
+                                "to": next,
+                                "reason": last_error.to_string(),
+                            }));
+                        }
+                        pool.clear_cooldowns();
+                    }
                 }
             }
         }

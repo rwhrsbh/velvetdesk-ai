@@ -56,6 +56,13 @@ pub struct ProviderConfig {
     /// on the next.
     #[serde(default)]
     pub model_chain: Vec<String>,
+    /// How many times to walk the whole chain of models before giving up. One
+    /// pass tries each model once; more passes retry the list (a model that was
+    /// busy or rate-limited a moment ago may answer on the next round). A model
+    /// that is simply unavailable (404) is dropped for the rest of the run so a
+    /// round is never spent on it again.
+    #[serde(default = "default_chain_rounds")]
+    pub chain_rounds: u32,
     /// Context window in tokens. Empty falls back to a guess from the model
     /// name, which is what drives automatic compaction.
     #[serde(default)]
@@ -69,6 +76,11 @@ pub struct ProviderConfig {
 /// endpoint at call time.
 pub fn default_dialect() -> String {
     "auto".into()
+}
+
+/// How many times the model chain is walked by default.
+pub fn default_chain_rounds() -> u32 {
+    3
 }
 
 /// Rough context windows, by the part of the model name that gives it away.

@@ -42,6 +42,12 @@ pub async fn call(
         .map_err(|e| CallError::Transport(e.to_string()))?;
 
     if !status.is_success() {
+        eprintln!(
+            "[llm] POST {url} model={} FAILED {} — {}",
+            body.get("model").and_then(|m| m.as_str()).unwrap_or("?"),
+            status.as_u16(),
+            text.trim()
+        );
         return Err(CallError::Status {
             code: status.as_u16(),
             body: text,
@@ -75,6 +81,13 @@ pub async fn call_streaming(
     // Without this most servers omit usage entirely when streaming.
     body["stream_options"] = json!({ "include_usage": true });
 
+    // A line per call so a provider problem can be read from the log: which
+    // endpoint, which model, streaming or not.
+    eprintln!(
+        "[llm] POST {url} model={} stream=1",
+        body.get("model").and_then(|m| m.as_str()).unwrap_or("?")
+    );
+
     let mut req = http
         .post(&url)
         .header("authorization", format!("Bearer {api_key}"))
@@ -92,6 +105,7 @@ pub async fn call_streaming(
     let status = response.status();
     if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
+        eprintln!("[llm] {} {url} FAILED {} — {}", "POST", status.as_u16(), body.trim());
         return Err(CallError::Status {
             code: status.as_u16(),
             body,
@@ -124,6 +138,7 @@ pub async fn call_streaming(
                 seen.push('\n');
             }
             if let Some(err) = value.get("error") {
+                eprintln!("[llm] {url} stream error — {}", err);
                 return Err(CallError::Parse(err.to_string()));
             }
             if let Some(meta) = value.get("usage").filter(|u| !u.is_null()) {
@@ -633,6 +648,7 @@ mod tests {
             thinking_effort: String::new(),
             thinking_budget: None,
             model_chain: vec![],
+            chain_rounds: 3,
             reasoning_dialect: "auto".into(),
             context_tokens: None,
             key_count: 1,

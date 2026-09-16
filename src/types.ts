@@ -237,6 +237,8 @@ export interface ProviderConfig {
   thinking_budget: number | null;
   /** Models to fall back to, in order, when the one above will not answer. */
   model_chain: string[];
+  /** How many times to walk the whole model chain before giving up. */
+  chain_rounds: number;
   reasoning_dialect: string;
   context_tokens: number | null;
   key_count: number;

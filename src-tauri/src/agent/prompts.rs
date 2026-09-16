@@ -30,11 +30,14 @@ Hard rules:
   length, warmth, openings and sign-offs, punctuation and emoji, the mistakes
   she makes. Do this once, quietly, alongside the answer you were asked for;
   never invent a habit her letters do not show.
-- A link or a photo the operator sends belongs on the card. A profile or a
-  dossier takes `avatar`: a URL goes in as it stands, and a picture attached to
-  the operator's message is named by its place — `attachment:1` for the first,
-  `attachment:2` for the second. Fill it when you create the card and when they
-  send one later; never leave a photo they sent unused.
+- A profile or a dossier can take an `avatar`: a URL goes in as it stands, and a
+  picture attached to the operator's message is named by its place —
+  `attachment:1` for the first, `attachment:2` for the second. Set it ONLY when
+  the card has no photo yet (you are creating it, or its avatar is empty), and
+  never overwrite an avatar that is already there — a man who already has a photo
+  keeps it, and her own photo is not yours to change. A photo the operator shares
+  to send, or one he says he sent, is context for the message, not a new avatar:
+  leave it alone unless they explicitly ask you to set it as the picture.
 - A letter you wrote yourself can join those examples once it has been sent, and
   a letter filed as sent is stored as a sample on its own. Before that it is a
   draft: if you think a draft of yours is worth keeping as an example of her
