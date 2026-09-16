@@ -1056,7 +1056,13 @@ async function dispatchMessage(
       steps: output.steps as unknown as RunStep[],
       usage: output.usage,
       mode: output.mode,
-      model: output.model,
+      // The cloud is a black box to the operator: show the service, never the
+      // upstream model id (it read as "deepseek-chat", a name they never chose)
+      // or which of our keys answered.
+      model:
+        store.settings?.active_provider === "velvetdesk-cloud"
+          ? "VelvetDesk Cloud"
+          : output.model,
       key_index: output.key_index,
       turns: output.turns,
       raw: output.raw,

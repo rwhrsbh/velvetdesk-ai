@@ -505,8 +505,12 @@ export function renderChat() {
       const steps = Array.isArray(meta.steps) ? meta.steps.map(stepHtml).join("") : "";
       const extras: string[] = [];
       if (meta.mode) extras.push(String(meta.mode).toUpperCase());
-      if (meta.model) extras.push(t("chat.viaModel", { model: meta.model }));
-      if (typeof meta.key_index === "number") extras.push(t("chat.key", { n: meta.key_index + 1 }));
+      // The cloud service is shown by name; a real model id gets the "via" label.
+      const cloudLabel = meta.model === "VelvetDesk Cloud";
+      if (meta.model) extras.push(cloudLabel ? meta.model : t("chat.viaModel", { model: meta.model }));
+      // Which of our keys answered is ours to know, not the operator's.
+      if (typeof meta.key_index === "number" && !cloudLabel)
+        extras.push(t("chat.key", { n: meta.key_index + 1 }));
       if (typeof meta.turns === "number" && meta.turns > 1)
         extras.push(t("chat.turns", { n: meta.turns }));
 
