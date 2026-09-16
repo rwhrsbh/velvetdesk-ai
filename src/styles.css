@@ -1470,18 +1470,45 @@ details.step[open] > .step-head .step-caret {
   padding-top: 1px;
 }
 
-.diff-before {
-  color: var(--text-faint);
-  text-decoration: line-through;
-  text-decoration-color: rgba(255, 69, 58, 0.5);
+/* Read like a git diff: the old value is a red "-" line, the new one a green
+   "+" line, each on its own tinted row. */
+.diff-before,
+.diff-after {
   white-space: pre-wrap;
   word-break: break-word;
+  font-family: var(--mono);
+  font-size: 12px;
+  border-radius: 4px;
+  padding: 2px 8px 2px 20px;
+  position: relative;
+}
+
+.diff-before::before,
+.diff-after::before {
+  position: absolute;
+  left: 7px;
+  font-weight: 700;
+  opacity: 0.75;
+}
+
+.diff-before {
+  color: #ff7a70;
+  background: rgba(255, 69, 58, 0.12);
+}
+
+.diff-before::before {
+  content: "\2212";
+  color: #ff7a70;
 }
 
 .diff-after {
-  color: var(--text);
-  white-space: pre-wrap;
-  word-break: break-word;
+  color: #6fdc8c;
+  background: rgba(48, 209, 88, 0.12);
+}
+
+.diff-after::before {
+  content: "+";
+  color: #6fdc8c;
 }
 
 .step-was {
