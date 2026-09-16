@@ -1065,7 +1065,11 @@ impl Db {
     }
 
     /// One license's spend per UTC day since a moment — for the detail chart.
-    pub fn usage_daily(&self, license_id: &str, since: i64) -> rusqlite::Result<Vec<(i64, f64, i64)>> {
+    pub fn usage_daily(
+        &self,
+        license_id: &str,
+        since: i64,
+    ) -> rusqlite::Result<Vec<(i64, f64, i64)>> {
         let conn = self.conn.lock();
         let mut statement = conn.prepare(
             "SELECT (ts / 86400) * 86400 AS day, COALESCE(SUM(credits), 0), COUNT(*)
