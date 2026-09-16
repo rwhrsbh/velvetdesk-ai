@@ -171,6 +171,78 @@
         td, th { padding: 7px 6px; }
         h1 { margin-right: 0; }
       }
+
+      /* ---------- licences: searchable list, iOS-style detail sheet ---------- */
+      .search { position: relative; margin-bottom: 12px; }
+      .search input { padding-left: 34px; border-radius: 12px; }
+      .search::before {
+        content: "⌕"; position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+        color: var(--dim); font-size: 16px; pointer-events: none;
+      }
+      .keylist { display: grid; gap: 8px; }
+      .keycard {
+        display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+        background: #0c0e13; border: 1px solid var(--line); border-radius: 14px;
+        padding: 12px 14px; cursor: pointer; font: inherit; color: var(--text);
+        transition: border-color .12s, transform .06s, background .12s;
+      }
+      .keycard:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); background: #0e1118; }
+      .keycard:active { transform: scale(.995); }
+      .keycard .kmain { flex: 1; min-width: 0; }
+      .keycard .kid { font-family: ui-monospace, monospace; font-size: 13px; word-break: break-all; }
+      .keycard .ksub { color: var(--dim); font-size: 12px; margin-top: 2px; }
+      .keycard .chev { color: var(--dim); font-size: 20px; flex: none; }
+      .tag { border-radius: 999px; padding: 3px 10px; font-size: 12px; white-space: nowrap;
+        border: 1px solid var(--line); color: var(--dim); flex: none; }
+      .tag.tier { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+
+      /* sheet */
+      .sheet-back {
+        position: fixed; inset: 0; background: rgb(0 0 0 / .5); backdrop-filter: blur(3px);
+        display: none; align-items: flex-start; justify-content: center; z-index: 20;
+        padding: 40px 16px; overflow-y: auto;
+      }
+      .sheet-back.on { display: flex; }
+      .sheet {
+        width: min(680px, 100%); background: var(--card); border: 1px solid var(--line);
+        border-radius: 22px; box-shadow: 0 30px 80px rgb(0 0 0 / .6); overflow: hidden;
+        animation: rise .18s ease;
+      }
+      @keyframes rise { from { transform: translateY(14px); opacity: .4; } to { transform: none; opacity: 1; } }
+      .sheet-head {
+        display: flex; align-items: center; gap: 12px; padding: 16px 18px;
+        border-bottom: 1px solid var(--line); position: sticky; top: 0;
+        background: color-mix(in srgb, var(--card) 92%, transparent); backdrop-filter: blur(8px);
+      }
+      .sheet-head .kid { flex: 1; min-width: 0; font-family: ui-monospace, monospace; font-size: 14px; word-break: break-all; }
+      .sheet-head .x {
+        flex: none; width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--line);
+        background: #0c0e13; color: var(--dim); cursor: pointer; font-size: 16px; line-height: 1;
+      }
+      .sheet-head .x:hover { color: var(--text); }
+      .sheet-body { padding: 18px; display: grid; gap: 16px; }
+      .gauges { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+      @media (max-width: 560px) { .gauges { grid-template-columns: 1fr; } }
+      .gauge {
+        background: #0c0e13; border: 1px solid var(--line); border-radius: 16px; padding: 14px;
+        display: grid; gap: 8px;
+      }
+      .gauge .glabel { font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: .04em; }
+      .gauge .gval { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+      .gauge .gval small { font-size: 12px; color: var(--dim); font-weight: 400; }
+      .gauge.wallet { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+      .bar { height: 6px; border-radius: 999px; background: #1b1f29; overflow: hidden; }
+      .bar > i { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
+      .bar.ok > i { background: var(--ok); }
+      .subhead { font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; margin: 0 0 8px; }
+      .chart { width: 100%; height: 120px; display: block; }
+      .chart rect:hover { opacity: .8; }
+      .note-hint { font-size: 12px; color: var(--dim); line-height: 1.5; }
+      .devrow { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+      .devrow:last-child { border-bottom: 0; }
+      .devrow code { font-size: 12px; }
+      .devrow .dinfo { flex: 1; min-width: 0; }
+      .devrow .dinfo small { display: block; color: var(--dim); }
     </style>
   </head>
   <body>
@@ -312,15 +384,9 @@
           <div id="l-out" style="margin-top:12px"></div>
         </div>
         <div class="card">
-          <h2>Выданные</h2>
-          <p class="muted">
-            «Устройств» — сколько машин покрывает ключ; правится здесь, и решает именно
-            это число, а не то, что зашито в самом ключе. Место занимает первая машина,
-            вошедшая с этим ключом, и держит его: освободить может только админ —
-            «устройства» → «отвязать». Сам пользователь не может, иначе десять мест по
-            очереди использовал бы целый этаж.
-          </p>
-          <div id="license-list" class="muted">Загружаю…</div>
+          <h2>Все ключи</h2>
+          <div class="search"><input id="l-search" placeholder="поиск по ключу, тарифу, кому…" autocomplete="off" /></div>
+          <div id="license-list" class="keylist muted">Загружаю…</div>
         </div>
       </section>
 
@@ -341,6 +407,16 @@
     </main>
 
     <div id="toast"></div>
+
+    <div class="sheet-back" id="sheet-back">
+      <div class="sheet" id="sheet" role="dialog" aria-modal="true">
+        <div class="sheet-head">
+          <div class="kid" id="sheet-id">—</div>
+          <button class="x" id="sheet-x" title="закрыть">✕</button>
+        </div>
+        <div class="sheet-body" id="sheet-body"></div>
+      </div>
+    </div>
 
     <script>
       const $ = (id) => document.getElementById(id);
@@ -711,158 +787,240 @@
       });
 
       // --------------------------------------------------------- licences
+      let licenseRows = [];
+
       async function drawLicenses() {
-        const rows = await call("/admin/licenses");
-        $("license-list").innerHTML = `<table><thead><tr>
-            <th>лицензия</th><th>тариф</th><th>до</th><th>устройств</th><th>кому</th><th></th></tr></thead><tbody>
-          ${rows
-            .map(
-              (row) => `<tr>
-                <td><code>${esc(row.license_id)}</code> ${row.revoked ? '<span class="pill off">отозвана</span>' : ""}</td>
-                <td>${esc(row.tier)}</td>
-                <td class="muted">${row.expires_at ? new Date(row.expires_at * 1000).toLocaleDateString() : "без срока"}</td>
-                <td class="row" style="gap:6px;align-items:center">
-                  <input class="peers" data-peers-for="${esc(row.license_id)}" value="${row.max_peers}"
-                         inputmode="numeric" style="width:56px" />
-                  <button class="ghost" data-save-peers="${esc(row.license_id)}">ок</button>
-                </td>
-                <td class="muted">${esc(row.note)}</td>
-                <td style="text-align:right" class="row" style="justify-content:flex-end">
-                  <button class="ghost" data-devices="${esc(row.license_id)}">устройства</button>
-                  <button class="ghost" data-mailbox="${esc(row.license_id)}">очистить обмен</button>
-                  <button class="ghost" data-credits="${esc(row.license_id)}">+ кредиты</button>
-                  <button class="ghost ${row.revoked ? "" : "danger"}" data-revoke="${esc(row.license_id)}" data-on="${row.revoked}">
-                    ${row.revoked ? "вернуть" : "отозвать"}
-                  </button>
-                </td></tr>
-                <tr><td colspan="6" class="table-scroll" data-devices-for="${esc(row.license_id)}" data-open="0"></td></tr>`,
+        licenseRows = await call("/admin/licenses");
+        renderLicenseList();
+      }
+
+      $("l-search").addEventListener("input", renderLicenseList);
+
+      function renderLicenseList() {
+        const q = $("l-search").value.trim().toLowerCase();
+        const rows = q
+          ? licenseRows.filter((r) =>
+              [r.license_id, r.tier, r.note].some((f) => String(f || "").toLowerCase().includes(q)),
             )
-            .join("")}
-        </tbody></table>`;
+          : licenseRows;
+        const box = $("license-list");
+        box.classList.remove("muted");
+        if (!rows.length) {
+          box.innerHTML = '<div class="muted">' + (q ? "Ничего не найдено" : "Пока ни одного ключа") + "</div>";
+          return;
+        }
+        box.innerHTML = rows
+          .map((row) => {
+            const until = row.expires_at
+              ? "до " + new Date(row.expires_at * 1000).toLocaleDateString()
+              : "без срока";
+            return `<button class="keycard" data-open="${esc(row.license_id)}">
+              <span class="tag tier">${esc(row.tier)}</span>
+              <span class="kmain">
+                <span class="kid">${esc(row.license_id)}</span>
+                <span class="ksub">${until}${row.note ? " · " + esc(row.note) : ""} · ${row.max_peers} устр.</span>
+              </span>
+              ${row.revoked ? '<span class="pill off">отозвана</span>' : ""}
+              <span class="chev">›</span>
+            </button>`;
+          })
+          .join("");
+        box.querySelectorAll("[data-open]").forEach((card) => {
+          card.addEventListener("click", () => openLicense(card.dataset.open));
+        });
+      }
 
-        // The number in the key is what it was sold with; this is what the
-        // gateway enforces, so a team that grew keeps the key it paid for.
-        document.querySelectorAll("[data-save-peers]").forEach((button) => {
-          button.addEventListener("click", async () => {
-            const id = button.dataset.savePeers;
-            const field = document.querySelector(`[data-peers-for="${CSS.escape(id)}"]`);
+      // -------------------------------------------------- one key: detail sheet
+      const dt = (ts) => new Date(ts * 1000).toLocaleDateString();
+      const dtime = (ts) => new Date(ts * 1000).toLocaleString();
+
+      function gauge(label, left, cap, cls, unit) {
+        const pct = cap > 0 ? Math.max(0, Math.min(100, (left / cap) * 100)) : 0;
+        const capTxt = cap > 0 ? `<small>из ${Math.round(cap)}</small>` : "";
+        return `<div class="gauge ${cls || ""}">
+          <div class="glabel">${label}</div>
+          <div class="gval">${Math.round(left)} ${capTxt}</div>
+          <div class="bar ${cls === "wallet" ? "" : "ok"}"><i style="width:${pct}%"></i></div>
+          ${unit ? `<div class="glabel" style="text-transform:none">${unit}</div>` : ""}
+        </div>`;
+      }
+
+      // Inline SVG bar chart of daily spend — no libraries, scales to the box.
+      function chart(daily) {
+        if (!daily.length) return '<div class="muted">Расхода за период не было</div>';
+        const w = 640, h = 120, pad = 4;
+        const max = Math.max(...daily.map((d) => d.credits), 1);
+        const bw = (w - pad * 2) / daily.length;
+        const bars = daily
+          .map((d, i) => {
+            const bh = (d.credits / max) * (h - 20);
+            const x = pad + i * bw;
+            const y = h - bh;
+            const day = new Date(d.day * 1000).toLocaleDateString();
+            return `<rect x="${x + 1}" y="${y}" width="${Math.max(1, bw - 2)}" height="${bh}"
+              rx="2" fill="var(--accent)"><title>${day}: ${Math.round(d.credits)} кред. · ${d.calls} запр.</title></rect>`;
+          })
+          .join("");
+        return `<svg class="chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${bars}</svg>`;
+      }
+
+      function closeSheet() {
+        $("sheet-back").classList.remove("on");
+        $("sheet-body").innerHTML = "";
+      }
+      $("sheet-x").addEventListener("click", closeSheet);
+      $("sheet-back").addEventListener("click", (e) => {
+        if (e.target === $("sheet-back")) closeSheet();
+      });
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && $("sheet-back").classList.contains("on")) closeSheet();
+      });
+
+      async function openLicense(id) {
+        $("sheet-id").textContent = id;
+        $("sheet-body").innerHTML = '<div class="muted">Загружаю…</div>';
+        $("sheet-back").classList.add("on");
+        try {
+          await paintLicense(id);
+        } catch (error) {
+          $("sheet-body").innerHTML = `<div class="muted">${esc(error.message)}</div>`;
+        }
+      }
+
+      async function paintLicense(id) {
+        const d = await call(`/admin/licenses/${encodeURIComponent(id)}/detail`);
+        const row = d.license || {};
+        const money = (c) => "$" + (c * (d.credit_usd || 0)).toFixed(2);
+        const totalSpent = (d.daily || []).reduce((s, x) => s + x.credits, 0);
+        const totalCalls = (d.daily || []).reduce((s, x) => s + x.calls, 0);
+        const resetTxt = d.allowance.reset_at ? dtime(d.allowance.reset_at) : "—";
+
+        $("sheet-body").innerHTML = `
+          <div class="row" style="gap:8px">
+            <span class="tag tier">${esc(row.tier || "")}</span>
+            <span class="tag">${row.expires_at ? "до " + dt(row.expires_at) : "без срока"}</span>
+            ${row.revoked ? '<span class="pill off">отозвана</span>' : '<span class="pill on">активна</span>'}
+            ${row.note ? `<span class="tag">${esc(row.note)}</span>` : ""}
+          </div>
+
+          <div>
+            <p class="subhead">Кредиты</p>
+            <div class="gauges">
+              ${gauge("за 5 часов", d.allowance.left_5h, d.tier.credits_5h, "", "обновляется каждые 5 ч")}
+              ${gauge("за неделю", d.allowance.left_week, d.tier.credits_week, "", "обновляется раз в неделю")}
+              ${gauge("кошелёк", d.allowance.wallet, 0, "wallet", "докупленные — навсегда, тратятся после тарифных")}
+            </div>
+            <p class="note-hint" style="margin-top:10px">
+              Тарифные кредиты возвращаются в начале каждого окна (следующее — ${resetTxt}).
+              «Кошелёк» — то, что докуплено сверх тарифа: не сгорает и тратится, только когда
+              тарифные кончились. Кнопка ниже кладёт кредиты именно в кошелёк.
+            </p>
+            <div class="row" style="margin-top:10px">
+              <input id="d-credits" placeholder="кредитов в кошелёк (минус — списать)" inputmode="numeric" style="max-width:280px" />
+              <button class="act" id="d-add-credits">Добавить в кошелёк</button>
+            </div>
+          </div>
+
+          <div>
+            <p class="subhead">Расход по дням (за ${d.days} дн.)</p>
+            ${chart(d.daily || [])}
+            <div class="stat-row" style="margin-top:12px">
+              <div class="stat"><b>${Math.round(totalSpent)}</b><span>кредитов потрачено</span></div>
+              <div class="stat"><b>${money(totalSpent)}</b><span>в деньгах</span></div>
+              <div class="stat"><b>${totalCalls}</b><span>запросов</span></div>
+            </div>
+          </div>
+
+          <div>
+            <p class="subhead">Устройства — ${(d.devices || []).length} из ${row.max_peers}</p>
+            <div class="row" style="margin-bottom:8px">
+              <input id="d-peers" value="${row.max_peers}" inputmode="numeric" style="width:80px" />
+              <button class="ghost" id="d-save-peers">изменить лимит мест</button>
+            </div>
+            <div id="d-devices">${
+              (d.devices || []).length
+                ? (d.devices || [])
+                    .map(
+                      (dev) => `<div class="devrow">
+                        <div class="dinfo">
+                          <code>${esc(dev.device_id)}</code>
+                          <small>заходило ${dtime(dev.first_seen)} · последний раз ${dtime(dev.last_seen)}</small>
+                        </div>
+                        <button class="ghost danger" data-free="${esc(dev.device_id)}">отвязать</button>
+                      </div>`,
+                    )
+                    .join("")
+                : '<div class="muted">Ни одного устройства ещё не заходило</div>'
+            }</div>
+          </div>
+
+          <div class="row" style="gap:8px;justify-content:space-between;border-top:1px solid var(--line);padding-top:14px">
+            <button class="ghost" id="d-mailbox">очистить обмен</button>
+            <button class="ghost ${row.revoked ? "" : "danger"}" id="d-revoke">${row.revoked ? "вернуть ключ" : "отозвать ключ"}</button>
+          </div>`;
+
+        $("d-add-credits").addEventListener("click", async () => {
+          const typed = $("d-credits").value.trim();
+          if (typed === "") return;
+          try {
+            const out = await call(`/admin/licenses/${encodeURIComponent(id)}/credits`, {
+              method: "POST",
+              body: JSON.stringify({ credits: num(typed) }),
+            });
+            toast(`Кошелёк: ${Math.round(out.credits_left)} кред.`);
+            paintLicense(id);
+          } catch (error) {
+            toast(error.message, true);
+          }
+        });
+
+        $("d-save-peers").addEventListener("click", async () => {
+          try {
+            await call(`/admin/licenses/${encodeURIComponent(id)}/peers`, {
+              method: "POST",
+              body: JSON.stringify({ max_peers: num($("d-peers").value) }),
+            });
+            toast("Сохранено");
+            await drawLicenses();
+            paintLicense(id);
+          } catch (error) {
+            toast(error.message, true);
+          }
+        });
+
+        $("sheet-body").querySelectorAll("[data-free]").forEach((btn) => {
+          btn.addEventListener("click", async () => {
             try {
-              await call(`/admin/licenses/${encodeURIComponent(id)}/peers`, {
-                method: "POST",
-                body: JSON.stringify({ max_peers: num(field.value) }),
-              });
-              toast("Сохранено");
-              drawLicenses();
+              await call(
+                `/admin/licenses/${encodeURIComponent(id)}/devices/${encodeURIComponent(btn.dataset.free)}`,
+                { method: "DELETE" },
+              );
+              toast("Устройство отвязано — место освободилось");
+              paintLicense(id);
             } catch (error) {
               toast(error.message, true);
             }
           });
         });
 
-        // Seats, and the only way to free one. An operator cannot release
-        // their own: a licence for ten would otherwise be a licence for a
-        // whole floor taking turns.
-        document.querySelectorAll("[data-devices]").forEach((button) => {
-          button.addEventListener("click", async () => {
-            const id = button.dataset.devices;
-            const box = document.querySelector(`[data-devices-for="${CSS.escape(id)}"]`);
-            if (box.dataset.open === "1") {
-              box.dataset.open = "0";
-              box.innerHTML = "";
-              return;
-            }
-            box.dataset.open = "1";
-            box.innerHTML = '<span class="muted">Загружаю…</span>';
-            try {
-              const list = await call(`/admin/licenses/${encodeURIComponent(id)}/devices`);
-              box.innerHTML = list.length
-                ? `<table><thead><tr><th>устройство</th><th>привязано</th><th>последний раз</th><th></th></tr></thead>
-                   <tbody>${list
-                     .map(
-                       (d) => `<tr>
-                       <td><code>${esc(d.device_id)}</code></td>
-                       <td class="muted">${new Date(d.first_seen * 1000).toLocaleString()}</td>
-                       <td class="muted">${new Date(d.last_seen * 1000).toLocaleString()}</td>
-                       <td style="text-align:right">
-                         <button class="ghost danger" data-free="${esc(id)}|${esc(d.device_id)}">отвязать</button>
-                       </td></tr>`,
-                     )
-                     .join("")}</tbody></table>`
-                : '<span class="muted">Ни одного устройства ещё не заходило</span>';
-
-              box.querySelectorAll("[data-free]").forEach((free) => {
-                free.addEventListener("click", async () => {
-                  const [license, device] = free.dataset.free.split("|");
-                  try {
-                    await call(
-                      `/admin/licenses/${encodeURIComponent(license)}/devices/${encodeURIComponent(device)}`,
-                      { method: "DELETE" },
-                    );
-                    toast("Устройство отвязано — место освободилось");
-                    button.click();
-                    button.click();
-                  } catch (error) {
-                    toast(error.message, true);
-                  }
-                });
-              });
-            } catch (error) {
-              box.innerHTML = "";
-              box.dataset.open = "0";
-              toast(error.message, true);
-            }
-          });
+        $("d-mailbox").addEventListener("click", async () => {
+          try {
+            const out = await call(`/admin/licenses/${encodeURIComponent(id)}/mailbox`, { method: "DELETE" });
+            toast(`Очищено записей: ${out.cleared}`);
+          } catch (error) {
+            toast(error.message, true);
+          }
         });
 
-        // Everything in a mailbox is sealed and unreadable here; clearing it
-        // reclaims the space and makes every device start the exchange again
-        // from what it holds locally.
-        // Credits sold on top of a plan. They sit outside the windows and
-        // are spent only once the included allowance is gone.
-        document.querySelectorAll("[data-credits]").forEach((button) => {
-          button.addEventListener("click", async () => {
-            const id = button.dataset.credits;
-            const typed = prompt(`Сколько кредитов добавить лицензии ${id}? (минус — списать)`, "1000");
-            if (typed === null) return;
-            try {
-              const out = await call(`/admin/licenses/${encodeURIComponent(id)}/credits`, {
-                method: "POST",
-                body: JSON.stringify({ credits: num(typed) }),
-              });
-              toast(`Докуплено. Остаток сверх тарифа: ${Math.round(out.credits_left)}`);
-            } catch (error) {
-              toast(error.message, true);
-            }
-          });
-        });
-
-        document.querySelectorAll("[data-mailbox]").forEach((button) => {
-          button.addEventListener("click", async () => {
-            const id = button.dataset.mailbox;
-            try {
-              const out = await call(`/admin/licenses/${encodeURIComponent(id)}/mailbox`, {
-                method: "DELETE",
-              });
-              toast(`Очищено записей: ${out.cleared}`);
-            } catch (error) {
-              toast(error.message, true);
-            }
-          });
-        });
-
-        document.querySelectorAll("[data-revoke]").forEach((button) => {
-          button.addEventListener("click", async () => {
-            const path = button.dataset.on === "true" ? "/admin/unrevoke" : "/admin/revoke";
-            try {
-              await call(path, {
-                method: "POST",
-                body: JSON.stringify({ license_id: button.dataset.revoke, reason: "admin" }),
-              });
-              drawLicenses();
-            } catch (error) {
-              toast(error.message, true);
-            }
-          });
+        $("d-revoke").addEventListener("click", async () => {
+          const path = row.revoked ? "/admin/unrevoke" : "/admin/revoke";
+          try {
+            await call(path, { method: "POST", body: JSON.stringify({ license_id: id, reason: "admin" }) });
+            await drawLicenses();
+            paintLicense(id);
+          } catch (error) {
+            toast(error.message, true);
+          }
         });
       }
 

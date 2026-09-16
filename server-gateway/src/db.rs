@@ -1064,6 +1064,21 @@ impl Db {
         Ok(rows)
     }
 
+    /// One license's spend per UTC day since a moment — for the detail chart.
+    pub fn usage_daily(&self, license_id: &str, since: i64) -> rusqlite::Result<Vec<(i64, f64, i64)>> {
+        let conn = self.conn.lock();
+        let mut statement = conn.prepare(
+            "SELECT (ts / 86400) * 86400 AS day, COALESCE(SUM(credits), 0), COUNT(*)
+             FROM usage WHERE license_id = ?1 AND ts >= ?2 GROUP BY day ORDER BY day",
+        )?;
+        let rows = statement
+            .query_map(rusqlite::params![license_id, since], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
     /// What each model has cost since a moment, and how much of its prompt
     /// came out of a cache.
     pub fn usage_by_model(&self, since: i64) -> rusqlite::Result<Vec<(String, f64, i64, i64)>> {

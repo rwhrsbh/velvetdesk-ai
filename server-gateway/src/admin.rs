@@ -22,7 +22,7 @@ use base64::Engine;
 use ed25519_dalek::SigningKey;
 
 use crate::config::Tier;
-use crate::quota::{WINDOW_5H, WINDOW_WEEK};
+use crate::quota::{allowance, WINDOW_5H, WINDOW_WEEK};
 use crate::registry::{now, ModelRow, UpstreamRow};
 use crate::routes::ApiError;
 use crate::state::AppState;
@@ -44,6 +44,7 @@ pub fn router() -> Router<AppState> {
         .route("/admin/licenses/{id}/peers", post(set_peers))
         .route("/admin/upstreams/{id}/catalog", get(catalog))
         .route("/admin/licenses/{id}/devices", get(list_devices))
+        .route("/admin/licenses/{id}/detail", get(license_detail))
         .route("/admin/licenses/{id}/mailbox", delete(clear_mailbox))
         .route("/admin/licenses/{id}/credits", post(add_credits))
         .route(
@@ -122,6 +123,8 @@ struct LicenseBody {
 struct Window {
     #[serde(default)]
     hours: Option<i64>,
+    #[serde(default)]
+    days: Option<i64>,
 }
 
 // ------------------------------------------------------------------ routes
@@ -425,6 +428,47 @@ async fn clear_mailbox(
 }
 
 /// The machines one licence is in use from.
+/// Everything about one licence for its detail card: what it is, what it has
+/// left (the plan's 5h and weekly windows, and the permanent wallet on top),
+/// its devices, and its spend per day for the chart.
+async fn license_detail(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Query(window): Query<Window>,
+) -> Result<Json<Value>, ApiError> {
+    admin(&state, &headers)?;
+    let days = window.days.unwrap_or(30).clamp(1, 180);
+    let since = now() - days * 86400;
+    let row = state
+        .db
+        .list_licenses()?
+        .into_iter()
+        .find(|r| r.license_id == id);
+    let tier_name = row.as_ref().map(|r| r.tier.clone()).unwrap_or_default();
+    let tier = state.registry.read().tier(&tier_name);
+    let allow = allowance(&state.db, &id, tier, now())?;
+    let devices = state.db.devices(&id)?;
+    let daily: Vec<Value> = state
+        .db
+        .usage_daily(&id, since)?
+        .into_iter()
+        .map(|(day, credits, calls)| json!({ "day": day, "credits": credits, "calls": calls }))
+        .collect();
+    Ok(Json(json!({
+        "license": row,
+        "tier": { "credits_5h": tier.credits_5h, "credits_week": tier.credits_week, "max_peers": tier.max_peers },
+        "allowance": {
+            "left_5h": allow.left_5h, "left_week": allow.left_week,
+            "wallet": allow.wallet, "reset_at": allow.reset_at
+        },
+        "devices": devices,
+        "daily": daily,
+        "days": days,
+        "credit_usd": state.cfg.credit_usd
+    })))
+}
+
 async fn list_devices(
     State(state): State<AppState>,
     headers: HeaderMap,
