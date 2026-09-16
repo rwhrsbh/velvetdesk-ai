@@ -219,6 +219,7 @@ pub fn run() {
             commands::cloud_status,
             commands::plan_state,
             commands::activate_license,
+            commands::deactivate_license,
             commands::cloud_plans,
             commands::cloud_coins,
             commands::cloud_subscribe,

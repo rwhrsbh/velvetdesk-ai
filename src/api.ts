@@ -181,6 +181,8 @@ export const api = {
 
   /** Check a licence key and, if it is good, start using it. */
   activateLicense: (token: string) => invoke<PlanState>("activate_license", { token }),
+  /** Remove the licence: forget the key and the verdict, drop to free. */
+  deactivateLicense: () => invoke<PlanState>("deactivate_license"),
 
   /** Device sync: pairing, and one round on demand. */
   syncState: () => invoke<SyncState>("sync_state"),

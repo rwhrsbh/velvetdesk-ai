@@ -177,6 +177,7 @@ function planPanel(plan: PlanState | null, hasKey: boolean): string {
     <div class="row-inline">
       <button class="btn btn-secondary" id="btnBuyPlan">${t("buy.extendPlan")}</button>
       <button class="btn btn-secondary" id="btnPurchases">${t("buy.history")}</button>
+      <button class="btn btn-secondary" id="btnRemoveKey">${t("plan.removeKey")}</button>
     </div>
     ${field}
   </div>`;
@@ -582,6 +583,22 @@ export async function openKeysModal(deps: ModalDeps) {
           plan.plan === "free" ? t("plan.stillFree") : t("plan.activatedAs", { tier: plan.tier }),
           plan.plan === "free" ? "error" : "success",
         );
+        await draw();
+      } catch (error) {
+        toast(errorText(error), "error");
+      } finally {
+        if (button) button.disabled = false;
+      }
+    });
+
+    card.querySelector("#btnRemoveKey")?.addEventListener("click", async () => {
+      const button = card.querySelector<HTMLButtonElement>("#btnRemoveKey");
+      if (button) button.disabled = true;
+      try {
+        await api.deactivateLicense();
+        catalogs.delete(p.id);
+        await deps.refresh();
+        toast(t("plan.keyRemoved"), "info");
         await draw();
       } catch (error) {
         toast(errorText(error), "error");

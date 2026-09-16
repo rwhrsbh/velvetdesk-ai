@@ -1795,6 +1795,21 @@ pub async fn activate_license(
     plan_state(state)
 }
 
+/// Remove the cloud licence: forget the key, the remembered gateway verdict,
+/// and drop back to the free limits. Without this a key entered once could not
+/// be taken out — the plan kept showing whatever it last granted, even with
+/// the field empty.
+#[tauri::command]
+pub fn deactivate_license(state: State<'_, AppState>) -> Result<entitlement::PlanState> {
+    let mut secrets = state.secrets.read().clone();
+    secrets.keys.remove(entitlement::CLOUD_PROVIDER);
+    state.save_secrets(secrets)?;
+    entitlement::forget_verdict(&state.paths);
+    // Recompute limits from the now-empty token: free.
+    state.refresh_entitlement();
+    plan_state(state)
+}
+
 /// Ask the gateway whether this licence is good, and remember what it said.
 async fn confirm_with_gateway(state: &AppState, token: &str) -> Result<()> {
     // The settings file may carry an address written by an older build —
