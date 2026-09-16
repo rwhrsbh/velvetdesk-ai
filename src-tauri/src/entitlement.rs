@@ -93,7 +93,7 @@ pub fn cloud_base_url() -> String {
     if cfg!(debug_assertions) {
         if let Ok(url) = std::env::var("VD_CLOUD_BASE_URL") {
             if !url.trim().is_empty() {
-                return url.trim().trim_end_matches('/').to_string();
+                return normalize_base_url(url.trim());
             }
         }
     }
@@ -104,7 +104,21 @@ pub fn cloud_base_url() -> String {
     if CLOUD_BASE_URL.trim().is_empty() {
         return DEFAULT_CLOUD_BASE_URL.to_string();
     }
-    CLOUD_BASE_URL.trim().trim_end_matches('/').to_string()
+    normalize_base_url(CLOUD_BASE_URL.trim())
+}
+
+/// Every gateway route lives under `/v1` (and `/v1beta`), and the code that
+/// calls it appends `/usage`, `/chat/completions` and the like. So the base
+/// must end at the `/v1` segment. The address is easy to set as a bare host
+/// (`https://gateway.example`), which would then miss `/v1` and 404 every call
+/// — read as "the gateway did not answer". Add the segment when it is absent,
+/// so either form of the address works.
+fn normalize_base_url(url: &str) -> String {
+    let trimmed = url.trim_end_matches('/');
+    if trimmed.ends_with("/v1") || trimmed.contains("/v1/") || trimmed.ends_with("/v1beta") {
+        return trimmed.to_string();
+    }
+    format!("{trimmed}/v1")
 }
 
 /// Actions a free copy may take in a day.
