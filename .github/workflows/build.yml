@@ -201,7 +201,11 @@ jobs:
           distribution: temurin
           java-version: 17
 
+      # Skip the action's default package install (it started failing on the
+      # refreshed ubuntu-22.04 image); the exact packages are installed below.
       - uses: android-actions/setup-android@v3
+        with:
+          packages: ""
 
       - name: Install NDK
         run: |
