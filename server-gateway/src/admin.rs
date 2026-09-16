@@ -41,6 +41,7 @@ pub fn router() -> Router<AppState> {
         .route("/admin/tiers", get(list_tiers).post(save_tier))
         .route("/admin/tiers/{name}", delete(delete_tier))
         .route("/admin/licenses", get(list_licenses).post(mint_license))
+        .route("/admin/licenses/{id}/reissue", post(reissue_license))
         .route("/admin/licenses/{id}/peers", post(set_peers))
         .route("/admin/upstreams/{id}/catalog", get(catalog))
         .route("/admin/licenses/{id}/devices", get(list_devices))
@@ -643,6 +644,46 @@ async fn mint_license(
     state.db.unrevoke(&license.license_id)?;
     Ok(Json(
         json!({ "license": token, "license_id": license.license_id }),
+    ))
+}
+
+/// Re-print the key for a licence that already exists. A minted token is shown
+/// once at issue; the operator who lost it need not lose the licence too. The
+/// signature is deterministic, so re-minting the very same id/tier/expiry/seats
+/// yields the identical key — this hands back exactly what was issued, without
+/// changing anything the gateway enforces.
+async fn reissue_license(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    admin(&state, &headers)?;
+    let row = state
+        .db
+        .list_licenses()?
+        .into_iter()
+        .find(|r| r.license_id == id)
+        .ok_or_else(|| ApiError::BadRequest("no licence with that id".into()))?;
+    let path =
+        std::env::var("VD_LICENSE_KEY_FILE").unwrap_or_else(|_| "license-signing.key".to_string());
+    let text = std::fs::read_to_string(&path).map_err(|err| {
+        ApiError::Upstream(format!("cannot read the signing key at {path}: {err}"))
+    })?;
+    let bytes = B64
+        .decode(text.trim())
+        .ok()
+        .and_then(|raw| <[u8; 32]>::try_from(raw).ok())
+        .ok_or_else(|| ApiError::Upstream("the signing key file does not hold a key".into()))?;
+    let signer = SigningKey::from_bytes(&bytes);
+    let license = License {
+        license_id: row.license_id.clone(),
+        tier: row.tier.clone(),
+        expires_at: row.expires_at,
+        max_peers: row.max_peers,
+    };
+    let token = vd_license::mint(&signer, &license);
+    Ok(Json(
+        json!({ "license": token, "license_id": row.license_id }),
     ))
 }
 

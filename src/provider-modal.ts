@@ -119,6 +119,14 @@ function meterBar(used: number, cap: number): string {
  * except a licence key, because everything else about the cloud provider —
  * models, fallbacks, voice, keys — lives on the server.
  */
+// The licence id, shown so the operator can tell which key is active without
+// exposing the whole thing: the middle is the secret part.
+function maskKey(id: string): string {
+  const value = String(id || "").trim();
+  if (value.length <= 12) return value;
+  return `${value.slice(0, 8)}…${value.slice(-4)}`;
+}
+
 function planPanel(plan: PlanState | null, hasKey: boolean): string {
   if (!plan) return `<div class="plan-card"><div class="meta">${t("keys.cloudChecking")}</div></div>`;
 
@@ -168,6 +176,7 @@ function planPanel(plan: PlanState | null, hasKey: boolean): string {
       }</span>
     </div>
     <div class="meta">${t("plan.paidWhat", { devices: plan.limits.devices })}</div>
+    ${plan.license_id ? `<div class="meta">${t("plan.activeKey", { key: maskKey(plan.license_id) })}</div>` : ""}
     <div class="meta" id="syncStatus">${t("keys.syncChecking")}</div>
     <div class="meta" id="cloudTopUp" hidden></div>
     <div class="row-inline">

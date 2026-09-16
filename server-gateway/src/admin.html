@@ -954,10 +954,36 @@
             }</div>
           </div>
 
+          <div>
+            <p class="subhead">Ключ</p>
+            <p class="note-hint">Сам ключ показывается клиенту один раз при выдаче и не хранится.
+              Если оператор его потерял — перевыпусти: вернётся ровно тот же ключ, лицензия не меняется.</p>
+            <div class="row" style="margin-top:8px">
+              <button class="ghost" id="d-reissue">показать / перевыпустить ключ</button>
+            </div>
+            <div id="d-key-out" style="margin-top:10px"></div>
+          </div>
+
           <div class="row" style="gap:8px;justify-content:space-between;border-top:1px solid var(--line);padding-top:14px">
             <button class="ghost" id="d-mailbox">очистить обмен</button>
             <button class="ghost ${row.revoked ? "" : "danger"}" id="d-revoke">${row.revoked ? "вернуть ключ" : "отозвать ключ"}</button>
           </div>`;
+
+        $("d-reissue").addEventListener("click", async () => {
+          try {
+            const out = await call(`/admin/licenses/${encodeURIComponent(id)}/reissue`, { method: "POST" });
+            $("d-key-out").innerHTML = `<div class="gauge" style="gap:10px">
+              <div class="glabel" style="text-transform:none;color:var(--accent)">Отдайте это клиенту — попросите сохранить, повторно он не показывается:</div>
+              <code style="display:block;white-space:pre-wrap">${esc(out.license)}</code>
+              <div class="row"><button class="ghost" id="d-key-copy">скопировать</button></div>
+            </div>`;
+            $("d-key-copy").addEventListener("click", () => {
+              navigator.clipboard.writeText(out.license).then(() => toast("В буфере"));
+            });
+          } catch (error) {
+            toast(error.message, true);
+          }
+        });
 
         $("d-add-credits").addEventListener("click", async () => {
           const typed = $("d-credits").value.trim();

@@ -254,17 +254,36 @@ export async function openBuyModal(options: { credits?: boolean } = {}) {
       try {
         await api.activateLicense(answer.license);
         toast(t("buy.activated"), "success");
-        closeModal();
+        // Not auto-closed: the key is shown once, so make the operator take it
+        // before the window goes away.
+        showKeyReceipt(answer.license, false);
       } catch (error) {
         // The key is good and saved; only switching to it failed. Show it
         // rather than swallowing it — it is the thing they paid for.
-        if (line) {
-          line.innerHTML = `${t("buy.activateFailed", { error: escapeHtml(errorText(error)) })}
-            <div class="pay-address">${escapeHtml(answer.license)}</div>`;
-        }
+        showKeyReceipt(answer.license, true, errorText(error));
       }
       return;
     }
+  }
+
+  // The key, once. It is also under Purchases on THIS machine, but nowhere else,
+  // so the buyer is told plainly to copy and keep it.
+  function showKeyReceipt(license: string, activateFailed: boolean, error?: string) {
+    body.innerHTML = `
+      <div class="pay-card">
+        <h3>${t("buy.saveKeyTitle")}</h3>
+        ${activateFailed ? `<div class="meta">${t("buy.activateFailed", { error: escapeHtml(error || "") })}</div>` : ""}
+        <div class="meta warn">${t("buy.saveKeyWarn")}</div>
+        <div class="pay-address" id="boughtKey">${escapeHtml(license)}</div>
+        <div class="row-inline">
+          <button class="btn btn-primary" id="btnCopyKey">${t("buy.copyKey")}</button>
+          <button class="btn btn-secondary" data-act="close">${t("common.close")}</button>
+        </div>
+      </div>`;
+    body.querySelector("#btnCopyKey")?.addEventListener("click", () => {
+      void navigator.clipboard.writeText(license).then(() => toast(t("buy.copied"), "success"));
+    });
+    body.querySelector("[data-act='close']")?.addEventListener("click", () => closeModal());
   }
 
   drawChoice();
