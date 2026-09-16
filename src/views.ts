@@ -12,7 +12,7 @@ import {
   visibleMen,
   visibleProfiles,
 } from "./store";
-import type { Attachment } from "./store";
+import type { Attachment, UiEntry } from "./store";
 import type { Man, Profile, RunStep, Usage } from "./types";
 
 export function renderTopbar() {
@@ -475,8 +475,23 @@ export function renderChat() {
     return;
   }
 
-  container.innerHTML = store.entries
-    .map((entry) => {
+  container.innerHTML = store.entries.map(entryHtml).join("");
+
+  // Following the conversation means staying at the bottom; reading further up
+  // — or dragging a selection across old messages — means staying where you
+  // are, so a redraw does not yank the chat away.
+  if (stick) {
+    container.scrollTop = container.scrollHeight;
+  } else {
+    container.scrollTop = keep;
+  }
+}
+
+// One message's HTML. Split out of renderChat so the live bubble can be redrawn
+// on its own while streaming, without rebuilding the whole log (which stuttered
+// the spinner) or the rest of the page.
+function entryHtml(entry: UiEntry): string {
+  {
       const meta = (entry.meta ?? {}) as {
         steps?: RunStep[];
         usage?: Usage;
@@ -587,17 +602,26 @@ export function renderChat() {
         `<div class="bubble">${recipient}${thinking}${shots}${bubbleText(entry, meta.reply_key)}` +
         `${steps}${working}${usageLine(meta.usage, extras)}${actions}${asked}</div></div>`
       );
-    })
-    .join("");
-
-  // Following the conversation means staying at the bottom; reading further up
-  // — or dragging a selection across old messages — means staying where you
-  // are, so a redraw does not yank the chat away.
-  if (stick) {
-    container.scrollTop = container.scrollHeight;
-  } else {
-    container.scrollTop = keep;
   }
+}
+
+// Redraw a single message in place — used while streaming, so the growing answer
+// appears normally but the rest of the page (open menus, the sync dialog, the
+// topbar) is never touched and never torn down. Falls back to a full redraw if
+// the node is not on screen yet.
+export function renderLiveEntry(entry: UiEntry) {
+  const container = $("messages");
+  const node = container.querySelector(`.msg[data-entry="${CSS.escape(entry.id)}"]`);
+  if (!node) {
+    renderChat();
+    return;
+  }
+  const stick = container.scrollTop + container.clientHeight >= container.scrollHeight - 48;
+  const holder = document.createElement("div");
+  holder.innerHTML = entryHtml(entry);
+  const fresh = holder.firstElementChild;
+  if (fresh) node.replaceWith(fresh);
+  if (stick) container.scrollTop = container.scrollHeight;
 }
 
 /**

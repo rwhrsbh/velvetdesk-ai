@@ -56,6 +56,7 @@ import type {
 import {
   renderAll,
   renderChat,
+  renderLiveEntry,
   renderMen,
   renderProfiles,
   renderAttachments,
@@ -3358,8 +3359,11 @@ function bindAgentEvents() {
     } else {
       return;
     }
-    // Only the chat on screen needs redrawing; the rest keep filling quietly.
-    if (sameTarget(run.target, currentTarget())) renderChat();
+    // Only the live bubble is redrawn, and only when its chat is on screen:
+    // rebuilding the whole log on every token stuttered the spinner and tore
+    // down any menu or dialog open at the time. The rest of the page is left
+    // untouched, so streaming shows normally while modals stay put.
+    if (sameTarget(run.target, currentTarget())) renderLiveEntry(entry);
   });
 }
 
