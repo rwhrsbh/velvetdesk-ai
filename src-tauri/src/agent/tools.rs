@@ -1171,6 +1171,7 @@ mod tests {
             thinking_budget: None,
             reasoning_dialect: "auto".into(),
             model_chain: vec![],
+            chain_rounds: 3,
             context_tokens: None,
             key_count: 1,
         };

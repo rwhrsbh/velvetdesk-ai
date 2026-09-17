@@ -106,8 +106,7 @@ pub async fn call_streaming(
     if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
         eprintln!(
-            "[llm] {} {url} FAILED {} — {}",
-            "POST",
+            "[llm] POST {url} FAILED {} — {}",
             status.as_u16(),
             body.trim()
         );

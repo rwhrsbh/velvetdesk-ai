@@ -368,6 +368,7 @@ pub fn provider_for(upstream: &UpstreamRow, model: &ModelRow) -> ProviderConfig 
         // The gateway walks its own chain across upstreams, so the provider
         // itself is given one model and no fallbacks.
         model_chain: vec![],
+        chain_rounds: 1,
         reasoning_dialect: upstream.reasoning_dialect.clone(),
         context_tokens: model.context_tokens,
         key_count: upstream.key_count,
