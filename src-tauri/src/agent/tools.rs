@@ -176,6 +176,13 @@ pub struct ToolOutcome {
     /// What the write changed, field by field. Null for reads.
     #[serde(default)]
     pub changes: Value,
+    /// Everything needed to undo an applied write: the record kind, its id, and
+    /// the full snapshot from before the change. Null when there is nothing to
+    /// undo (a read, a queued-not-applied write, or a create with no prior
+    /// state). Restoring writes the snapshot back through the same path the
+    /// change took, so an undo can only ever return the record to how it was.
+    #[serde(default)]
+    pub revert: Value,
     /// JSON string handed back to the model.
     pub result: Value,
     pub applied: bool,
@@ -511,6 +518,7 @@ pub fn execute(
             summary: phrase.text.clone(),
             phrase,
             changes: Value::Null,
+            revert: Value::Null,
         });
     }
 
@@ -518,6 +526,11 @@ pub fn execute(
     let changes = diff_values(&plan.before, &plan.after);
 
     if is_allowed(security, risk) {
+        // Captured before the target is consumed by commit: what to write back,
+        // and where, if the operator undoes this. Only a change with a full
+        // prior record can be undone — a create (before = null) or a delete
+        // cannot be restored from a diff, so those carry no undo.
+        let revert = revert_data(tool, &plan.target, &plan.before);
         commit(scope, &plan.target)?;
         Ok(ToolOutcome {
             tool: tool.to_string(),
@@ -528,6 +541,7 @@ pub fn execute(
             summary: plan.summary,
             phrase: plan.phrase,
             changes,
+            revert,
         })
     } else {
         let pending = PendingAction {
@@ -558,6 +572,7 @@ pub fn execute(
             summary: plan.summary,
             phrase: plan.phrase,
             changes,
+            revert: Value::Null,
         })
     }
 }
@@ -1115,6 +1130,47 @@ pub fn commit(scope: &Scope, target: &MutTarget) -> Result<()> {
         }
         MutTarget::DeleteMan(id) => scope.delete_man(id),
     }
+}
+
+/// The undo payload for an applied change: which record it was and the whole
+/// snapshot from before it. Null when there is nothing to restore — a create had
+/// no prior state, and a change we cannot round-trip to a record is not offered
+/// for undo. A delete carries the deleted record, so undoing it puts it back.
+fn revert_data(tool: &str, target: &MutTarget, before: &Value) -> Value {
+    if !before.is_object() {
+        return Value::Null;
+    }
+    let kind = match target {
+        MutTarget::Man(_) | MutTarget::DeleteMan(_) => "man",
+        MutTarget::Profile(_) => "profile",
+        MutTarget::Chat(_) => "chat",
+    };
+    json!({ "tool": tool, "kind": kind, "before": before })
+}
+
+/// Undo an applied change by writing its before-snapshot back through the same
+/// path the change took. The write bumps `rev` and `updated_at` (see storage),
+/// so the restored record is newer than any copy already synced out under the
+/// same id — the next sync replaces that copy rather than clobbering the undo.
+pub fn apply_revert(scope: &Scope, payload: &Value) -> Result<()> {
+    let kind = payload.get("kind").and_then(Value::as_str).unwrap_or("");
+    let before = payload.get("before").cloned().unwrap_or(Value::Null);
+    if !before.is_object() {
+        return Err(AppError::Invalid("nothing to undo for this step".into()));
+    }
+    let target = match kind {
+        "man" => MutTarget::Man(Box::new(
+            serde_json::from_value(before).map_err(|e| AppError::Invalid(e.to_string()))?,
+        )),
+        "profile" => MutTarget::Profile(Box::new(
+            serde_json::from_value(before).map_err(|e| AppError::Invalid(e.to_string()))?,
+        )),
+        "chat" => MutTarget::Chat(Box::new(
+            serde_json::from_value(before).map_err(|e| AppError::Invalid(e.to_string()))?,
+        )),
+        other => return Err(AppError::Invalid(format!("cannot undo a {other} change"))),
+    };
+    commit(scope, &target)
 }
 
 /// Keep one of her letters among the profile's examples: the newest ten, no

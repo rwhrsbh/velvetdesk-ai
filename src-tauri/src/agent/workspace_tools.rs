@@ -230,6 +230,7 @@ fn queued(tool: &str, args: &Value, risk: Risk, phrase: Phrase) -> ToolOutcome {
         applied: false,
         queued: Some(pending),
         changes: Value::Null,
+        revert: Value::Null,
         summary: phrase.text.clone(),
         phrase,
     }
@@ -243,6 +244,7 @@ fn done(tool: &str, risk: Risk, result: Value, phrase: Phrase) -> ToolOutcome {
         applied: true,
         queued: None,
         changes: Value::Null,
+        revert: Value::Null,
         summary: phrase.text.clone(),
         phrase,
     }
@@ -571,6 +573,7 @@ fn request_access(args: &Value) -> Result<ToolOutcome> {
         applied: false,
         queued: Some(pending),
         changes: Value::Null,
+        revert: Value::Null,
         summary,
         phrase,
     })

@@ -141,6 +141,8 @@ export const api = {
   pendingList: () => invoke<PendingAction[]>("pending_list"),
   pendingApprove: (id: string) => invoke<PendingAction>("pending_approve", { id }),
   pendingReject: (id: string) => invoke<void>("pending_reject", { id }),
+  revertStep: (modelId: string, payload: unknown) =>
+    invoke<void>("revert_step", { modelId, payload }),
   pendingClear: () => invoke<void>("pending_clear"),
 
   doctorScan: () => invoke<DoctorReport>("doctor_scan"),

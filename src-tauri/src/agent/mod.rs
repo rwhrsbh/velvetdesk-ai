@@ -1324,6 +1324,7 @@ async fn run_auto(
                     summary,
                     phrase,
                     changes,
+                    revert,
                     queued,
                     applied,
                     risk,
@@ -1355,6 +1356,8 @@ async fn run_auto(
                             "pending": waiting,
                             "result": crate::llm::cap_raw(&result.to_string()),
                             "changes": changes,
+                            // The snapshot the operator's "Undo" restores.
+                            "revert": revert,
                         }),
                     };
                     (result, step)

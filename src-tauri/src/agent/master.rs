@@ -162,6 +162,7 @@ fn read_outcome(tool: &str, result: Value) -> tools::ToolOutcome {
         applied: true,
         queued: None,
         changes: Value::Null,
+        revert: Value::Null,
         summary: format!("read: {tool}"),
         phrase: tools::Phrase::new(
             "step.read",
@@ -253,6 +254,7 @@ fn create_profile(
             applied: false,
             queued: Some(pending),
             changes: Value::Null,
+            revert: Value::Null,
             summary,
             phrase,
         });
@@ -267,6 +269,7 @@ fn create_profile(
         applied: true,
         queued: None,
         changes: Value::Null,
+        revert: Value::Null,
         summary,
         phrase,
     })

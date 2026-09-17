@@ -211,6 +211,7 @@ pub fn run() {
             commands::pending_list,
             commands::pending_approve,
             commands::pending_reject,
+            commands::revert_step,
             commands::pending_clear,
             commands::doctor_scan,
             commands::doctor_fix,

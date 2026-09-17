@@ -398,14 +398,18 @@ function stepHtml(step: RunStep): string {
   const detail = (step.detail ?? {}) as {
     changes?: { field: string; before: string; after: string }[];
     result?: string;
+    revert?: unknown;
   };
 
   const written = typeof params.text === "string" ? params.text.trim() : "";
   const changes = Array.isArray(detail.changes) ? detail.changes : [];
+  // Only a change that carries a full before-snapshot can be undone.
+  const canUndo =
+    detail.revert !== null && typeof detail.revert === "object" && detail.revert !== undefined;
 
   const parts: string[] = [];
 
-  // What the write changed, field by field.
+  // What the write changed, field by field, then the button that puts it back.
   if (changes.length > 0) {
     parts.push(
       `<div class="step-diff">` +
@@ -421,6 +425,13 @@ function stepHtml(step: RunStep): string {
           .join("") +
         `</div>`,
     );
+    if (canUndo) {
+      parts.push(
+        `<div class="step-undo"><button class="btn btn-secondary" data-revert-step="${escapeHtml(
+          JSON.stringify(detail.revert),
+        )}">${t("chat.undo")}</button></div>`,
+      );
+    }
   }
 
   // The text it wrote, in full — a letter, a note, a rewritten persona.

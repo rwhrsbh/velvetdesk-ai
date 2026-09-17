@@ -118,6 +118,9 @@ a {
 .topbar-center { flex: 0 1 auto; overflow: hidden; }
 /* Streaming answer: a plain growing text node, wrapped like prose. */
 .live-text { white-space: pre-wrap; word-break: break-word; }
+/* Undo sits under a step's diff, quiet until wanted. */
+.step-undo { margin: 6px 0 2px 16px; }
+.step-undo .btn { padding: 3px 10px; font-size: 12px; }
 .topbar-right { flex: 0 0 auto; }
 @media (max-width: 1180px) {
   .topbar { gap: 6px; padding-left: 8px; padding-right: 8px; }

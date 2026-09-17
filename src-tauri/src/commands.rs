@@ -1091,6 +1091,22 @@ pub fn pending_approve(state: State<'_, AppState>, id: String) -> Result<Pending
     Ok(action)
 }
 
+/// Undo one applied change: write the step's before-snapshot back. `payload` is
+/// the `revert` object the step carried (kind + before). The write bumps the
+/// record's rev/updated_at, so a copy already synced out under the same id is
+/// replaced on the next sync rather than overwriting the undo.
+#[tauri::command]
+pub fn revert_step(
+    state: State<'_, AppState>,
+    model_id: String,
+    payload: serde_json::Value,
+) -> Result<()> {
+    let scope = state.paths.scope(&model_id)?;
+    tools::apply_revert(&scope, &payload)?;
+    storage::rebuild_index(&state.paths)?;
+    Ok(())
+}
+
 /// Folders agents may use, and the ability to take one back.
 #[tauri::command]
 pub fn list_trusted_roots(

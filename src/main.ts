@@ -1970,6 +1970,23 @@ function bindPanels() {
   // Approving from the chat: the same two answers the panel offers, next to the
   // step that is waiting for them.
   $("messages").addEventListener("click", async (event) => {
+    const undoBtn = (event.target as HTMLElement).closest<HTMLElement>("[data-revert-step]");
+    if (undoBtn) {
+      event.stopPropagation();
+      const modelId = store.activeModelId;
+      if (!modelId) return;
+      if (!confirm(t("chat.undoConfirm"))) return;
+      try {
+        const payload = JSON.parse(undoBtn.dataset.revertStep || "null");
+        await api.revertStep(modelId, payload);
+        toast(t("chat.undone"), "success");
+        await refresh();
+      } catch (error) {
+        toast(errorText(error), "error");
+      }
+      return;
+    }
+
     const target = event.target as HTMLElement;
     const approve = target.closest<HTMLElement>("[data-approve]")?.dataset.approve;
     const reject = target.closest<HTMLElement>("[data-reject]")?.dataset.reject;
