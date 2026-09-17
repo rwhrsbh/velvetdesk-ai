@@ -393,7 +393,15 @@ fn cannot_stream(result: &std::result::Result<ChatResponse, CallError>) -> bool 
 impl LlmClient {
     pub fn new() -> Self {
         let http = reqwest::Client::builder()
-            .timeout(Duration::from_secs(180))
+            // No overall request timeout: a reasoning model may think for minutes
+            // (some Chinese models 5-10) before or between tokens, and a hard
+            // 180s cap was aborting those mid-answer — the abort surfaced as
+            // "error decoding response body" / "error sending request", which the
+            // chain read as a failure and jumped to the next model, losing the
+            // context and starting over. We never cut a call ourselves now; only
+            // the operator's Stop (the cancel flag the stream loops watch) ends
+            // one early. A short connect timeout still fails fast on a dead host.
+            .connect_timeout(Duration::from_secs(30))
             .user_agent("VelvetDesk/0.1")
             .build()
             .unwrap_or_default();
@@ -436,7 +444,10 @@ impl LlmClient {
         // next. One pass is the old behaviour.
         let rounds = provider.chain_rounds.max(1);
         'rounds: for _ in 0..rounds {
-            let live: Vec<&String> = models.iter().filter(|m| !unavailable.contains(*m)).collect();
+            let live: Vec<&String> = models
+                .iter()
+                .filter(|m| !unavailable.contains(*m))
+                .collect();
             if live.is_empty() {
                 break;
             }
