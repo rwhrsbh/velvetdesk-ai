@@ -43,7 +43,26 @@ pub struct AppState {
     /// Admission control: how many upstream calls run at once, and who is
     /// waiting for a turn.
     pub queue: Arc<crate::queue::Queue>,
+    /// Picture descriptions already made, by a hash of the picture. A
+    /// conversation resends its whole history on every turn, pictures
+    /// included; without this every turn would pay to describe them again.
+    pub descriptions: Arc<Mutex<HashMap<String, String>>>,
 }
+
+/// A call made on the way to an answer that is billed on its own - a
+/// picture described for a model that cannot see it.
+pub struct Spent {
+    pub model: String,
+    pub usage: vd_llm::Usage,
+}
+
+/// What the describer is told. It writes for a model that will never see
+/// the picture, so nothing it leaves out exists for that model.
+const DESCRIBE_PROMPT: &str = "You describe a picture for another AI model that cannot see it and will rely on your words alone. \
+Be complete and concrete: what kind of picture it is (selfie, photo, screenshot, document, meme), who and what is in it, how many people, \
+their apparent age and gender, appearance, hair, clothing, pose, expression and gestures, the setting and background, objects, colours, \
+light and mood. Copy any visible text exactly, in its own language. Do not guess who a person is. \
+Write in Russian, as plain text, with no preamble.";
 
 impl AppState {
     pub fn new(cfg: GatewayConfig, db: Db) -> rusqlite::Result<AppState> {
@@ -73,6 +92,7 @@ impl AppState {
                 queued: limits.2,
                 wait: std::time::Duration::from_secs(limits.3),
             })),
+            descriptions: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -115,6 +135,116 @@ impl AppState {
     /// Every model the gateway will answer with, in configured order.
     pub fn model_names(&self) -> Vec<String> {
         self.registry.read().model_names()
+    }
+
+    /// The request with every picture replaced by a description of it.
+    ///
+    /// With no describer switched on the pictures are left where they are,
+    /// as before: the model may cope, and a refusal is no worse than a
+    /// request with its pictures silently dropped.
+    async fn describe(&self, request: &ChatRequest, spent: &mut Vec<Spent>) -> ChatRequest {
+        let describers: Vec<(String, ProviderConfig)> = {
+            let registry = self.registry.read();
+            registry
+                .vision_chain()
+                .into_iter()
+                .map(|(upstream, entry)| (entry.name.clone(), provider_for(upstream, entry)))
+                .collect()
+        };
+        if describers.is_empty() {
+            log::warn!("a picture for a model that cannot see, and no vision model is switched on");
+            return request.clone();
+        }
+        let mut out = request.clone();
+        for message in &mut out.messages {
+            if message.images.is_empty() {
+                continue;
+            }
+            let mut notes = vec![];
+            for (place, image) in message.images.iter().enumerate() {
+                let text = self.describe_one(image, &describers, spent).await;
+                notes.push(format!(
+                    "[Фото {} — описание для модели, которая не видит изображений: {}]",
+                    place + 1,
+                    text
+                ));
+            }
+            message.images.clear();
+            let notes = notes.join("\n\n");
+            message.content = if message.content.trim().is_empty() {
+                notes
+            } else {
+                format!("{}\n\n{notes}", message.content)
+            };
+        }
+        out
+    }
+
+    async fn describe_one(
+        &self,
+        image: &vd_llm::ImagePart,
+        describers: &[(String, ProviderConfig)],
+        spent: &mut Vec<Spent>,
+    ) -> String {
+        use sha2::{Digest as _, Sha256};
+        let hash: String = Sha256::digest(image.data.as_bytes())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        if let Some(known) = self.descriptions.lock().get(&hash) {
+            return known.clone();
+        }
+        let ask = ChatRequest {
+            system: DESCRIBE_PROMPT.to_string(),
+            messages: vec![vd_llm::LlmMessage {
+                images: vec![image.clone()],
+                ..vd_llm::LlmMessage::user("Опиши это изображение.")
+            }],
+            tools: vec![],
+            temperature: 0.2,
+            max_output_tokens: Some(1200),
+            force_json: false,
+            thinking: Default::default(),
+            stream: false,
+            cancel: None,
+        };
+        for (index, (name, provider)) in describers.iter().enumerate() {
+            let Some(pool) = self.registry.read().pool(&provider.id) else {
+                continue;
+            };
+            if pool.is_empty() {
+                continue;
+            }
+            if index > 0 {
+                pool.clear_cooldowns();
+            }
+            match self.llm.chat(provider, pool, &ask, &|_| {}).await {
+                Ok(answer) if !answer.text.trim().is_empty() => {
+                    spent.push(Spent {
+                        model: name.clone(),
+                        usage: answer.usage.clone(),
+                    });
+                    let text = answer.text.trim().to_string();
+                    let mut cache = self.descriptions.lock();
+                    // A bound, not a policy: a long day's pictures, then a
+                    // fresh start.
+                    if cache.len() > 5_000 {
+                        cache.clear();
+                    }
+                    cache.insert(hash, text.clone());
+                    return text;
+                }
+                Ok(answer) => {
+                    spent.push(Spent {
+                        model: name.clone(),
+                        usage: answer.usage.clone(),
+                    });
+                    log::warn!("{name} described a picture with nothing");
+                }
+                Err(err) => log::warn!("{name} could not describe a picture: {err}"),
+            }
+        }
+        "не удалось описать изображение".to_string()
     }
 
     /// Turn a dictated clip into text, trying each voice model in turn.
@@ -195,22 +325,35 @@ impl AppState {
     ///
     /// Returns the model that actually answered, which is not always the one
     /// that was asked for, and the client is told so in the response.
+    ///
+    /// A model that cannot read pictures is sent a written description of
+    /// each one instead, made by a `vision` model; what that cost comes back
+    /// alongside, to be billed as well.
     pub async fn call(
         &self,
         model: &str,
         request: &ChatRequest,
         on_event: &(dyn Fn(Value) + Send + Sync),
-    ) -> Result<(String, ChatResponse), LlmError> {
+    ) -> Result<(String, ChatResponse, Vec<Spent>), LlmError> {
         // The chain is copied out from under the lock: a round of calls takes
         // minutes, and the admin page must not wait that long to save a key.
-        let attempts: Vec<(String, ProviderConfig)> = {
+        let attempts: Vec<(String, bool, ProviderConfig)> = {
             let registry = self.registry.read();
             registry
                 .chain_from(model)
                 .into_iter()
-                .map(|(upstream, entry)| (entry.name.clone(), provider_for(upstream, entry)))
+                .map(|(upstream, entry)| {
+                    (
+                        entry.name.clone(),
+                        entry.images,
+                        provider_for(upstream, entry),
+                    )
+                })
                 .collect()
         };
+        let has_pictures = request.messages.iter().any(|m| !m.images.is_empty());
+        let mut spent: Vec<Spent> = vec![];
+        let mut described: Option<ChatRequest> = None;
         if attempts.is_empty() {
             return Err(LlmError::Provider(
                 "the gateway has no model switched on".into(),
@@ -218,7 +361,7 @@ impl AppState {
         }
 
         let mut last = LlmError::Provider("no model was tried".into());
-        for (index, (model_name, provider)) in attempts.into_iter().enumerate() {
+        for (index, (model_name, sees, provider)) in attempts.into_iter().enumerate() {
             let Some(pool) = self.registry.read().pool(&provider.id) else {
                 continue;
             };
@@ -236,6 +379,14 @@ impl AppState {
                 pool.clear_cooldowns();
             }
 
+            let request = if has_pictures && !sees {
+                if described.is_none() {
+                    described = Some(self.describe(request, &mut spent).await);
+                }
+                described.as_ref().unwrap_or(request)
+            } else {
+                request
+            };
             let mut outcome = self
                 .llm
                 .chat(&provider, pool.clone(), request, on_event)
@@ -255,7 +406,7 @@ impl AppState {
             match outcome {
                 Ok(mut response) => {
                     response.model = model_name.clone();
-                    return Ok((model_name, response));
+                    return Ok((model_name, response, spent));
                 }
                 Err(err) => {
                     log::warn!("{model_name} failed: {err}");

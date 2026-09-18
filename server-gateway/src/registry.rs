@@ -64,6 +64,14 @@ pub struct ModelRow {
     /// never offered as a chat model.
     #[serde(default)]
     pub voice: bool,
+    /// Reads pictures itself. A chat model without it is handed a written
+    /// description of each picture instead, made by a `vision` model.
+    #[serde(default)]
+    pub images: bool,
+    /// Only describes pictures for models that cannot see them - like
+    /// `voice`, never offered for chat and never a fallback for it.
+    #[serde(default)]
+    pub vision: bool,
     /// Dollars per clip, for voice models. A transcription answers with text
     /// and no token count, so there is nothing else to bill it by.
     #[serde(default)]
@@ -250,6 +258,8 @@ impl Registry {
                     enabled: true,
                     position: place as i64,
                     voice: model.voice,
+                    images: false,
+                    vision: false,
                     price_request: model.price_request,
                     routing: Default::default(),
                 })?;
@@ -291,7 +301,7 @@ impl Registry {
     pub fn chain_from(&self, name: &str) -> Vec<(&UpstreamRow, &ModelRow)> {
         let mut all: Vec<(&UpstreamRow, &ModelRow)> = vec![];
         for model in &self.models {
-            if !model.enabled || model.voice {
+            if !model.enabled || model.voice || model.vision {
                 continue;
             }
             if let Some(upstream) = self
@@ -318,6 +328,20 @@ impl Registry {
         self.models
             .iter()
             .filter(|model| model.enabled && model.voice)
+            .filter_map(|model| {
+                self.upstreams
+                    .iter()
+                    .find(|up| up.id == model.upstream_id && up.enabled)
+                    .map(|upstream| (upstream, model))
+            })
+            .collect()
+    }
+
+    /// The picture describers, in the order they should be tried.
+    pub fn vision_chain(&self) -> Vec<(&UpstreamRow, &ModelRow)> {
+        self.models
+            .iter()
+            .filter(|model| model.enabled && model.vision)
             .filter_map(|model| {
                 self.upstreams
                     .iter()
@@ -474,6 +498,8 @@ mod tests {
             enabled,
             position: 0,
             voice: false,
+            images: false,
+            vision: false,
             price_request: 0.0,
             routing: Default::default(),
         }
@@ -622,5 +648,30 @@ mod tests {
         assert!(provider_for(&upstream("direct", true), &m)
             .extra_body
             .is_null());
+    }
+
+    /// Describers and dictation models are tools, not chat models: neither
+    /// answers a chat nor stands in for one that failed.
+    #[test]
+    fn vision_and_voice_models_stay_out_of_the_chat_chain() {
+        let mut registry = registry();
+        let mut eyes = model("describer", "openrouter", true);
+        eyes.vision = true;
+        let mut ears = model("dictation", "openrouter", true);
+        ears.voice = true;
+        registry.models.push(eyes);
+        registry.models.push(ears);
+        let chat: Vec<&str> = registry
+            .chain_from("describer")
+            .into_iter()
+            .map(|(_, m)| m.name.as_str())
+            .collect();
+        assert!(!chat.contains(&"describer") && !chat.contains(&"dictation"));
+        let vision: Vec<&str> = registry
+            .vision_chain()
+            .into_iter()
+            .map(|(_, m)| m.name.as_str())
+            .collect();
+        assert_eq!(vision, vec!["describer"]);
     }
 }

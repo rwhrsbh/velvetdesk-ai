@@ -41,6 +41,10 @@ pub struct ModelInfo {
     pub price_out: Option<f64>,
     #[serde(default)]
     pub price_cached: Option<f64>,
+    /// Takes pictures in, when the endpoint says. OpenRouter lists input
+    /// modalities per model; `None` is "not said".
+    #[serde(default)]
+    pub images: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -156,6 +160,8 @@ fn parse_gemini_models(value: &Value) -> Vec<ModelInfo> {
                 price_in: None,
                 price_out: None,
                 price_cached: None,
+                // Every Gemini chat model reads pictures.
+                images: Some(true),
             })
         })
         .collect();
@@ -320,6 +326,11 @@ fn parse_openai_models(value: &Value) -> Vec<ModelInfo> {
                 price_in: price(entry, "prompt"),
                 price_out: price(entry, "completion"),
                 price_cached: price(entry, "input_cache_read"),
+                images: entry
+                    .get("architecture")
+                    .and_then(|a| a.get("input_modalities"))
+                    .and_then(|m| m.as_array())
+                    .map(|m| m.iter().any(|x| x == "image")),
                 id,
                 label,
                 chat: true,

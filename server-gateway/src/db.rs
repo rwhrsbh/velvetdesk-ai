@@ -229,6 +229,8 @@ impl Db {
         Db::add_column(conn, "model", "voice", "INTEGER NOT NULL DEFAULT 0");
         Db::add_column(conn, "model", "price_request", "REAL NOT NULL DEFAULT 0");
         Db::add_column(conn, "model", "routing", "TEXT NOT NULL DEFAULT ''");
+        Db::add_column(conn, "model", "images", "INTEGER NOT NULL DEFAULT 0");
+        Db::add_column(conn, "model", "vision", "INTEGER NOT NULL DEFAULT 0");
         Ok(())
     }
 
@@ -889,7 +891,8 @@ impl Db {
         let conn = self.conn.lock();
         let mut statement = conn.prepare(
             "SELECT name, upstream_id, upstream_name, price_in, price_cached, price_out,
-                    context_tokens, enabled, position, voice, price_request, routing
+                    context_tokens, enabled, position, voice, price_request, routing,
+                    images, vision
              FROM model ORDER BY position, name",
         )?;
         let rows = statement
@@ -905,6 +908,8 @@ impl Db {
                     enabled: row.get::<_, i64>(7)? != 0,
                     position: row.get(8)?,
                     voice: row.get::<_, i64>(9)? != 0,
+                    images: row.get::<_, i64>(12)? != 0,
+                    vision: row.get::<_, i64>(13)? != 0,
                     price_request: row.get(10)?,
                     routing: serde_json::from_str(&row.get::<_, String>(11)?).unwrap_or_default(),
                 })
@@ -917,8 +922,8 @@ impl Db {
         self.conn.lock().execute(
             "INSERT INTO model (name, upstream_id, upstream_name, price_in, price_cached,
                                 price_out, context_tokens, enabled, position, voice,
-                                price_request, routing)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                                price_request, routing, images, vision)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
              ON CONFLICT(name) DO UPDATE SET
                  upstream_id = excluded.upstream_id,
                  upstream_name = excluded.upstream_name,
@@ -930,7 +935,9 @@ impl Db {
                  position = excluded.position,
                  voice = excluded.voice,
                  price_request = excluded.price_request,
-                 routing = excluded.routing",
+                 routing = excluded.routing,
+                 images = excluded.images,
+                 vision = excluded.vision",
             rusqlite::params![
                 model.name,
                 model.upstream_id,
@@ -948,6 +955,8 @@ impl Db {
                 } else {
                     serde_json::to_string(&model.routing).unwrap_or_default()
                 },
+                model.images as i64,
+                model.vision as i64,
             ],
         )?;
         Ok(())

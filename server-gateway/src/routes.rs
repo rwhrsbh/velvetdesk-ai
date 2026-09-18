@@ -377,6 +377,36 @@ fn credit_headers(state: &Allowance) -> HeaderMap {
     headers
 }
 
+/// Bill what was spent on the way to an answer - pictures described for a
+/// model that cannot see them - each at its own model's price.
+fn charge_spent(
+    state: &AppState,
+    license_id: &str,
+    tier: Tier,
+    spent: &[crate::state::Spent],
+) -> rusqlite::Result<()> {
+    for item in spent {
+        let priced = state
+            .registry
+            .read()
+            .find_model(&item.model)
+            .map(|(_, row)| row.clone());
+        charge(
+            &state.db,
+            &Bill {
+                license_id,
+                tier,
+                model: &item.model,
+                priced: priced.as_ref(),
+                usage: &item.usage,
+                credit_usd: state.cfg.credit_usd,
+                now: now(),
+            },
+        )?;
+    }
+    Ok(())
+}
+
 /// Bill one answer, looking the price up in the registry as it stands now.
 fn charge_one(
     state: &AppState,
@@ -505,10 +535,11 @@ async fn chat_completions(
     let created = now();
 
     if !streaming {
-        let (model, response) = state
+        let (model, response, spent) = state
             .call(&wanted, &chat, &|_| {})
             .await
             .map_err(|err| ApiError::Upstream(err.to_string()))?;
+        charge_spent(&state, &caller.license.license_id, caller.tier, &spent)?;
         let after = charge_for(&state, &caller, &model, &response)?;
         drop(slot);
         let body = translate::oai_completion(&id, created, &model, &response);
@@ -541,7 +572,10 @@ async fn chat_completions(
         };
 
         match task.call(&wanted, &chat, &on_event).await {
-            Ok((model, response)) => {
+            Ok((model, response, spent)) => {
+                if let Err(err) = charge_spent(&task, &license_id, tier, &spent) {
+                    log::error!("could not record usage: {err}");
+                }
                 if let Err(err) = charge_one(&task, &license_id, tier, &model, &response) {
                     log::error!("could not record usage: {err}");
                 }
@@ -669,11 +703,12 @@ async fn gemini_generate(
     let chat = translate::gemini_to_chat_request(&body, streaming);
 
     if !streaming {
-        let (model, response) = state
+        let (model, response, spent) = state
             .call(&wanted, &chat, &|_| {})
             .await
             .map_err(|err| ApiError::Upstream(err.to_string()))?;
         drop(slot);
+        charge_spent(&state, &caller.license.license_id, caller.tier, &spent)?;
         let after = charge_for(&state, &caller, &model, &response)?;
         let body = translate::gemini_response(&model, &response);
         return Ok((credit_headers(&after), Json(body)).into_response());
@@ -696,7 +731,10 @@ async fn gemini_generate(
         };
 
         match task.call(&wanted, &chat, &on_event).await {
-            Ok((model, response)) => {
+            Ok((model, response, spent)) => {
+                if let Err(err) = charge_spent(&task, &license_id, tier, &spent) {
+                    log::error!("could not record usage: {err}");
+                }
                 if let Err(err) = charge_one(&task, &license_id, tier, &model, &response) {
                     log::error!("could not record usage: {err}");
                 }

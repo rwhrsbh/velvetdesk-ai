@@ -398,6 +398,8 @@ async fn catalog(
                 enabled: true,
                 position: 0,
                 voice: false,
+                images: false,
+                vision: false,
                 price_request: 0.0,
                 routing: Default::default(),
             });

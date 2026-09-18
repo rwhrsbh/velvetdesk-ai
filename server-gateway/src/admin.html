@@ -355,13 +355,27 @@
             <input id="m-pos" placeholder="порядок" inputmode="numeric" />
             <input id="m-req" placeholder="цена за клип, $" inputmode="decimal" />
             <label class="row" style="gap:6px;align-items:center">
-              <input id="m-voice" type="checkbox" /> голос (диктовка)
+              <input id="m-voice" type="checkbox" /> только голос (диктовка)
+            </label>
+            <label class="row" style="gap:6px;align-items:center">
+              <input id="m-vision" type="checkbox" /> только изображения (описывает фото)
+            </label>
+            <label class="row" style="gap:6px;align-items:center">
+              <input id="m-images" type="checkbox" /> понимает изображения сама
             </label>
           </div>
           <p class="muted">
             Голосовая модель не отдаётся в чат: на неё уходят только клипы диктовки,
             по своей цепочке падения. Токенов в ответе нет, поэтому клип считается
             по цене за клип.
+          </p>
+          <p class="muted">
+            Модель «только изображения» тоже не отвечает в чате и не подменяет упавшую:
+            если в запросе есть фото, а модель чата их не видит («фото: описывать»),
+            каждое фото сперва уходит ей, и в чат попадает подробное описание. Описание
+            списывается с ключа по цене описывающей модели и запоминается — одно и то же
+            фото в истории переписки второй раз не оплачивается. Без такой модели фото
+            уходят как есть.
           </p>
           <div class="row" style="margin-top:10px"><button class="act" id="m-add">Сохранить</button></div>
         </div>
@@ -645,7 +659,9 @@
           ${models
             .map(
               (model) => `<tr>
-                <td><code>${esc(model.name)}</code>${model.voice ? ' <span class="pill on">голос</span>' : ""}${routingPill(model.routing)}</td>
+                <td><code>${esc(model.name)}</code>${model.voice ? ' <span class="pill on">только голос</span>' : ""}${
+                  model.vision ? ' <span class="pill on">только изображения</span>' : ""
+                }${!model.voice && !model.vision && model.images ? ' <span class="pill">видит фото</span>' : ""}${routingPill(model.routing)}</td>
                 <td class="muted">${esc(model.upstream_id)}</td>
                 <td class="muted">${esc(model.upstream_name || model.name)}</td>
                 <td>${model.price_in}</td>
@@ -655,6 +671,11 @@
                 <td>${model.position}</td>
                 <td style="text-align:right" class="row" style="justify-content:flex-end">
                   ${model.voice ? "" : `<button class="ghost" data-route-model="${esc(model.name)}">провайдеры</button>`}
+                  ${
+                    model.voice || model.vision
+                      ? ""
+                      : `<button class="ghost" data-img-model="${esc(model.name)}" title="понимает ли модель картинки сама">фото: ${model.images ? "видит" : "описывать"}</button>`
+                  }
                   <button class="ghost" data-toggle-model="${esc(model.name)}">${model.enabled ? "выключить" : "включить"}</button>
                   <button class="ghost danger" data-del-model="${esc(model.name)}">удалить</button>
                 </td></tr>`,
@@ -669,6 +690,21 @@
               await call("/admin/models", {
                 method: "POST",
                 body: JSON.stringify({ ...model, enabled: !model.enabled }),
+              });
+              drawModels();
+            } catch (error) {
+              toast(error.message, true);
+            }
+          });
+        });
+
+        document.querySelectorAll("[data-img-model]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            const model = models.find((item) => item.name === button.dataset.imgModel);
+            try {
+              await call("/admin/models", {
+                method: "POST",
+                body: JSON.stringify({ ...model, images: !model.images }),
               });
               drawModels();
             } catch (error) {
@@ -733,6 +769,7 @@
         $("m-out").value = picked.price_out ?? "";
         $("m-ctx").value = picked.context_tokens ?? "";
         $("m-voice").checked = !!picked.audio && !picked.chat;
+        $("m-images").checked = !!picked.images;
       });
 
       $("m-add").addEventListener("click", async () => {
@@ -750,6 +787,8 @@
               enabled: true,
               position: num($("m-pos").value),
               voice: $("m-voice").checked,
+              vision: $("m-vision").checked,
+              images: $("m-images").checked || $("m-vision").checked,
               price_request: num($("m-req").value),
             }),
           });
