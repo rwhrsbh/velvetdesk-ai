@@ -63,6 +63,11 @@ pub struct ProviderConfig {
     /// round is never spent on it again.
     #[serde(default = "default_chain_rounds")]
     pub chain_rounds: u32,
+    /// Top-level fields added to an OpenAI-compatible request body as they
+    /// stand - OpenRouter's `provider` routing object, for one. Null adds
+    /// nothing; Gemini never reads it.
+    #[serde(default, skip_serializing_if = "serde_json::Value::is_null")]
+    pub extra_body: serde_json::Value,
     /// Context window in tokens. Empty falls back to a guess from the model
     /// name, which is what drives automatic compaction.
     #[serde(default)]

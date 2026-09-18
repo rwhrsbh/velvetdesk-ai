@@ -68,6 +68,60 @@ pub struct ModelRow {
     /// and no token count, so there is nothing else to bill it by.
     #[serde(default)]
     pub price_request: f64,
+    /// Which of the upstream's hosts serve it (OpenRouter only).
+    #[serde(default)]
+    pub routing: Routing,
+}
+
+/// OpenRouter provider routing for one model.
+///
+/// OpenRouter hosts most models at several companies at once, at different
+/// prices, and left to itself it balances price against speed - which is not
+/// the cheapest. This picks the hosts: an order to try them in, optionally
+/// only those, or simply "cheapest first".
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Routing {
+    /// "" (OpenRouter's balance), "price", "throughput" or "latency".
+    #[serde(default)]
+    pub sort: String,
+    /// Endpoint tags (`deepinfra/fp4`) or provider slugs, tried in order.
+    #[serde(default)]
+    pub order: Vec<String>,
+    /// Use only the hosts in `order`, never fall back to another one.
+    #[serde(default)]
+    pub only: bool,
+}
+
+impl Routing {
+    pub fn is_default(&self) -> bool {
+        self.sort.trim().is_empty() && self.order.is_empty()
+    }
+
+    /// The request-body fields OpenRouter reads, or null for its default.
+    pub fn body(&self) -> serde_json::Value {
+        if self.is_default() {
+            return serde_json::Value::Null;
+        }
+        let mut provider = serde_json::Map::new();
+        let order: Vec<&str> = self
+            .order
+            .iter()
+            .map(|slug| slug.trim())
+            .filter(|slug| !slug.is_empty())
+            .collect();
+        if !order.is_empty() {
+            provider.insert("order".into(), serde_json::json!(order));
+            provider.insert("allow_fallbacks".into(), serde_json::json!(!self.only));
+        }
+        let sort = self.sort.trim();
+        if matches!(sort, "price" | "throughput" | "latency") {
+            provider.insert("sort".into(), serde_json::json!(sort));
+        }
+        if provider.is_empty() {
+            return serde_json::Value::Null;
+        }
+        serde_json::json!({ "provider": provider })
+    }
 }
 
 /// One key, as the admin page is allowed to see it.
@@ -194,6 +248,7 @@ impl Registry {
                     position: place as i64,
                     voice: model.voice,
                     price_request: model.price_request,
+                    routing: Default::default(),
                 })?;
             }
         }
@@ -348,7 +403,7 @@ pub enum DeviceVerdict {
 
 /// The provider shape `vd-llm` calls with, for one model of one upstream.
 pub fn provider_for(upstream: &UpstreamRow, model: &ModelRow) -> ProviderConfig {
-    ProviderConfig {
+    let mut provider = ProviderConfig {
         id: upstream.id.clone(),
         label: if upstream.label.is_empty() {
             upstream.id.clone()
@@ -369,10 +424,16 @@ pub fn provider_for(upstream: &UpstreamRow, model: &ModelRow) -> ProviderConfig 
         // itself is given one model and no fallbacks.
         model_chain: vec![],
         chain_rounds: 1,
+        extra_body: serde_json::Value::Null,
         reasoning_dialect: upstream.reasoning_dialect.clone(),
         context_tokens: model.context_tokens,
         key_count: upstream.key_count,
+    };
+    // Routing is OpenRouter's; any other endpoint would reject the field.
+    if provider.dialect() == "openrouter" {
+        provider.extra_body = model.routing.body();
     }
+    provider
 }
 
 pub fn now() -> i64 {
@@ -411,6 +472,7 @@ mod tests {
             position: 0,
             voice: false,
             price_request: 0.0,
+            routing: Default::default(),
         }
     }
 
@@ -519,5 +581,41 @@ mod tests {
         assert_eq!(model.cached_price(), 1.0);
         model.price_cached = Some(0.1);
         assert_eq!(model.cached_price(), 0.1);
+    }
+
+    /// What each admin choice sends to OpenRouter, and that nothing is sent
+    /// to an endpoint that is not OpenRouter.
+    #[test]
+    fn routing_goes_to_openrouter_only() {
+        let mut openrouter = upstream("openrouter", true);
+        openrouter.base_url = "https://openrouter.ai/api/v1".into();
+        let mut m = model("glm", "openrouter", true);
+
+        assert!(provider_for(&openrouter, &m).extra_body.is_null());
+
+        m.routing.sort = "price".into();
+        assert_eq!(
+            provider_for(&openrouter, &m).extra_body,
+            serde_json::json!({ "provider": { "sort": "price" } })
+        );
+
+        m.routing = Routing {
+            sort: String::new(),
+            order: vec!["deepinfra/fp4".into(), "novita/bf16".into()],
+            only: true,
+        };
+        assert_eq!(
+            provider_for(&openrouter, &m).extra_body,
+            serde_json::json!({ "provider": {
+                "order": ["deepinfra/fp4", "novita/bf16"],
+                "allow_fallbacks": false,
+            } })
+        );
+
+        // The same model row on a plain OpenAI-compatible endpoint: the field
+        // would be a 400 there, so it is left out.
+        assert!(provider_for(&upstream("direct", true), &m)
+            .extra_body
+            .is_null());
     }
 }

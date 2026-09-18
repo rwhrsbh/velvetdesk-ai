@@ -89,6 +89,7 @@ fn provider(model: &str) -> ProviderConfig {
         thinking_budget: None,
         model_chain: vec![],
         chain_rounds: 3,
+        extra_body: serde_json::Value::Null,
         reasoning_dialect: "auto".into(),
         context_tokens: None,
         key_count: 1,

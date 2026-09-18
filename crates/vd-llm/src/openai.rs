@@ -412,6 +412,12 @@ fn build_body(provider: &ProviderConfig, request: &ChatRequest) -> Value {
 
     apply_thinking(&mut body, provider, &request.thinking);
 
+    if let Value::Object(extra) = &provider.extra_body {
+        for (key, value) in extra {
+            body[key] = value.clone();
+        }
+    }
+
     body
 }
 
@@ -653,6 +659,7 @@ mod tests {
             thinking_budget: None,
             model_chain: vec![],
             chain_rounds: 3,
+            extra_body: serde_json::Value::Null,
             reasoning_dialect: "auto".into(),
             context_tokens: None,
             key_count: 1,

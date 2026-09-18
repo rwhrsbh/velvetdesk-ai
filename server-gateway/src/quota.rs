@@ -253,6 +253,7 @@ mod tests {
             position: 0,
             voice: false,
             price_request: 0.0,
+            routing: Default::default(),
         }
     }
 

@@ -1228,6 +1228,7 @@ mod tests {
             reasoning_dialect: "auto".into(),
             model_chain: vec![],
             chain_rounds: 3,
+            extra_body: serde_json::Value::Null,
             context_tokens: None,
             key_count: 1,
         };

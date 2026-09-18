@@ -38,6 +38,7 @@ pub fn router() -> Router<AppState> {
         .route("/admin/keys/{id}", delete(delete_key))
         .route("/admin/models", get(list_models).post(save_model))
         .route("/admin/models/{name}", delete(delete_model))
+        .route("/admin/models/{name}/providers", get(model_providers))
         .route("/admin/tiers", get(list_tiers).post(save_tier))
         .route("/admin/tiers/{name}", delete(delete_tier))
         .route("/admin/licenses", get(list_licenses).post(mint_license))
@@ -278,9 +279,24 @@ async fn list_models(
 async fn save_model(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(body): Json<ModelRow>,
+    Json(raw): Json<Value>,
 ) -> Result<Json<Value>, ApiError> {
     admin(&state, &headers)?;
+    let mut body: ModelRow = serde_json::from_value(raw.clone())
+        .map_err(|err| ApiError::BadRequest(format!("not a model: {err}")))?;
+    // The add form knows nothing of routing: re-saving a model from it keeps
+    // the hosts picked for it rather than quietly dropping them.
+    if raw.get("routing").is_none() {
+        if let Some(existing) = state
+            .registry
+            .read()
+            .models
+            .iter()
+            .find(|model| model.name == body.name)
+        {
+            body.routing = existing.routing.clone();
+        }
+    }
     if body.name.trim().is_empty() {
         return Err(ApiError::BadRequest("a model needs a name".into()));
     }
@@ -383,6 +399,7 @@ async fn catalog(
                 position: 0,
                 voice: false,
                 price_request: 0.0,
+                routing: Default::default(),
             });
         (
             crate::registry::provider_for(upstream, &sample),
@@ -403,6 +420,104 @@ async fn catalog(
             Err(ApiError::Upstream(err.message()))
         }
     }
+}
+
+/// The hosts OpenRouter serves one model through, with their prices.
+///
+/// Public on OpenRouter's side, so no key is spent on it. Prices come back
+/// per million tokens, the unit the model table uses.
+async fn model_providers(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    admin(&state, &headers)?;
+    let (slug, routing) = {
+        let registry = state.registry.read();
+        let model = registry
+            .models
+            .iter()
+            .find(|model| model.name == name)
+            .ok_or_else(|| ApiError::BadRequest(format!("no model called {name}")))?;
+        let upstream = registry
+            .upstreams
+            .iter()
+            .find(|up| up.id == model.upstream_id)
+            .ok_or_else(|| ApiError::BadRequest("the model's upstream is gone".into()))?;
+        if crate::registry::provider_for(upstream, model).dialect() != "openrouter" {
+            return Err(ApiError::BadRequest(
+                "host routing exists only for models served through OpenRouter".into(),
+            ));
+        }
+        // `:floor`, `:nitro` and the like are routing of their own; the list
+        // is of the model itself.
+        let slug = model
+            .upstream_name()
+            .split(':')
+            .next()
+            .unwrap_or("")
+            .to_string();
+        (slug, model.routing.clone())
+    };
+    let url = format!("https://openrouter.ai/api/v1/models/{slug}/endpoints");
+    let response = state
+        .llm
+        .http
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(20))
+        .send()
+        .await
+        .map_err(|err| ApiError::Upstream(format!("OpenRouter: {err}")))?;
+    if !response.status().is_success() {
+        return Err(ApiError::Upstream(format!(
+            "OpenRouter answered {} for {slug}",
+            response.status()
+        )));
+    }
+    let data: Value = response
+        .json()
+        .await
+        .map_err(|err| ApiError::Upstream(format!("OpenRouter: {err}")))?;
+    let per_million = |value: &Value| -> Option<f64> {
+        let raw = match value {
+            Value::String(text) => text.parse::<f64>().ok()?,
+            Value::Number(number) => number.as_f64()?,
+            _ => return None,
+        };
+        Some((raw * 1_000_000.0 * 10_000.0).round() / 10_000.0)
+    };
+    let hosts: Vec<Value> = data["data"]["endpoints"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(|endpoint| {
+            let pricing = &endpoint["pricing"];
+            json!({
+                "tag": endpoint["tag"].as_str().unwrap_or(""),
+                "provider": endpoint["provider_name"].as_str().unwrap_or(""),
+                "quantization": endpoint["quantization"].as_str().unwrap_or(""),
+                "price_in": per_million(&pricing["prompt"]),
+                "price_out": per_million(&pricing["completion"]),
+                "price_cached": per_million(&pricing["input_cache_read"]),
+                "discount": pricing["discount"].as_f64().unwrap_or(0.0),
+                "context": endpoint["context_length"],
+                "uptime": endpoint["uptime_last_30m"],
+                // Tokens a second and seconds to first token over the last
+                // half hour; a number or a percentile object, null when
+                // OpenRouter has too little traffic to say.
+                "throughput": endpoint["throughput_last_30m"],
+                "latency": endpoint["latency_last_30m"],
+                "status": endpoint["status"],
+                "tools": endpoint["supported_parameters"]
+                    .as_array()
+                    .is_some_and(|params| params.iter().any(|p| p == "tools")),
+            })
+        })
+        .collect();
+    Ok(Json(
+        json!({ "model": slug, "hosts": hosts, "routing": routing }),
+    ))
 }
 
 /// Empty a licence's sync mailbox.

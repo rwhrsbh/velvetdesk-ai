@@ -238,6 +238,21 @@
       .chart { width: 100%; height: 120px; display: block; }
       .chart rect:hover { opacity: .8; }
       .note-hint { font-size: 12px; color: var(--dim); line-height: 1.5; }
+      .sheet.wide { width: min(980px, 100%); }
+      .modes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+      @media (max-width: 760px) { .modes { grid-template-columns: 1fr 1fr; } }
+      .mode {
+        text-align: left; background: #0c0e13; border: 1px solid var(--line); border-radius: 14px;
+        padding: 10px 12px; color: var(--text); cursor: pointer; display: grid; gap: 3px;
+      }
+      .mode b { font-weight: 600; font-size: 13px; }
+      .mode span { font-size: 12px; color: var(--dim); line-height: 1.35; }
+      .mode.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+      .hosts td { font-variant-numeric: tabular-nums; }
+      .hosts tr.picked td { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+      .hosts tr.first td:first-child { box-shadow: 3px 0 0 var(--ok) inset; }
+      .hosts .tagline { font-size: 11px; color: var(--dim); font-family: ui-monospace, monospace; }
+      .hosts .mv { padding: 2px 7px; min-width: 0; }
       .devrow { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
       .devrow:last-child { border-bottom: 0; }
       .devrow code { font-size: 12px; }
@@ -630,7 +645,7 @@
           ${models
             .map(
               (model) => `<tr>
-                <td><code>${esc(model.name)}</code>${model.voice ? ' <span class="pill on">голос</span>' : ""}</td>
+                <td><code>${esc(model.name)}</code>${model.voice ? ' <span class="pill on">голос</span>' : ""}${routingPill(model.routing)}</td>
                 <td class="muted">${esc(model.upstream_id)}</td>
                 <td class="muted">${esc(model.upstream_name || model.name)}</td>
                 <td>${model.price_in}</td>
@@ -639,6 +654,7 @@
                 <td>${model.price_request || "—"}</td>
                 <td>${model.position}</td>
                 <td style="text-align:right" class="row" style="justify-content:flex-end">
+                  ${model.voice ? "" : `<button class="ghost" data-route-model="${esc(model.name)}">провайдеры</button>`}
                   <button class="ghost" data-toggle-model="${esc(model.name)}">${model.enabled ? "выключить" : "включить"}</button>
                   <button class="ghost danger" data-del-model="${esc(model.name)}">удалить</button>
                 </td></tr>`,
@@ -659,6 +675,10 @@
               toast(error.message, true);
             }
           });
+        });
+
+        document.querySelectorAll("[data-route-model]").forEach((button) => {
+          button.addEventListener("click", () => openRouting(button.dataset.routeModel));
         });
 
         document.querySelectorAll("[data-del-model]").forEach((button) => {
@@ -866,6 +886,7 @@
 
       function closeSheet() {
         $("sheet-back").classList.remove("on");
+        $("sheet").classList.remove("wide");
         $("sheet-body").innerHTML = "";
       }
       $("sheet-x").addEventListener("click", closeSheet);
@@ -875,6 +896,202 @@
       document.addEventListener("keydown", (e) => {
         if (e.key === "Escape" && $("sheet-back").classList.contains("on")) closeSheet();
       });
+
+      // ------------------------------------------------ OpenRouter hosts
+      // OpenRouter serves most models through several companies at once, at
+      // different prices, and by default balances price against speed - not
+      // the cheapest. Per model: cheapest first, fastest first, a hand-picked
+      // list, or OpenRouter's own choice.
+      const ROUTING_MODES = [
+        ["", "Как решит OpenRouter", "баланс цены и скорости"],
+        ["price", "Самый дешёвый сверху", "сначала самый дешёвый, при сбое — следующий по цене"],
+        ["throughput", "Самый быстрый", "по токенам в секунду за последние 30 минут"],
+        ["manual", "Выбрать вручную", "отмеченные, в этом порядке"],
+      ];
+
+      function routingMode(r) {
+        if (r && r.order && r.order.length) return "manual";
+        return (r && r.sort) || "";
+      }
+
+      function routingPill(r) {
+        const mode = routingMode(r);
+        if (!mode) return "";
+        const text =
+          mode === "price" ? "дешёвый" : mode === "throughput" ? "быстрый" : `вручную: ${r.order.length}${r.only ? ", только" : ""}`;
+        return ` <span class="pill on">${esc(text)}</span>`;
+      }
+
+      // OpenRouter gives speed as a number or as percentiles.
+      function tps(v) {
+        if (v == null) return null;
+        if (typeof v === "number") return v;
+        return v.p50 ?? v.median ?? v.avg ?? null;
+      }
+      const cost = (h) => (h.price_in ?? 1e9) + (h.price_out ?? 1e9);
+      const price = (v) => (v == null ? "—" : "$" + (+v).toFixed(v < 0.1 ? 4 : 3));
+
+      async function openRouting(name) {
+        $("sheet").classList.add("wide");
+        $("sheet-id").textContent = `${name} · провайдеры OpenRouter`;
+        $("sheet-body").innerHTML = '<div class="muted">Спрашиваю OpenRouter…</div>';
+        $("sheet-back").classList.add("on");
+        try {
+          const [d, models] = await Promise.all([
+            call(`/admin/models/${encodeURIComponent(name)}/providers`),
+            call("/admin/models"),
+          ]);
+          const model = models.find((m) => m.name === name);
+          const st = {
+            model,
+            slug: d.model,
+            hosts: d.hosts || [],
+            mode: routingMode(d.routing),
+            picked: [...((d.routing && d.routing.order) || [])],
+            only: !!(d.routing && d.routing.only),
+            setPrice: true,
+          };
+          paintRouting(st);
+        } catch (error) {
+          $("sheet-body").innerHTML = `<div class="muted">${esc(error.message)}</div>`;
+        }
+      }
+
+      function orderedHosts(st) {
+        const hosts = [...st.hosts];
+        if (st.mode === "throughput") {
+          return hosts.sort((a, b) => (tps(b.throughput) ?? -1) - (tps(a.throughput) ?? -1));
+        }
+        hosts.sort((a, b) => cost(a) - cost(b));
+        if (st.mode === "manual") {
+          const at = (h) => {
+            const i = st.picked.indexOf(h.tag);
+            return i < 0 ? 1e6 : i;
+          };
+          hosts.sort((a, b) => at(a) - at(b));
+        }
+        return hosts;
+      }
+
+      function paintRouting(st) {
+        const hosts = orderedHosts(st);
+        const manual = st.mode === "manual";
+        const first = manual ? hosts.find((h) => st.picked.includes(h.tag)) : st.mode ? hosts[0] : null;
+        const m = st.model || {};
+        $("sheet-body").innerHTML = `
+          <div class="note-hint">Модель на OpenRouter: <code>${esc(st.slug)}</code>. Сейчас в таблице цен:
+            вход ${price(m.price_in)} · кеш ${price(m.price_cached)} · выход ${price(m.price_out)} за 1M.</div>
+          <div class="modes">
+            ${ROUTING_MODES.map(
+              ([id, title, hint]) =>
+                `<button class="mode ${st.mode === id ? "on" : ""}" data-mode="${id}"><b>${esc(title)}</b><span>${esc(hint)}</span></button>`,
+            ).join("")}
+          </div>
+          ${hosts.length ? "" : '<div class="muted">OpenRouter не вернул ни одного хоста для этой модели.</div>'}
+          <div style="overflow-x:auto">
+          <table class="hosts"><thead><tr>
+            ${manual ? "<th></th>" : ""}<th>хост</th><th>вход</th><th>кеш</th><th>выход</th>
+            <th>контекст</th><th>ток/с</th><th>аптайм</th><th></th>${manual ? "<th></th>" : ""}
+          </tr></thead><tbody>
+          ${hosts
+            .map((h) => {
+              const picked = st.picked.includes(h.tag);
+              const speed = tps(h.throughput);
+              const down = h.status != null && h.status < 0;
+              return `<tr class="${manual && picked ? "picked" : ""} ${first && first.tag === h.tag ? "first" : ""}">
+                ${manual ? `<td><input type="checkbox" data-pick="${esc(h.tag)}" ${picked ? "checked" : ""} /></td>` : ""}
+                <td>${esc(h.provider)}${h.discount ? ` <span class="pill on">−${Math.round(h.discount * 100)}%</span>` : ""}
+                  <div class="tagline">${esc(h.tag)}${h.quantization ? "" : ""}</div></td>
+                <td>${price(h.price_in)}</td>
+                <td>${price(h.price_cached)}</td>
+                <td>${price(h.price_out)}</td>
+                <td>${h.context ? Math.round(h.context / 1000) + "k" : "—"}</td>
+                <td>${speed == null ? "—" : Math.round(speed)}</td>
+                <td>${h.uptime == null ? "—" : (+h.uptime).toFixed(1) + "%"}</td>
+                <td>${down ? '<span class="pill off">сбоит</span>' : ""}${h.tools ? "" : ' <span class="pill" title="не поддерживает tools">без tools</span>'}</td>
+                ${
+                  manual
+                    ? `<td style="white-space:nowrap">${
+                        picked
+                          ? `<button class="ghost mv" data-up="${esc(h.tag)}" title="выше">↑</button><button class="ghost mv" data-down="${esc(h.tag)}" title="ниже">↓</button>`
+                          : ""
+                      }</td>`
+                    : ""
+                }
+              </tr>`;
+            })
+            .join("")}
+          </tbody></table></div>
+          ${
+            manual
+              ? `<label class="row" style="gap:6px;align-items:center">
+                  <input type="checkbox" id="r-only" ${st.only ? "checked" : ""} />
+                  только отмеченные — если все они лягут, запрос упадёт, а не уйдёт к другим
+                </label>`
+              : ""
+          }
+          <label class="row" style="gap:6px;align-items:center">
+            <input type="checkbox" id="r-price" ${st.setPrice && first ? "checked" : ""} ${first ? "" : "disabled"} />
+            цены модели = цены ${first ? `<b>${esc(first.provider)}</b> (${price(first.price_in)} / ${price(first.price_out)})` : "первого хоста"}
+            — чтобы клиентам списывалось столько, сколько платим мы
+          </label>
+          <div class="note-hint">Зелёная полоса — хост, куда запрос пойдёт первым. «Без tools» — хост не умеет вызывать
+            инструменты, агенту такой не подходит.</div>
+          <div class="row"><button class="act" id="r-save">Сохранить</button></div>`;
+
+        const body = $("sheet-body");
+        body.querySelectorAll("[data-mode]").forEach((b) =>
+          b.addEventListener("click", () => {
+            st.mode = b.dataset.mode;
+            if (st.mode === "manual" && !st.picked.length) {
+              st.picked = orderedHosts({ ...st, mode: "price" })
+                .filter((h) => h.status == null || h.status >= 0)
+                .slice(0, 3)
+                .map((h) => h.tag);
+            }
+            paintRouting(st);
+          }),
+        );
+        body.querySelectorAll("[data-pick]").forEach((box) =>
+          box.addEventListener("change", () => {
+            const tag = box.dataset.pick;
+            st.picked = box.checked ? [...st.picked, tag] : st.picked.filter((t) => t !== tag);
+            paintRouting(st);
+          }),
+        );
+        const move = (tag, by) => {
+          const i = st.picked.indexOf(tag);
+          const j = i + by;
+          if (i < 0 || j < 0 || j >= st.picked.length) return;
+          [st.picked[i], st.picked[j]] = [st.picked[j], st.picked[i]];
+          paintRouting(st);
+        };
+        body.querySelectorAll("[data-up]").forEach((b) => b.addEventListener("click", () => move(b.dataset.up, -1)));
+        body.querySelectorAll("[data-down]").forEach((b) => b.addEventListener("click", () => move(b.dataset.down, 1)));
+        $("r-only")?.addEventListener("change", (e) => (st.only = e.target.checked));
+        $("r-price")?.addEventListener("change", (e) => (st.setPrice = e.target.checked));
+
+        $("r-save").addEventListener("click", async () => {
+          if (manual && !st.picked.length) return toast("Отметьте хотя бы один хост", true);
+          const routing = manual
+            ? { sort: "", order: st.picked, only: st.only }
+            : { sort: st.mode, order: [], only: false };
+          const row = { ...st.model, routing };
+          if (first && $("r-price")?.checked) {
+            if (first.price_in != null) row.price_in = first.price_in;
+            if (first.price_out != null) row.price_out = first.price_out;
+            row.price_cached = first.price_cached ?? null;
+          }
+          try {
+            await call("/admin/models", { method: "POST", body: JSON.stringify(row) });
+            toast("Сохранено");
+            closeSheet();
+            drawModels();
+          } catch (error) {
+            toast(error.message, true);
+          }
+        });
+      }
 
       async function openLicense(id) {
         $("sheet-id").textContent = id;
