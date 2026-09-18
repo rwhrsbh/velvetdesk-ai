@@ -945,6 +945,7 @@
           const st = {
             model,
             slug: d.model,
+            target: d.target,
             hosts: d.hosts || [],
             mode: routingMode(d.routing),
             picked: [...((d.routing && d.routing.order) || [])],
@@ -979,7 +980,12 @@
         const first = manual ? hosts.find((h) => st.picked.includes(h.tag)) : st.mode ? hosts[0] : null;
         const m = st.model || {};
         $("sheet-body").innerHTML = `
-          <div class="note-hint">Модель на OpenRouter: <code>${esc(st.slug)}</code>. Сейчас в таблице цен:
+          <div class="note-hint">Модель на OpenRouter: <code>${esc(st.slug)}</code>${
+            st.target && st.target !== st.slug
+              ? ` → сейчас это <code>${esc(st.target)}</code> (алиас сам переедет на новую версию, хосты — нет: выбор вручную
+                 держится за хосты этой версии)`
+              : ""
+          }. Сейчас в таблице цен:
             вход ${price(m.price_in)} · кеш ${price(m.price_cached)} · выход ${price(m.price_out)} за 1M.</div>
           <div class="modes">
             ${ROUTING_MODES.map(

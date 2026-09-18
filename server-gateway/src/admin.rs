@@ -459,25 +459,25 @@ async fn model_providers(
             .to_string();
         (slug, model.routing.clone())
     };
-    let url = format!("https://openrouter.ai/api/v1/models/{slug}/endpoints");
-    let response = state
-        .llm
-        .http
-        .get(&url)
-        .timeout(std::time::Duration::from_secs(20))
-        .send()
-        .await
-        .map_err(|err| ApiError::Upstream(format!("OpenRouter: {err}")))?;
-    if !response.status().is_success() {
-        return Err(ApiError::Upstream(format!(
-            "OpenRouter answered {} for {slug}",
-            response.status()
-        )));
-    }
-    let data: Value = response
-        .json()
-        .await
-        .map_err(|err| ApiError::Upstream(format!("OpenRouter: {err}")))?;
+    // `~vendor/name-latest` is an alias that follows the vendor's newest
+    // model; OpenRouter lists no hosts under the alias itself, only under
+    // the model it currently points at.
+    let target = if slug.starts_with('~') {
+        let catalog = openrouter_json(&state, "https://openrouter.ai/api/v1/models").await?;
+        catalog["data"]
+            .as_array()
+            .and_then(|models| models.iter().find(|m| m["id"] == slug.as_str()))
+            .and_then(|m| m["alias_target"]["slug"].as_str())
+            .unwrap_or(&slug)
+            .to_string()
+    } else {
+        slug.clone()
+    };
+    let data = openrouter_json(
+        &state,
+        &format!("https://openrouter.ai/api/v1/models/{target}/endpoints"),
+    )
+    .await?;
     let per_million = |value: &Value| -> Option<f64> {
         let raw = match value {
             Value::String(text) => text.parse::<f64>().ok()?,
@@ -515,9 +515,34 @@ async fn model_providers(
             })
         })
         .collect();
-    Ok(Json(
-        json!({ "model": slug, "hosts": hosts, "routing": routing }),
-    ))
+    Ok(Json(json!({
+        "model": slug,
+        "target": target,
+        "hosts": hosts,
+        "routing": routing,
+    })))
+}
+
+/// One public OpenRouter document, as JSON.
+async fn openrouter_json(state: &AppState, url: &str) -> Result<Value, ApiError> {
+    let response = state
+        .llm
+        .http
+        .get(url)
+        .timeout(std::time::Duration::from_secs(30))
+        .send()
+        .await
+        .map_err(|err| ApiError::Upstream(format!("OpenRouter: {err}")))?;
+    if !response.status().is_success() {
+        return Err(ApiError::Upstream(format!(
+            "OpenRouter answered {} for {url}",
+            response.status()
+        )));
+    }
+    response
+        .json()
+        .await
+        .map_err(|err| ApiError::Upstream(format!("OpenRouter: {err}")))
 }
 
 /// Empty a licence's sync mailbox.
