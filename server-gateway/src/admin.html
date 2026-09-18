@@ -4,985 +4,1277 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>VelvetDesk — шлюз</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
     <style>
       :root {
-        color-scheme: light dark;
-        --bg: #0f1115;
-        --card: #171a21;
-        --line: #262b36;
-        --text: #e7e9ee;
-        --dim: #9aa2b1;
-        --accent: #c87ad6;
-        --ok: #6fcf97;
-        --bad: #eb5757;
+        color-scheme: dark;
+        --bg: #0a0b0f;
+        --surface: #111319;
+        --surface-2: #161922;
+        --elev: #1b1f2a;
+        --hover: #1f2430;
+        --line: rgb(255 255 255 / 0.07);
+        --line-2: rgb(255 255 255 / 0.12);
+        --text: #eceef4;
+        --dim: #9199a9;
+        --faint: #636b7c;
+        --accent: #a979ff;
+        --accent-2: #ff6fb5;
+        --accent-soft: rgb(169 121 255 / 0.14);
+        --ok: #34d399;
+        --ok-soft: rgb(52 211 153 / 0.13);
+        --warn: #fbbf24;
+        --warn-soft: rgb(251 191 36 / 0.13);
+        --bad: #fb6f7e;
+        --bad-soft: rgb(251 111 126 / 0.13);
+        --info: #60a5fa;
+        --info-soft: rgb(96 165 250 / 0.13);
+        --r-lg: 18px;
+        --r-md: 13px;
+        --r-sm: 10px;
+        --shadow: 0 1px 0 rgb(255 255 255 / 0.04) inset, 0 12px 32px -18px rgb(0 0 0 / 0.7);
+        --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+        --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
       }
       * { box-sizing: border-box; }
+      html, body { height: 100%; }
       body {
         margin: 0;
-        background:
-          radial-gradient(900px 420px at 15% -10%, color-mix(in srgb, var(--accent) 12%, transparent), transparent),
-          var(--bg);
+        background: var(--bg);
         color: var(--text);
-        font: 14px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        font: 14px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
         -webkit-font-smoothing: antialiased;
+        font-feature-settings: "cv11", "ss01";
       }
-      /* Everything sits in one column of the same width, centred: the page
-         used to start hard against the top-left corner of a wide monitor. */
-      .wrap {
-        width: min(1100px, 100%);
-        margin-inline: auto;
-        padding-inline: 24px;
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        background:
+          radial-gradient(700px 380px at 12% -8%, rgb(169 121 255 / 0.13), transparent 70%),
+          radial-gradient(600px 360px at 100% 0%, rgb(255 111 181 / 0.07), transparent 70%);
+        z-index: 0;
       }
-      header {
-        border-bottom: 1px solid var(--line);
-        position: sticky;
-        top: 0;
-        background: color-mix(in srgb, var(--bg) 86%, transparent);
-        backdrop-filter: blur(8px);
-        z-index: 5;
+      button, input, select { font: inherit; color: inherit; }
+      ::selection { background: rgb(169 121 255 / 0.35); }
+      .mono { font-family: var(--mono); font-size: 12.5px; }
+      .dim { color: var(--dim); }
+      .faint { color: var(--faint); }
+      .ell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+      .num { font-variant-numeric: tabular-nums; }
+
+      /* ---------------------------------------------------------------- layout */
+      .app { position: relative; z-index: 1; display: grid; grid-template-columns: 248px minmax(0, 1fr); min-height: 100vh; }
+      .side {
+        position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; gap: 6px;
+        padding: 20px 14px; border-right: 1px solid var(--line);
+        background: linear-gradient(180deg, rgb(17 19 25 / 0.85), rgb(10 11 15 / 0.85));
+        backdrop-filter: blur(14px);
       }
-      header .wrap {
-        display: flex;
-        gap: 12px;
-        align-items: center;
-        padding-block: 14px;
-        flex-wrap: wrap;
+      .brand { display: flex; align-items: center; gap: 11px; padding: 4px 8px 18px; }
+      .logo {
+        width: 34px; height: 34px; border-radius: 11px; display: grid; place-items: center; flex: none;
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
+        box-shadow: 0 8px 24px -8px rgb(169 121 255 / 0.7);
+        font-weight: 700; color: #140d1f; font-size: 16px;
       }
-      h1 {
-        font-size: 15px;
-        margin: 0 12px 0 0;
-        font-weight: 600;
-        letter-spacing: .01em;
-        white-space: nowrap;
+      .brand b { display: block; font-size: 14.5px; letter-spacing: 0.01em; }
+      .brand span { display: block; font-size: 12px; color: var(--dim); }
+      .nav { display: grid; gap: 3px; }
+      .nav button {
+        display: flex; align-items: center; gap: 11px; width: 100%; padding: 9px 11px;
+        border: 0; border-radius: 11px; background: none; color: var(--dim); cursor: pointer;
+        text-align: left; font-weight: 500; transition: background 0.18s var(--ease), color 0.18s var(--ease);
+        position: relative;
       }
-      h1 .dot {
-        display: inline-block;
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: var(--ok);
-        margin-right: 8px;
-        vertical-align: 1px;
+      .nav button svg { width: 18px; height: 18px; flex: none; opacity: 0.85; }
+      .nav button:hover { background: var(--hover); color: var(--text); }
+      .nav button.on { background: var(--accent-soft); color: var(--text); }
+      .nav button.on::before {
+        content: ""; position: absolute; left: -14px; top: 9px; bottom: 9px; width: 3px; border-radius: 0 3px 3px 0;
+        background: linear-gradient(var(--accent), var(--accent-2));
       }
-      nav { display: flex; gap: 4px; flex-wrap: wrap; }
-      nav button {
-        background: none;
-        border: 1px solid transparent;
-        color: var(--dim);
-        padding: 6px 12px;
-        border-radius: 8px;
-        cursor: pointer;
-        font: inherit;
+      .nav button.on svg { color: var(--accent); opacity: 1; }
+      .side-foot { margin-top: auto; display: grid; gap: 10px; }
+      .live {
+        display: flex; align-items: center; gap: 10px; padding: 11px 12px; border-radius: 13px;
+        background: var(--surface-2); border: 1px solid var(--line); font-size: 12.5px;
       }
-      nav button:hover { color: var(--text); background: color-mix(in srgb, var(--card) 70%, transparent); }
-      nav button.on { color: var(--text); border-color: var(--line); background: var(--card); }
-      main { padding-block: 24px 64px; }
-      section { display: none; }
-      section.on { display: block; }
+      .live .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); position: relative; flex: none; }
+      .live .pulse::after {
+        content: ""; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid var(--ok);
+        animation: ping 1.8s var(--ease) infinite; opacity: 0;
+      }
+      .live.off .pulse { background: var(--bad); }
+      .live.off .pulse::after { border-color: var(--bad); }
+      @keyframes ping { 0% { transform: scale(0.6); opacity: 0.7; } 100% { transform: scale(1.8); opacity: 0; } }
+
+      .main { min-width: 0; padding: 30px 36px 80px; }
+      .page-head {
+        display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; flex-wrap: wrap;
+        margin-bottom: 24px; max-width: 1240px;
+      }
+      .page-head h1 { margin: 0; font-size: 25px; font-weight: 700; letter-spacing: -0.02em; }
+      .page-head p { margin: 5px 0 0; color: var(--dim); max-width: 680px; }
+      .page-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+      #view { max-width: 1240px; }
+      .enter { animation: viewIn 0.38s var(--ease) both; }
+      @keyframes viewIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+      .stagger > * { animation: rise 0.42s var(--ease) both; animation-delay: calc(var(--i, 0) * 40ms); }
+      @keyframes rise { from { opacity: 0; transform: translateY(10px) scale(0.99); } to { opacity: 1; transform: none; } }
+
+      /* ---------------------------------------------------------------- pieces */
       .card {
-        background: var(--card);
-        border: 1px solid var(--line);
-        border-radius: 14px;
-        padding: 18px 18px 20px;
-        margin-bottom: 18px;
-        box-shadow: 0 1px 0 color-mix(in srgb, #fff 4%, transparent) inset;
+        background: linear-gradient(180deg, var(--surface-2), var(--surface));
+        border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow);
       }
-      .card h2 {
-        font-size: 13px;
-        margin: 0 0 6px;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: .06em;
-        color: var(--dim);
+      .card-pad { padding: 18px 20px; }
+      .section-title {
+        display: flex; align-items: center; justify-content: space-between; gap: 12px;
+        margin: 28px 0 12px; font-size: 13px; font-weight: 600; color: var(--dim);
+        text-transform: uppercase; letter-spacing: 0.07em;
       }
-      .card > .muted:first-of-type { margin-top: 0; }
-      .card p { margin: 0 0 12px; }
-      .muted { color: var(--dim); }
-      .table-scroll { overflow-x: auto; }
-      table { width: 100%; border-collapse: collapse; }
-      th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
-      tbody tr:last-child td { border-bottom: 0; }
-      tbody tr:hover { background: color-mix(in srgb, var(--accent) 5%, transparent); }
-      th { color: var(--dim); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+      .section-title:first-child { margin-top: 0; }
+
+      .btn {
+        display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 38px; padding: 0 15px;
+        border-radius: 11px; border: 1px solid var(--line-2); background: var(--elev); cursor: pointer;
+        font-weight: 500; white-space: nowrap; transition: background 0.16s, border-color 0.16s, transform 0.08s, box-shadow 0.16s;
+      }
+      .btn:hover { background: var(--hover); border-color: rgb(255 255 255 / 0.18); }
+      .btn:active { transform: translateY(1px) scale(0.99); }
+      .btn:disabled { opacity: 0.5; pointer-events: none; }
+      .btn svg { width: 16px; height: 16px; }
+      .btn.primary {
+        border: 0; color: #150d20; font-weight: 600;
+        background: linear-gradient(135deg, var(--accent), var(--accent-2));
+        box-shadow: 0 8px 22px -10px rgb(169 121 255 / 0.9);
+      }
+      .btn.primary:hover { filter: brightness(1.07); background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+      .btn.sm { height: 32px; padding: 0 11px; border-radius: 9px; font-size: 13px; }
+      .btn.ghost { background: transparent; border-color: transparent; color: var(--dim); }
+      .btn.ghost:hover { background: var(--hover); color: var(--text); }
+      .btn.danger { color: var(--bad); }
+      .btn.danger:hover { background: var(--bad-soft); border-color: rgb(251 111 126 / 0.35); }
+      .btn.icon { width: 34px; height: 34px; padding: 0; border-radius: 10px; }
+      .btn.icon.sm { width: 30px; height: 30px; }
+
+      .badge {
+        display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 9px; border-radius: 999px;
+        font-size: 11.5px; font-weight: 500; white-space: nowrap; background: rgb(255 255 255 / 0.06); color: var(--dim);
+        border: 1px solid transparent;
+      }
+      .badge svg { width: 12px; height: 12px; }
+      .badge.violet { background: var(--accent-soft); color: #cdb3ff; }
+      .badge.green { background: var(--ok-soft); color: var(--ok); }
+      .badge.amber { background: var(--warn-soft); color: var(--warn); }
+      .badge.red { background: var(--bad-soft); color: var(--bad); }
+      .badge.blue { background: var(--info-soft); color: var(--info); }
+      .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
+
+      .switch {
+        position: relative; width: 38px; height: 22px; border-radius: 999px; border: 0; cursor: pointer; flex: none;
+        background: rgb(255 255 255 / 0.12); transition: background 0.22s var(--ease); padding: 0;
+      }
+      .switch::after {
+        content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%;
+        background: #fff; box-shadow: 0 2px 6px rgb(0 0 0 / 0.35); transition: transform 0.24s var(--ease);
+      }
+      .switch.on { background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+      .switch.on::after { transform: translateX(16px); }
+      .switch:disabled { opacity: 0.5; cursor: default; }
+      .switch-row { display: inline-flex; align-items: center; gap: 9px; color: var(--dim); font-size: 13px; cursor: pointer; }
+
       input, select {
-        background: #0c0e13;
-        border: 1px solid var(--line);
-        color: var(--text);
-        border-radius: 8px;
-        padding: 8px 10px;
-        font: inherit;
-        min-width: 0;
-        width: 100%;
-        transition: border-color .12s, box-shadow .12s;
+        width: 100%; height: 40px; padding: 0 12px; border-radius: 11px; border: 1px solid var(--line-2);
+        background: rgb(0 0 0 / 0.25); color: var(--text); min-width: 0;
+        transition: border-color 0.16s, box-shadow 0.16s, background 0.16s;
       }
-      input:focus, select:focus, button:focus-visible {
-        outline: none;
-        border-color: color-mix(in srgb, var(--accent) 60%, var(--line));
-        box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+      input::placeholder { color: var(--faint); }
+      input:hover, select:hover { border-color: rgb(255 255 255 / 0.18); }
+      input:focus, select:focus, .btn:focus-visible, .switch:focus-visible, .nav button:focus-visible {
+        outline: none; border-color: rgb(169 121 255 / 0.7); box-shadow: 0 0 0 4px rgb(169 121 255 / 0.18);
       }
-      input::placeholder { color: color-mix(in srgb, var(--dim) 70%, transparent); }
-      label.field { display: grid; gap: 4px; font-size: 12px; color: var(--dim); }
-      button.act {
-        background: var(--accent);
-        border: 0;
-        color: #16121a;
-        border-radius: 8px;
-        padding: 8px 16px;
-        font: inherit;
-        font-weight: 600;
-        cursor: pointer;
-        transition: filter .12s, transform .06s;
-      }
-      button.act:hover { filter: brightness(1.08); }
-      button.act:active { transform: translateY(1px); }
-      button.ghost {
-        background: none;
-        border: 1px solid var(--line);
-        color: var(--text);
-        border-radius: 8px;
-        padding: 6px 11px;
-        font: inherit;
-        cursor: pointer;
-        transition: background .12s, border-color .12s;
-      }
-      button.ghost:hover { background: color-mix(in srgb, #fff 5%, transparent); }
-      button.danger { color: var(--bad); }
-      button.danger:hover { border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
-      .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-      .grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
-      .pill { border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; font-size: 12px; color: var(--dim); }
-      .pill.on { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
-      .pill.off { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
-      code { background: #0c0e13; padding: 2px 6px; border-radius: 6px; word-break: break-all; }
-      #toast {
-        position: fixed; right: 18px; bottom: 18px; background: var(--card);
-        border: 1px solid var(--line); border-radius: 10px; padding: 11px 15px; display: none;
-        box-shadow: 0 10px 30px rgb(0 0 0 / .45);
-        max-width: min(420px, calc(100vw - 36px));
-      }
-      /* Figures worth reading at a glance: the queue, the day, the seats. */
-      .stat-row { display: flex; gap: 22px; flex-wrap: wrap; }
-      .stat { display: grid; gap: 2px; }
-      .stat b { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
-      .stat span { font-size: 12px; color: var(--dim); }
-      @media (max-width: 640px) {
-        .wrap { padding-inline: 14px; }
-        main { padding-block: 16px 48px; }
-        td, th { padding: 7px 6px; }
-        h1 { margin-right: 0; }
-      }
+      input:disabled { opacity: 0.6; }
+      select { appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--dim) 50%), linear-gradient(135deg, var(--dim) 50%, transparent 50%); background-position: calc(100% - 17px) 17px, calc(100% - 12px) 17px; background-size: 5px 5px; background-repeat: no-repeat; padding-right: 32px; }
+      select option { background: #151821; }
+      input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--accent); cursor: pointer; }
+      .field { display: grid; gap: 6px; min-width: 0; align-content: start; }
+      .field > span { font-size: 12.5px; color: var(--dim); font-weight: 500; }
+      .field small { color: var(--faint); font-size: 12px; line-height: 1.4; }
+      .form-grid { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .form-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .form-grid .full { grid-column: 1 / -1; }
+      .search { position: relative; }
+      .search svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: var(--faint); pointer-events: none; }
+      .search input { padding-left: 38px; }
 
-      /* ---------- licences: searchable list, iOS-style detail sheet ---------- */
-      .search { position: relative; margin-bottom: 12px; }
-      .search input { padding-left: 34px; border-radius: 12px; }
-      .search::before {
-        content: "⌕"; position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
-        color: var(--dim); font-size: 16px; pointer-events: none;
+      .seg {
+        display: inline-flex; padding: 3px; gap: 2px; border-radius: 12px; background: rgb(0 0 0 / 0.3);
+        border: 1px solid var(--line); flex-wrap: wrap;
       }
-      .keylist { display: grid; gap: 8px; }
-      .keycard {
-        display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
-        background: #0c0e13; border: 1px solid var(--line); border-radius: 14px;
-        padding: 12px 14px; cursor: pointer; font: inherit; color: var(--text);
-        transition: border-color .12s, transform .06s, background .12s;
+      .seg button {
+        height: 32px; padding: 0 13px; border-radius: 9px; border: 0; background: none; color: var(--dim);
+        cursor: pointer; font-weight: 500; font-size: 13px; transition: background 0.18s, color 0.18s;
       }
-      .keycard:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); background: #0e1118; }
-      .keycard:active { transform: scale(.995); }
-      .keycard .kmain { flex: 1; min-width: 0; }
-      .keycard .kid { font-family: ui-monospace, monospace; font-size: 13px; word-break: break-all; }
-      .keycard .ksub { color: var(--dim); font-size: 12px; margin-top: 2px; }
-      .keycard .chev { color: var(--dim); font-size: 20px; flex: none; }
-      .tag { border-radius: 999px; padding: 3px 10px; font-size: 12px; white-space: nowrap;
-        border: 1px solid var(--line); color: var(--dim); flex: none; }
-      .tag.tier { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+      .seg button:hover { color: var(--text); }
+      .seg button.on { background: var(--elev); color: var(--text); box-shadow: 0 1px 0 rgb(255 255 255 / 0.06) inset, 0 4px 12px -6px rgb(0 0 0 / 0.8); }
 
-      /* sheet */
-      .sheet-back {
-        position: fixed; inset: 0; background: rgb(0 0 0 / .5); backdrop-filter: blur(3px);
-        display: none; align-items: flex-start; justify-content: center; z-index: 20;
-        padding: 40px 16px; overflow-y: auto;
+      .toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+      .toolbar .search { flex: 1 1 260px; max-width: 420px; }
+
+      .empty {
+        display: grid; place-items: center; gap: 8px; text-align: center; padding: 44px 20px; color: var(--dim);
+        border: 1px dashed var(--line-2); border-radius: var(--r-lg);
       }
-      .sheet-back.on { display: flex; }
-      .sheet {
-        width: min(680px, 100%); background: var(--card); border: 1px solid var(--line);
-        border-radius: 22px; box-shadow: 0 30px 80px rgb(0 0 0 / .6); overflow: hidden;
-        animation: rise .18s ease;
+      .empty svg { width: 30px; height: 30px; color: var(--faint); }
+
+      .skel { position: relative; overflow: hidden; background: rgb(255 255 255 / 0.05); border-radius: var(--r-lg); }
+      .skel::after {
+        content: ""; position: absolute; inset: 0; transform: translateX(-100%);
+        background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.06), transparent);
+        animation: shimmer 1.3s infinite;
       }
-      @keyframes rise { from { transform: translateY(14px); opacity: .4; } to { transform: none; opacity: 1; } }
-      .sheet-head {
-        display: flex; align-items: center; gap: 12px; padding: 16px 18px;
-        border-bottom: 1px solid var(--line); position: sticky; top: 0;
-        background: color-mix(in srgb, var(--card) 92%, transparent); backdrop-filter: blur(8px);
+      @keyframes shimmer { to { transform: translateX(100%); } }
+
+      /* ------------------------------------------------------------------ kpis */
+      .kpis { display: grid; gap: 14px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+      .kpi { padding: 17px 18px; display: grid; gap: 6px; position: relative; overflow: hidden; }
+      .kpi .k-label { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--dim); font-weight: 500; }
+      .kpi .k-label svg { width: 15px; height: 15px; color: var(--accent); }
+      .kpi .k-val { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1.15; }
+      .kpi .k-val small { font-size: 14px; color: var(--faint); font-weight: 500; }
+      .kpi .k-sub { font-size: 12px; color: var(--faint); }
+      .meter { height: 6px; border-radius: 999px; background: rgb(255 255 255 / 0.07); overflow: hidden; margin-top: 4px; }
+      .meter > i { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width 0.6s var(--ease); }
+      .meter.ok > i { background: linear-gradient(90deg, #22c58b, var(--ok)); }
+      .meter.warn > i { background: linear-gradient(90deg, #f59e0b, var(--warn)); }
+      .meter.bad > i { background: linear-gradient(90deg, #f43f5e, var(--bad)); }
+      .two { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+      .bars { display: grid; gap: 11px; }
+      .bar-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; }
+      .bar-row .b-name { min-width: 0; }
+      .bar-row .b-val { font-size: 12.5px; color: var(--dim); font-variant-numeric: tabular-nums; text-align: right; }
+      .bar-row .meter { grid-column: 1 / -1; margin: 0; height: 5px; }
+
+      /* ------------------------------------------------------------ list rows */
+      .list { display: grid; gap: 10px; }
+      .item {
+        display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: center;
+        padding: 15px 16px 15px 18px; transition: border-color 0.18s, transform 0.18s var(--ease), background 0.18s;
       }
-      .sheet-head .kid { flex: 1; min-width: 0; font-family: ui-monospace, monospace; font-size: 14px; word-break: break-all; }
-      .sheet-head .x {
-        flex: none; width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--line);
-        background: #0c0e13; color: var(--dim); cursor: pointer; font-size: 16px; line-height: 1;
+      .item:hover { border-color: var(--line-2); }
+      /* Dimmed content, not the card: the entrance animation owns opacity. */
+      .item.off > :first-child, .is-off .up-head > :nth-child(-n + 2), .is-off .keys { opacity: 0.5; filter: saturate(0.5); transition: opacity 0.2s; }
+      .item.off:hover > :first-child, .is-off:hover .up-head > :nth-child(-n + 2), .is-off:hover .keys { opacity: 0.85; }
+      .switch.sm { width: 32px; height: 19px; }
+      .switch.sm::after { width: 13px; height: 13px; }
+      .switch.sm.on::after { transform: translateX(13px); }
+      .i-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+      .i-title b { font-weight: 600; font-size: 15px; letter-spacing: -0.005em; max-width: 100%; }
+      .i-sub { display: flex; align-items: center; gap: 7px; margin-top: 5px; color: var(--dim); font-size: 12.5px; min-width: 0; }
+      .i-sub .sep { color: var(--faint); }
+      .i-right { display: flex; align-items: center; gap: 8px; }
+      .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 11px; }
+      .chip {
+        display: inline-flex; align-items: baseline; gap: 6px; padding: 5px 10px; border-radius: 9px;
+        background: rgb(0 0 0 / 0.28); border: 1px solid var(--line); font-size: 12.5px; white-space: nowrap;
       }
-      .sheet-head .x:hover { color: var(--text); }
-      .sheet-body { padding: 18px; display: grid; gap: 16px; }
-      .gauges { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-      @media (max-width: 560px) { .gauges { grid-template-columns: 1fr; } }
-      .gauge {
-        background: #0c0e13; border: 1px solid var(--line); border-radius: 16px; padding: 14px;
-        display: grid; gap: 8px;
+      .chip i { font-style: normal; color: var(--faint); font-size: 11.5px; }
+      .chip b { font-weight: 600; font-variant-numeric: tabular-nums; }
+      .clickable { cursor: pointer; }
+      .clickable:hover { background: linear-gradient(180deg, #1a1e28, #13161d); }
+      .avatar {
+        width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; flex: none;
+        font-weight: 700; font-size: 14px; color: #fff; background: linear-gradient(135deg, #3b3263, #2a2f45);
+        border: 1px solid var(--line-2);
       }
-      .gauge .glabel { font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: .04em; }
-      .gauge .gval { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
-      .gauge .gval small { font-size: 12px; color: var(--dim); font-weight: 400; }
-      .gauge.wallet { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
-      .bar { height: 6px; border-radius: 999px; background: #1b1f29; overflow: hidden; }
-      .bar > i { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
-      .bar.ok > i { background: var(--ok); }
-      .subhead { font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; margin: 0 0 8px; }
-      .chart { width: 100%; height: 120px; display: block; }
-      .chart rect:hover { opacity: .8; }
-      .note-hint { font-size: 12px; color: var(--dim); line-height: 1.5; }
-      .sheet.wide { width: min(980px, 100%); }
-      .modes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
-      @media (max-width: 760px) { .modes { grid-template-columns: 1fr 1fr; } }
-      .mode {
-        text-align: left; background: #0c0e13; border: 1px solid var(--line); border-radius: 14px;
-        padding: 10px 12px; color: var(--text); cursor: pointer; display: grid; gap: 3px;
+      .row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+
+      /* providers: keys */
+      .up-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 16px 18px; }
+      .keys { border-top: 1px solid var(--line); padding: 6px 10px 12px; }
+      .key {
+        display: grid; grid-template-columns: minmax(120px, 190px) auto auto minmax(0, 1fr) auto; gap: 14px; align-items: center;
+        padding: 9px 8px; border-radius: 10px;
       }
-      .mode b { font-weight: 600; font-size: 13px; }
-      .mode span { font-size: 12px; color: var(--dim); line-height: 1.35; }
-      .mode.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
-      .hosts td { font-variant-numeric: tabular-nums; }
-      .hosts tr.picked td { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+      .key:hover { background: rgb(255 255 255 / 0.025); }
+      .key .err { color: var(--faint); font-size: 12px; }
+      .add-key { display: flex; gap: 8px; padding: 8px 8px 0; }
+
+      /* ----------------------------------------------------------------- drawer */
+      .scrim {
+        position: fixed; inset: 0; z-index: 40; background: rgb(3 4 8 / 0.55); backdrop-filter: blur(4px);
+        opacity: 0; pointer-events: none; transition: opacity 0.25s var(--ease);
+      }
+      .scrim.on { opacity: 1; pointer-events: auto; }
+      .drawer {
+        position: fixed; top: 10px; right: 10px; bottom: 10px; z-index: 41; width: min(560px, calc(100vw - 20px));
+        display: flex; flex-direction: column; border-radius: 22px; overflow: hidden;
+        background: linear-gradient(180deg, #151822, #0f1117); border: 1px solid var(--line-2);
+        box-shadow: -30px 0 80px -20px rgb(0 0 0 / 0.8);
+        transform: translateX(calc(100% + 30px)); transition: transform 0.36s var(--ease), width 0.3s var(--ease);
+      }
+      .drawer.on { transform: none; }
+      .drawer.wide { width: min(1000px, calc(100vw - 20px)); }
+      .d-head { display: flex; align-items: flex-start; gap: 12px; padding: 20px 22px 16px; border-bottom: 1px solid var(--line); }
+      .d-head h2 { margin: 0; font-size: 18px; font-weight: 650; letter-spacing: -0.01em; word-break: break-word; }
+      .d-head p { margin: 4px 0 0; color: var(--dim); font-size: 13px; word-break: break-word; }
+      .d-head .btn { margin-left: auto; }
+      .d-body { flex: 1; overflow-y: auto; padding: 20px 22px 26px; display: grid; gap: 22px; align-content: start; }
+      .d-foot { display: flex; gap: 10px; justify-content: flex-end; padding: 14px 22px; border-top: 1px solid var(--line); background: rgb(0 0 0 / 0.2); }
+      .d-sec { display: grid; gap: 12px; }
+      .d-sec > h3 { margin: 0; font-size: 12px; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: 0.07em; }
+      .hint { color: var(--faint); font-size: 12.5px; line-height: 1.55; margin: 0; }
+      .callout {
+        display: flex; gap: 12px; padding: 13px 15px; border-radius: 13px; background: var(--accent-soft);
+        border: 1px solid rgb(169 121 255 / 0.25); font-size: 13px; line-height: 1.5; color: #d9c8ff;
+      }
+      .callout svg { width: 18px; height: 18px; flex: none; margin-top: 1px; }
+      .callout.warn { background: var(--warn-soft); border-color: rgb(251 191 36 / 0.25); color: #fde3a4; }
+      .secret {
+        display: grid; gap: 10px; padding: 14px; border-radius: 13px; background: rgb(0 0 0 / 0.35);
+        border: 1px solid rgb(169 121 255 / 0.35);
+      }
+      .secret code { font-family: var(--mono); font-size: 12px; word-break: break-all; line-height: 1.55; color: #e6dbff; }
+
+      .catalog { border: 1px solid var(--line-2); border-radius: 13px; overflow: hidden; }
+      .catalog .search input { border: 0; border-radius: 0; border-bottom: 1px solid var(--line); background: rgb(0 0 0 / 0.2); }
+      .cat-list { max-height: 280px; overflow-y: auto; }
+      .cat-item {
+        display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; width: 100%;
+        padding: 10px 13px; border: 0; border-bottom: 1px solid var(--line); background: none; cursor: pointer; text-align: left;
+      }
+      .cat-item:last-child { border-bottom: 0; }
+      .cat-item:hover { background: var(--hover); }
+      .cat-item.on { background: var(--accent-soft); }
+      .cat-item .mono { color: var(--faint); font-size: 11.5px; }
+
+      .choice { display: grid; gap: 8px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .choice.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+      .choice button {
+        display: grid; gap: 4px; align-content: start; text-align: left; padding: 12px 13px; border-radius: 13px; cursor: pointer;
+        border: 1px solid var(--line-2); background: rgb(0 0 0 / 0.22); transition: border-color 0.18s, background 0.18s, box-shadow 0.18s;
+      }
+      .choice button:hover { border-color: rgb(255 255 255 / 0.2); }
+      .choice button b { font-size: 13.5px; font-weight: 600; }
+      .choice button span { font-size: 12px; color: var(--dim); line-height: 1.4; }
+      .choice button.on { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent) inset; }
+
+      table { width: 100%; border-collapse: separate; border-spacing: 0; }
+      th { text-align: left; font-size: 11.5px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: 0.06em; padding: 0 10px 9px; white-space: nowrap; }
+      td { padding: 10px; border-top: 1px solid var(--line); font-variant-numeric: tabular-nums; vertical-align: middle; }
+      tbody tr { transition: background 0.14s; }
+      tbody tr:hover td { background: rgb(255 255 255 / 0.02); }
+      .hosts tr.picked td { background: rgb(169 121 255 / 0.07); }
       .hosts tr.first td:first-child { box-shadow: 3px 0 0 var(--ok) inset; }
-      .hosts .tagline { font-size: 11px; color: var(--dim); font-family: ui-monospace, monospace; }
-      .hosts .mv { padding: 2px 7px; min-width: 0; }
-      .devrow { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
-      .devrow:last-child { border-bottom: 0; }
-      .devrow code { font-size: 12px; }
-      .devrow .dinfo { flex: 1; min-width: 0; }
-      .devrow .dinfo small { display: block; color: var(--dim); }
+      .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; padding-top: 10px; }
+
+      .gauges { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .gauge { padding: 14px 15px; display: grid; gap: 6px; border-radius: 14px; background: rgb(0 0 0 / 0.28); border: 1px solid var(--line); }
+      .gauge .g-l { font-size: 12px; color: var(--dim); }
+      .gauge .g-v { font-size: 21px; font-weight: 700; font-variant-numeric: tabular-nums; }
+      .gauge .g-v small { font-size: 12.5px; color: var(--faint); font-weight: 500; }
+      .gauge .g-s { font-size: 11.5px; color: var(--faint); }
+      .gauge.wallet { border-color: rgb(169 121 255 / 0.35); }
+      .chart { width: 100%; height: 130px; display: block; }
+      .chart rect { transition: opacity 0.15s; }
+      .chart rect:hover { opacity: 0.75; }
+      .devices { display: grid; gap: 8px; }
+      .device { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px 12px; border-radius: 12px; background: rgb(0 0 0 / 0.25); border: 1px solid var(--line); }
+      .device small { display: block; color: var(--faint); font-size: 11.5px; margin-top: 2px; }
+
+      /* ------------------------------------------------------------- dialogs */
+      .modal-back { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 20px; background: rgb(3 4 8 / 0.6); backdrop-filter: blur(5px); animation: fade 0.2s both; }
+      .modal { width: min(420px, 100%); padding: 22px; border-radius: 20px; background: linear-gradient(180deg, #181b25, #11131a); border: 1px solid var(--line-2); box-shadow: 0 30px 80px -20px rgb(0 0 0 / 0.9); animation: pop 0.26s var(--ease) both; }
+      .modal h3 { margin: 0 0 8px; font-size: 17px; }
+      .modal p { margin: 0 0 20px; color: var(--dim); line-height: 1.55; }
+      .modal .acts { display: flex; justify-content: flex-end; gap: 10px; }
+      @keyframes fade { from { opacity: 0; } }
+      @keyframes pop { from { opacity: 0; transform: scale(0.94) translateY(6px); } }
+
+      .toasts { position: fixed; right: 18px; bottom: 18px; z-index: 80; display: grid; gap: 10px; justify-items: end; pointer-events: none; }
+      .toast {
+        display: flex; align-items: center; gap: 11px; max-width: min(440px, calc(100vw - 36px)); padding: 12px 15px;
+        border-radius: 14px; background: #1a1d27; border: 1px solid var(--line-2); box-shadow: 0 18px 40px -12px rgb(0 0 0 / 0.8);
+        animation: toastIn 0.34s var(--ease) both; pointer-events: auto; font-size: 13.5px;
+      }
+      .toast.out { animation: toastOut 0.25s var(--ease) both; }
+      .toast .t-ic { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; flex: none; background: var(--ok-soft); color: var(--ok); }
+      .toast.bad .t-ic { background: var(--bad-soft); color: var(--bad); }
+      .toast .t-ic svg { width: 15px; height: 15px; }
+      @keyframes toastIn { from { opacity: 0; transform: translateY(12px) scale(0.97); } }
+      @keyframes toastOut { to { opacity: 0; transform: translateX(20px); } }
+
+      /* -------------------------------------------------------------- login */
+      .login { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 20px; background: var(--bg); }
+      .login::before { content: ""; position: absolute; inset: 0; background: radial-gradient(600px 400px at 50% 20%, rgb(169 121 255 / 0.18), transparent 70%); }
+      .login-card { position: relative; width: min(400px, 100%); padding: 30px; display: grid; gap: 18px; animation: pop 0.4s var(--ease) both; }
+      .login-card .logo { width: 46px; height: 46px; border-radius: 14px; font-size: 20px; }
+      .login-card h2 { margin: 0; font-size: 21px; letter-spacing: -0.01em; }
+      .login-card p { margin: 4px 0 0; color: var(--dim); }
+      .hidden { display: none !important; }
+
+      @media (max-width: 1100px) {
+        .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .two { grid-template-columns: 1fr; }
+      }
+      @media (max-width: 860px) {
+        .app { grid-template-columns: minmax(0, 1fr); }
+        .side { position: sticky; top: 0; z-index: 20; height: auto; flex-direction: row; align-items: center; padding: 10px 12px; border-right: 0; border-bottom: 1px solid var(--line); overflow-x: auto; }
+        .brand { padding: 0 8px 0 0; }
+        .brand div { display: none; }
+        .nav { display: flex; gap: 2px; }
+        .nav button { width: auto; padding: 8px 10px; }
+        .nav button span { display: none; }
+        .nav button.on::before { display: none; }
+        .side-foot { margin: 0 0 0 auto; display: flex; }
+        .live { display: none; }
+        .main { padding: 20px 14px 70px; }
+        .form-grid, .form-grid.three, .choice, .choice.four, .gauges { grid-template-columns: 1fr 1fr; }
+        .key { grid-template-columns: minmax(0, 1fr) auto auto; }
+        .key .err, .key .stats { display: none; }
+      }
+      @media (max-width: 520px) {
+        .kpis, .form-grid, .form-grid.three, .gauges { grid-template-columns: 1fr; }
+        .item { grid-template-columns: minmax(0, 1fr); }
+        .item .i-right { justify-content: flex-end; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+      }
     </style>
   </head>
   <body>
-    <header>
-      <div class="wrap">
-      <h1><span class="dot"></span>VelvetDesk — шлюз</h1>
-      <nav>
-        <button data-tab="upstreams" class="on">Провайдеры</button>
-        <button data-tab="models">Модели</button>
-        <button data-tab="tiers">Тарифы</button>
-        <button data-tab="licenses">Лицензии</button>
-        <button data-tab="stats">Расход</button>
-      </nav>
-      <div class="row" style="margin-left:auto">
-        <input id="token" type="password" placeholder="admin-токен" style="width:220px"
-               autocomplete="off" autocapitalize="off" spellcheck="false" />
-        <button class="ghost" id="save-token">Войти</button>
-      </div>
-      </div>
-    </header>
-
-    <main class="wrap">
-      <section id="upstreams" class="on">
-        <div class="card">
-          <h2>Очередь</h2>
-          <div class="stat-row" id="queue-line"><span class="muted">Загружаю…</span></div>
-          <p class="muted">
-            Одновременных вызовов к провайдерам — ограничено, остальные ждут в очереди;
-            на одну лицензию своя доля, чтобы пачка запросов одного оператора не заняла
-            весь шлюз. Кто не дождался — получает 503 и Retry-After, а не оборванное
-            соединение.
-          </p>
+    <div class="login hidden" id="login">
+      <form class="card login-card" id="login-form">
+        <div class="logo">V</div>
+        <div>
+          <h2>Панель шлюза</h2>
+          <p>VelvetDesk Cloud — вход для администратора</p>
         </div>
-        <div class="card">
-          <h2>Провайдеры и ключи</h2>
-          <div id="upstream-list" class="muted">Загружаю…</div>
-        </div>
-        <div class="card">
-          <h2>Добавить провайдера</h2>
-          <div class="grid">
-            <input id="up-id" placeholder="id (gemini)" />
-            <input id="up-label" placeholder="название" />
-            <select id="up-kind">
-              <option value="gemini">gemini</option>
-              <option value="openai_compatible">openai_compatible</option>
-            </select>
-            <input id="up-url" placeholder="https://…" />
-            <input id="up-version" placeholder="v1beta" />
-            <select id="up-dialect">
-              <option value="auto">auto</option>
-              <option value="openai">openai</option>
-              <option value="openrouter">openrouter</option>
-              <option value="qwen">qwen</option>
-              <option value="nvidia">nvidia</option>
-            </select>
-          </div>
-          <div class="row" style="margin-top:10px">
-            <button class="act" id="up-add">Сохранить</button>
-            <span class="muted">Существующий id перезаписывается.</span>
-          </div>
-        </div>
-      </section>
-
-      <section id="models">
-        <div class="card">
-          <h2>Модели</h2>
-          <p class="muted">
-            Порядок — это порядок падения: запрос идёт с той, что назвал клиент, и дальше
-            вниз по списку, через всех провайдеров. При переходе на следующую модель
-            кулдауны ключей сбрасываются — квота считается по моделям, и ключ, упёршийся
-            в одну, на следующей ещё жив. Цены за миллион токенов в долларах; пустая цена
-            кеша означает, что кеш считается по полной.
-          </p>
-          <div id="model-list" class="muted">Загружаю…</div>
-        </div>
-        <div class="card">
-          <h2>Добавить модель</h2>
-          <p class="muted">
-            Выберите провайдера и нажмите «загрузить список» — модели и цены придут
-            от самого провайдера (OpenRouter публикует и то и другое). Выбор модели
-            заполняет поля ниже; править их всё равно можно.
-          </p>
-          <div class="row" style="margin-bottom:10px">
-            <select id="m-catalog" style="flex:1 1 320px"><option value="">список не загружен</option></select>
-            <button class="ghost" id="m-fetch">загрузить список</button>
-          </div>
-          <div class="grid">
-            <input id="m-name" placeholder="имя для клиента" />
-            <select id="m-upstream"></select>
-            <input id="m-upstream-name" placeholder="имя у провайдера" />
-            <input id="m-in" placeholder="цена входа" inputmode="decimal" />
-            <input id="m-cached" placeholder="цена кеша" inputmode="decimal" />
-            <input id="m-out" placeholder="цена выхода" inputmode="decimal" />
-            <input id="m-ctx" placeholder="контекст, токенов" inputmode="numeric" />
-            <input id="m-pos" placeholder="порядок" inputmode="numeric" />
-            <input id="m-req" placeholder="цена за клип, $" inputmode="decimal" />
-            <label class="row" style="gap:6px;align-items:center">
-              <input id="m-voice" type="checkbox" /> только голос (диктовка)
-            </label>
-            <label class="row" style="gap:6px;align-items:center">
-              <input id="m-vision" type="checkbox" /> только изображения (описывает фото)
-            </label>
-            <label class="row" style="gap:6px;align-items:center">
-              <input id="m-images" type="checkbox" /> понимает изображения сама
-            </label>
-          </div>
-          <p class="muted">
-            Голосовая модель не отдаётся в чат: на неё уходят только клипы диктовки,
-            по своей цепочке падения. Токенов в ответе нет, поэтому клип считается
-            по цене за клип.
-          </p>
-          <p class="muted">
-            Модель «только изображения» тоже не отвечает в чате и не подменяет упавшую:
-            если в запросе есть фото, а модель чата их не видит («фото: описывать»),
-            каждое фото сперва уходит ей, и в чат попадает подробное описание. Описание
-            списывается с ключа по цене описывающей модели и запоминается — одно и то же
-            фото в истории переписки второй раз не оплачивается. Без такой модели фото
-            уходят как есть.
-          </p>
-          <div class="row" style="margin-top:10px"><button class="act" id="m-add">Сохранить</button></div>
-        </div>
-      </section>
-
-      <section id="tiers">
-        <div class="card">
-          <h2>Тарифы</h2>
-          <p class="muted">Кредит — это себестоимость: <span id="credit-usd"></span> за кредит.</p>
-          <div id="tier-list" class="muted">Загружаю…</div>
-        </div>
-        <div class="card">
-          <h2>Добавить тариф</h2>
-          <div class="grid">
-            <input id="t-name" placeholder="business" />
-            <input id="t-5h" placeholder="кредитов за 5 ч" inputmode="decimal" />
-            <input id="t-week" placeholder="кредитов за неделю" inputmode="decimal" />
-            <input id="t-peers" placeholder="устройств" inputmode="numeric" />
-          </div>
-          <div class="row" style="margin-top:10px"><button class="act" id="t-add">Сохранить</button></div>
-        </div>
-      </section>
-
-      <section id="licenses">
-        <div class="card">
-          <h2>Выдать лицензию</h2>
-          <div class="grid">
-            <input id="l-id" placeholder="VD-PRO-0001" />
-            <input id="l-tier" value="business" placeholder="business" />
-            <input id="l-days" placeholder="дней (0 — без срока)" inputmode="numeric" />
-            <input id="l-peers" placeholder="устройств (0 — из тарифа)" inputmode="numeric" />
-            <input id="l-note" placeholder="кому" />
-          </div>
-          <div class="row" style="margin-top:10px"><button class="act" id="l-add">Выдать</button></div>
-          <div id="l-out" style="margin-top:12px"></div>
-        </div>
-        <div class="card">
-          <h2>Все ключи</h2>
-          <div class="search"><input id="l-search" placeholder="поиск по ключу, тарифу, кому…" autocomplete="off" /></div>
-          <div id="license-list" class="keylist muted">Загружаю…</div>
-        </div>
-      </section>
-
-      <section id="stats">
-        <div class="card">
-          <h2>Расход</h2>
-          <div class="row">
-            <select id="s-hours" style="width:160px">
-              <option value="24">сутки</option>
-              <option value="168">неделя</option>
-              <option value="720">месяц</option>
-            </select>
-            <button class="ghost" id="s-load">Обновить</button>
-          </div>
-          <div id="stats-out" style="margin-top:12px" class="muted">—</div>
-        </div>
-      </section>
-    </main>
-
-    <div id="toast"></div>
-
-    <div class="sheet-back" id="sheet-back">
-      <div class="sheet" id="sheet" role="dialog" aria-modal="true">
-        <div class="sheet-head">
-          <div class="kid" id="sheet-id">—</div>
-          <button class="x" id="sheet-x" title="закрыть">✕</button>
-        </div>
-        <div class="sheet-body" id="sheet-body"></div>
-      </div>
+        <label class="field">
+          <span>Admin-токен</span>
+          <input id="token" type="password" placeholder="VD_ADMIN_TOKEN" autocomplete="off" autocapitalize="off" spellcheck="false" />
+        </label>
+        <button class="btn primary" type="submit" style="height:42px">Войти</button>
+      </form>
     </div>
 
-    <script>
-      const $ = (id) => document.getElementById(id);
-      let token = sessionStorage.getItem("vd-admin") || "";
-      $("token").value = token;
+    <div class="app">
+      <aside class="side">
+        <div class="brand">
+          <div class="logo">V</div>
+          <div><b>VelvetDesk</b><span>шлюз · админка</span></div>
+        </div>
+        <nav class="nav" id="nav"></nav>
+        <div class="side-foot">
+          <div class="live" id="live"><span class="pulse"></span><span id="live-text" class="ell">подключаюсь…</span></div>
+          <button class="btn ghost sm" id="logout" title="выйти">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>
+            <span>Выйти</span>
+          </button>
+        </div>
+      </aside>
 
+      <main class="main">
+        <header class="page-head">
+          <div>
+            <h1 id="page-title">Обзор</h1>
+            <p id="page-sub"></p>
+          </div>
+          <div class="page-actions" id="page-actions"></div>
+        </header>
+        <div id="view"></div>
+      </main>
+    </div>
+
+    <div class="scrim" id="scrim"></div>
+    <aside class="drawer" id="drawer" role="dialog" aria-modal="true">
+      <div class="d-head">
+        <div style="min-width:0">
+          <h2 id="d-title">—</h2>
+          <p id="d-sub"></p>
+        </div>
+        <button class="btn icon ghost" id="d-close" title="закрыть">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="d-body" id="d-body"></div>
+      <div class="d-foot hidden" id="d-foot"></div>
+    </aside>
+
+    <div class="toasts" id="toasts"></div>
+
+    <script>
+      // ============================================================ basics
+      const $ = (id) => document.getElementById(id);
+      const esc = (text) =>
+        String(text ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+      const num = (value) => {
+        const parsed = Number(String(value ?? "").replace(",", "."));
+        return Number.isFinite(parsed) ? parsed : 0;
+      };
+      const maybe = (value) => (String(value ?? "").trim() === "" ? null : num(value));
+      const dt = (ts) => new Date(ts * 1000).toLocaleDateString("ru-RU");
+      const dtime = (ts) => new Date(ts * 1000).toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" });
+      const usd = (v, digits = 2) => "$" + (Number(v) || 0).toFixed(digits);
+      const price = (v) => (v == null ? "—" : "$" + (+v).toFixed(v < 0.1 ? 4 : 3).replace(/0+$/, "").replace(/\.$/, ""));
+      const fmt = (n) => (Number(n) || 0).toLocaleString("ru-RU", { maximumFractionDigits: 1 });
+      const initials = (s) => String(s || "?").replace(/[^A-Za-zА-Яа-я0-9]/g, " ").trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?";
+
+      const I = {
+        overview: '<path d="M3 3h7v9H3zM14 3h7v5h-7zM14 12h7v9h-7zM3 16h7v5H3z"/>',
+        providers: '<rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/>',
+        models: '<path d="M12 2 3 7l9 5 9-5-9-5Z"/><path d="m3 17 9 5 9-5"/><path d="m3 12 9 5 9-5"/>',
+        tiers: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+        licenses: '<circle cx="8" cy="15" r="4"/><path d="m10.8 12.2 8.2-8.2M17 6l2 2M15 8l2 2"/>',
+        stats: '<path d="M3 3v18h18"/><path d="m7 15 4-4 3 3 5-6"/>',
+        plus: '<path d="M12 5v14M5 12h14"/>',
+        search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+        trash: '<path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/>',
+        edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+        route: '<circle cx="6" cy="19" r="3"/><circle cx="18" cy="5" r="3"/><path d="M9 19h6.5a3.5 3.5 0 0 0 0-7h-7a3.5 3.5 0 0 1 0-7H15"/>',
+        check: '<path d="M20 6 9 17l-5-5"/>',
+        x: '<path d="M18 6 6 18M6 6l12 12"/>',
+        eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
+        mic: '<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5"/>',
+        image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/>',
+        chev: '<path d="m9 18 6-6-6-6"/>',
+        chat: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z"/>',
+        info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>',
+        activity: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
+        users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/>',
+        coin: '<circle cx="12" cy="12" r="9"/><path d="M14.5 9.5a2.5 2 0 0 0-2.5-1.5c-1.5 0-2.5.8-2.5 2s1 1.7 2.5 2 2.5.8 2.5 2-1 2-2.5 2a2.5 2 0 0 1-2.5-1.5M12 6v2M12 16v2"/>',
+        queue: '<path d="M3 6h18M3 12h12M3 18h7"/>',
+        key: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/>',
+        copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+        up: '<path d="m18 15-6-6-6 6"/>',
+        down: '<path d="m6 9 6 6 6-6"/>',
+        refresh: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>',
+      };
+      const icon = (name, size = 16) =>
+        `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${I[name] || ""}</svg>`;
+
+      // ============================================================ toasts
       function toast(text, bad) {
-        const el = $("toast");
-        el.textContent = text;
-        el.style.display = "block";
-        el.style.borderColor = bad ? "var(--bad)" : "var(--line)";
-        clearTimeout(el._t);
-        el._t = setTimeout(() => (el.style.display = "none"), 3200);
+        const el = document.createElement("div");
+        el.className = "toast" + (bad ? " bad" : "");
+        el.innerHTML = `<span class="t-ic">${icon(bad ? "x" : "check")}</span><span>${esc(text)}</span>`;
+        $("toasts").appendChild(el);
+        setTimeout(() => {
+          el.classList.add("out");
+          setTimeout(() => el.remove(), 260);
+        }, bad ? 5200 : 3000);
       }
+
+      function confirmBox({ title, text, ok = "Удалить", danger = true }) {
+        return new Promise((resolve) => {
+          const back = document.createElement("div");
+          back.className = "modal-back";
+          back.innerHTML = `<div class="modal" role="alertdialog">
+            <h3>${esc(title)}</h3><p>${esc(text)}</p>
+            <div class="acts"><button class="btn" data-no>Отмена</button>
+            <button class="btn ${danger ? "danger" : "primary"}" data-yes>${esc(ok)}</button></div></div>`;
+          const done = (value) => {
+            back.remove();
+            document.removeEventListener("keydown", onKey);
+            resolve(value);
+          };
+          const onKey = (e) => {
+            if (e.key === "Escape") done(false);
+            if (e.key === "Enter") done(true);
+          };
+          back.addEventListener("click", (e) => e.target === back && done(false));
+          back.querySelector("[data-no]").onclick = () => done(false);
+          back.querySelector("[data-yes]").onclick = () => done(true);
+          document.addEventListener("keydown", onKey);
+          document.body.appendChild(back);
+          back.querySelector("[data-yes]").focus();
+        });
+      }
+
+      // ============================================================ api
+      let token = sessionStorage.getItem("vd-admin") || "";
 
       async function call(path, options = {}) {
         const response = await fetch(path, {
           ...options,
-          headers: {
-            "content-type": "application/json",
-            "x-vd-admin": token,
-            ...(options.headers || {}),
-          },
+          headers: { "content-type": "application/json", "x-vd-admin": token, ...(options.headers || {}) },
         });
         const body = await response.json().catch(() => ({}));
         if (response.status === 401 || response.status === 403) {
           sessionStorage.removeItem("vd-admin");
           token = "";
-          $("token").value = "";
-          $("token").focus();
-          throw new Error(
-            (body?.error?.message || "не тот токен") + " — введите admin-токен заново",
-          );
+          showLogin(body?.error?.message || "Неверный токен");
+          throw new Error(body?.error?.message || "нужен admin-токен");
         }
         if (!response.ok) throw new Error(body?.error?.message || response.statusText);
         return body;
       }
 
-      const num = (value) => {
-        const parsed = Number(String(value).replace(",", "."));
-        return Number.isFinite(parsed) ? parsed : 0;
-      };
-      const maybe = (value) => (String(value).trim() === "" ? null : num(value));
-      const esc = (text) =>
-        String(text ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-
-      // ------------------------------------------------------------- tabs
-      document.querySelectorAll("nav button").forEach((button) => {
-        button.addEventListener("click", () => {
-          document.querySelectorAll("nav button").forEach((b) => b.classList.remove("on"));
-          document.querySelectorAll("section").forEach((s) => s.classList.remove("on"));
-          button.classList.add("on");
-          $(button.dataset.tab).classList.add("on");
-          load();
-        });
-      });
-
-      function signIn() {
-        token = $("token").value.trim();
-        sessionStorage.setItem("vd-admin", token);
-        load();
-      }
-
-      $("save-token").addEventListener("click", signIn);
-      // Typing a token and pressing Enter is what everyone does, and doing
-      // nothing in response looked exactly like a rejected token.
-      $("token").addEventListener("keydown", (event) => {
-        if (event.key === "Enter") signIn();
-      });
-
-      // -------------------------------------------------------- upstreams
-      async function drawUpstreams() {
-        const data = await call("/admin/overview");
-        $("credit-usd").textContent = "$" + data.credit_usd;
-        const q = data.queue;
-        $("queue-line").innerHTML = `
-          <div class="stat"><b>${q.inflight} / ${q.max_inflight}</b><span>в работе</span></div>
-          <div class="stat"><b>${q.queued} / ${q.max_queued}</b><span>ждут очереди</span></div>
-          <div class="stat"><b>${q.max_per_license}</b><span>на лицензию</span></div>`;
-        const rows = await Promise.all(
-          data.upstreams.map(async (up) => {
-            const keys = await call(`/admin/upstreams/${encodeURIComponent(up.id)}/keys`);
-            const keyRows = keys
-              .map((key) => {
-                const state = key.cooling_seconds
-                  ? `<span class="pill off">остывает ${key.cooling_seconds}s</span>`
-                  : `<span class="pill on">в строю</span>`;
-                return `<tr><td><code>${esc(key.masked)}</code></td>
-                  <td>${state}</td>
-                  <td class="muted">${key.successes} / ${key.failures}</td>
-                  <td class="muted">${esc(key.last_error || "")}</td>
-                  <td style="text-align:right"><button class="ghost danger" data-del-key="${key.id}">удалить</button></td></tr>`;
-              })
-              .join("");
-            return `<div class="card" style="background:#0c0e13">
-              <div class="row">
-                <strong>${esc(up.label || up.id)}</strong>
-                <span class="pill">${esc(up.kind)}</span>
-                <span class="pill ${up.enabled ? "on" : "off"}">${up.enabled ? "включён" : "выключен"}</span>
-                <span class="muted">${esc(up.base_url)}</span>
-                <span style="margin-left:auto" class="row">
-                  <button class="ghost" data-toggle-up="${esc(up.id)}">${up.enabled ? "выключить" : "включить"}</button>
-                  <button class="ghost danger" data-del-up="${esc(up.id)}">удалить</button>
-                </span>
-              </div>
-              <table style="margin-top:8px"><thead><tr>
-                  <th>ключ</th><th>состояние</th><th>ок / сбоев</th><th>последняя ошибка</th><th></th>
-                </tr></thead>
-                <tbody>${keyRows || '<tr><td colspan="5" class="muted">ключей нет</td></tr>'}</tbody></table>
-              <div class="row" style="margin-top:8px">
-                <input placeholder="вставьте ключ или несколько через запятую" data-key-for="${esc(up.id)}" />
-                <button class="act" data-add-key="${esc(up.id)}">Добавить</button>
-              </div>
-            </div>`;
-          }),
-        );
-        $("upstream-list").innerHTML = rows.join("") || '<span class="muted">пока пусто</span>';
-
-        const select = $("m-upstream");
-        select.innerHTML = data.upstreams
-          .map((up) => `<option value="${esc(up.id)}">${esc(up.label || up.id)}</option>`)
-          .join("");
-
-        document.querySelectorAll("[data-add-key]").forEach((button) => {
-          button.addEventListener("click", async () => {
-            const id = button.dataset.addKey;
-            const input = document.querySelector(`[data-key-for="${CSS.escape(id)}"]`);
-            if (!input.value.trim()) return;
-            try {
-              const result = await call(`/admin/upstreams/${encodeURIComponent(id)}/keys`, {
-                method: "POST",
-                body: JSON.stringify({ key: input.value }),
-              });
-              input.value = "";
-              toast(`Добавлено ключей: ${result.added}`);
-              drawUpstreams();
-            } catch (error) {
-              toast(error.message, true);
-            }
-          });
-        });
-
-        document.querySelectorAll("[data-del-key]").forEach((button) => {
-          button.addEventListener("click", async () => {
-            try {
-              await call(`/admin/keys/${button.dataset.delKey}`, { method: "DELETE" });
-              drawUpstreams();
-            } catch (error) {
-              toast(error.message, true);
-            }
-          });
-        });
-
-        document.querySelectorAll("[data-toggle-up]").forEach((button) => {
-          button.addEventListener("click", async () => {
-            const up = data.upstreams.find((item) => item.id === button.dataset.toggleUp);
-            try {
-              await call("/admin/upstreams", {
-                method: "POST",
-                body: JSON.stringify({ ...up, enabled: !up.enabled }),
-              });
-              drawUpstreams();
-            } catch (error) {
-              toast(error.message, true);
-            }
-          });
-        });
-
-        document.querySelectorAll("[data-del-up]").forEach((button) => {
-          button.addEventListener("click", async () => {
-            if (!confirm(`Удалить ${button.dataset.delUp} вместе с его ключами и моделями?`)) return;
-            try {
-              await call(`/admin/upstreams/${encodeURIComponent(button.dataset.delUp)}`, { method: "DELETE" });
-              drawUpstreams();
-            } catch (error) {
-              toast(error.message, true);
-            }
-          });
-        });
-      }
-
-      $("up-add").addEventListener("click", async () => {
+      // Runs a button's action with a spinner-free "busy" state and a toast
+      // on failure, so every handler is not a try/catch of its own.
+      async function act(button, fn, okText) {
+        if (button) button.disabled = true;
         try {
-          await call("/admin/upstreams", {
-            method: "POST",
-            body: JSON.stringify({
-              id: $("up-id").value.trim(),
-              label: $("up-label").value.trim(),
-              kind: $("up-kind").value,
-              base_url: $("up-url").value.trim(),
-              api_version: $("up-version").value.trim() || "v1beta",
-              reasoning_dialect: $("up-dialect").value,
-              extra_headers: [],
-              enabled: true,
-              position: 0,
-            }),
-          });
-          toast("Сохранено");
-          drawUpstreams();
-        } catch (error) {
-          toast(error.message, true);
-        }
-      });
-
-      // ----------------------------------------------------------- models
-      async function drawModels() {
-        const models = await call("/admin/models");
-        $("model-list").innerHTML = `<table><thead><tr>
-            <th>модель</th><th>провайдер</th><th>имя у провайдера</th>
-            <th>вход</th><th>кеш</th><th>выход</th><th>клип</th><th>порядок</th><th></th></tr></thead><tbody>
-          ${models
-            .map(
-              (model) => `<tr>
-                <td><code>${esc(model.name)}</code>${model.voice ? ' <span class="pill on">только голос</span>' : ""}${
-                  model.vision ? ' <span class="pill on">только изображения</span>' : ""
-                }${!model.voice && !model.vision && model.images ? ' <span class="pill">видит фото</span>' : ""}${routingPill(model.routing)}</td>
-                <td class="muted">${esc(model.upstream_id)}</td>
-                <td class="muted">${esc(model.upstream_name || model.name)}</td>
-                <td>${model.price_in}</td>
-                <td>${model.price_cached ?? "—"}</td>
-                <td>${model.price_out}</td>
-                <td>${model.price_request || "—"}</td>
-                <td>${model.position}</td>
-                <td style="text-align:right" class="row" style="justify-content:flex-end">
-                  ${model.voice ? "" : `<button class="ghost" data-route-model="${esc(model.name)}">провайдеры</button>`}
-                  ${
-                    model.voice || model.vision
-                      ? ""
-                      : `<button class="ghost" data-img-model="${esc(model.name)}" title="понимает ли модель картинки сама">фото: ${model.images ? "видит" : "описывать"}</button>`
-                  }
-                  <button class="ghost" data-toggle-model="${esc(model.name)}">${model.enabled ? "выключить" : "включить"}</button>
-                  <button class="ghost danger" data-del-model="${esc(model.name)}">удалить</button>
-                </td></tr>`,
-            )
-            .join("")}
-        </tbody></table>`;
-
-        document.querySelectorAll("[data-toggle-model]").forEach((button) => {
-          button.addEventListener("click", async () => {
-            const model = models.find((item) => item.name === button.dataset.toggleModel);
-            try {
-              await call("/admin/models", {
-                method: "POST",
-                body: JSON.stringify({ ...model, enabled: !model.enabled }),
-              });
-              drawModels();
-            } catch (error) {
-              toast(error.message, true);
-            }
-          });
-        });
-
-        document.querySelectorAll("[data-img-model]").forEach((button) => {
-          button.addEventListener("click", async () => {
-            const model = models.find((item) => item.name === button.dataset.imgModel);
-            try {
-              await call("/admin/models", {
-                method: "POST",
-                body: JSON.stringify({ ...model, images: !model.images }),
-              });
-              drawModels();
-            } catch (error) {
-              toast(error.message, true);
-            }
-          });
-        });
-
-        document.querySelectorAll("[data-route-model]").forEach((button) => {
-          button.addEventListener("click", () => openRouting(button.dataset.routeModel));
-        });
-
-        document.querySelectorAll("[data-del-model]").forEach((button) => {
-          button.addEventListener("click", async () => {
-            try {
-              await call(`/admin/models/${encodeURIComponent(button.dataset.delModel)}`, { method: "DELETE" });
-              drawModels();
-            } catch (error) {
-              toast(error.message, true);
-            }
-          });
-        });
-      }
-
-      // The provider's own catalogue, with the prices it publishes.
-      let catalogue = [];
-
-      $("m-fetch").addEventListener("click", async () => {
-        const upstream = $("m-upstream").value;
-        if (!upstream) return toast("Сначала добавьте провайдера", true);
-        $("m-fetch").disabled = true;
-        try {
-          const data = await call(`/admin/upstreams/${encodeURIComponent(upstream)}/catalog`);
-          catalogue = data.models || [];
-          $("m-catalog").innerHTML =
-            `<option value="">— выберите модель (${catalogue.length}) —</option>` +
-            catalogue
-              .map((m, index) => {
-                const priced = m.price_in != null ? ` · $${m.price_in}/$${m.price_out ?? 0}` : "";
-                return `<option value="${index}">${esc(m.label || m.id)}${priced}</option>`;
-              })
-              .join("");
-          toast(`Загружено моделей: ${catalogue.length}`);
+          const out = await fn();
+          if (okText) toast(okText);
+          return out;
         } catch (error) {
           toast(error.message, true);
         } finally {
-          $("m-fetch").disabled = false;
+          if (button) button.disabled = false;
         }
-      });
-
-      $("m-catalog").addEventListener("change", () => {
-        const picked = catalogue[Number($("m-catalog").value)];
-        if (!picked) return;
-        // The name the client asks for is the short one; the upstream name is
-        // what the provider calls it, and they differ on gateways that
-        // namespace by vendor.
-        const short = picked.id.includes("/") ? picked.id.split("/").pop() : picked.id;
-        $("m-name").value = short;
-        $("m-upstream-name").value = picked.id === short ? "" : picked.id;
-        $("m-in").value = picked.price_in ?? "";
-        $("m-cached").value = picked.price_cached ?? "";
-        $("m-out").value = picked.price_out ?? "";
-        $("m-ctx").value = picked.context_tokens ?? "";
-        $("m-voice").checked = !!picked.audio && !picked.chat;
-        $("m-images").checked = !!picked.images;
-      });
-
-      $("m-add").addEventListener("click", async () => {
-        try {
-          await call("/admin/models", {
-            method: "POST",
-            body: JSON.stringify({
-              name: $("m-name").value.trim(),
-              upstream_id: $("m-upstream").value,
-              upstream_name: $("m-upstream-name").value.trim(),
-              price_in: num($("m-in").value),
-              price_cached: maybe($("m-cached").value),
-              price_out: num($("m-out").value),
-              context_tokens: maybe($("m-ctx").value),
-              enabled: true,
-              position: num($("m-pos").value),
-              voice: $("m-voice").checked,
-              vision: $("m-vision").checked,
-              images: $("m-images").checked || $("m-vision").checked,
-              price_request: num($("m-req").value),
-            }),
-          });
-          toast("Сохранено");
-          drawModels();
-        } catch (error) {
-          toast(error.message, true);
-        }
-      });
-
-      // ------------------------------------------------------------ tiers
-      async function drawTiers() {
-        const tiers = await call("/admin/tiers");
-        const names = Object.keys(tiers).sort();
-        $("tier-list").innerHTML = `<table><thead><tr>
-            <th>тариф</th><th>за 5 часов</th><th>за неделю</th><th>устройств</th><th></th></tr></thead><tbody>
-          ${names
-            .map(
-              (name) => `<tr><td><code>${esc(name)}</code></td>
-                <td>${tiers[name].credits_5h}</td>
-                <td>${tiers[name].credits_week}</td>
-                <td>${tiers[name].max_peers}</td>
-                <td style="text-align:right"><button class="ghost danger" data-del-tier="${esc(name)}">удалить</button></td></tr>`,
-            )
-            .join("")}
-        </tbody></table>`;
-        document.querySelectorAll("[data-del-tier]").forEach((button) => {
-          button.addEventListener("click", async () => {
-            try {
-              await call(`/admin/tiers/${encodeURIComponent(button.dataset.delTier)}`, { method: "DELETE" });
-              drawTiers();
-            } catch (error) {
-              toast(error.message, true);
-            }
-          });
-        });
       }
 
-      $("t-add").addEventListener("click", async () => {
+      // ============================================================ login
+      function showLogin(reason) {
+        $("login").classList.remove("hidden");
+        $("token").value = "";
+        setTimeout(() => $("token").focus(), 50);
+        if (reason) toast(reason, true);
+      }
+      $("login-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        token = $("token").value.trim();
+        if (!token) return;
         try {
-          await call("/admin/tiers", {
-            method: "POST",
-            body: JSON.stringify({
-              name: $("t-name").value.trim(),
-              credits_5h: num($("t-5h").value),
-              credits_week: num($("t-week").value),
-              max_peers: num($("t-peers").value) || 2,
-            }),
-          });
-          toast("Сохранено");
-          drawTiers();
-        } catch (error) {
-          toast(error.message, true);
-        }
+          await call("/admin/overview");
+          sessionStorage.setItem("vd-admin", token);
+          $("login").classList.add("hidden");
+          go(current);
+        } catch {}
+      });
+      $("logout").addEventListener("click", () => {
+        sessionStorage.removeItem("vd-admin");
+        token = "";
+        showLogin();
       });
 
-      // --------------------------------------------------------- licences
-      let licenseRows = [];
+      // ============================================================ drawer
+      function openDrawer({ title, sub = "", wide = false }) {
+        $("d-title").textContent = title;
+        $("d-sub").textContent = sub;
+        $("d-body").innerHTML = '<div class="skel" style="height:120px"></div><div class="skel" style="height:220px"></div>';
+        $("d-foot").innerHTML = "";
+        $("d-foot").classList.add("hidden");
+        $("drawer").classList.toggle("wide", wide);
+        $("drawer").classList.add("on");
+        $("scrim").classList.add("on");
+      }
+      function drawerBody(html) {
+        $("d-body").innerHTML = html;
+        $("d-body").scrollTop = 0;
+      }
+      function drawerFoot(html) {
+        $("d-foot").innerHTML = html;
+        $("d-foot").classList.toggle("hidden", !html);
+      }
+      function closeDrawer() {
+        $("drawer").classList.remove("on");
+        $("scrim").classList.remove("on");
+      }
+      $("d-close").onclick = closeDrawer;
+      $("scrim").onclick = closeDrawer;
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && $("drawer").classList.contains("on") && !document.querySelector(".modal-back")) closeDrawer();
+      });
 
-      async function drawLicenses() {
-        licenseRows = await call("/admin/licenses");
-        renderLicenseList();
+      // ============================================================ nav
+      const PAGES = [
+        { id: "overview", title: "Обзор", icon: "overview", sub: "Что происходит со шлюзом прямо сейчас." },
+        { id: "upstreams", title: "Провайдеры", icon: "providers", sub: "Куда шлюз отправляет запросы и какими ключами платит." },
+        { id: "models", title: "Модели", icon: "models", sub: "Что доступно клиентам, по какой цене и в каком порядке падения." },
+        { id: "tiers", title: "Тарифы", icon: "tiers", sub: "Сколько кредитов даёт подписка и на сколько устройств." },
+        { id: "licenses", title: "Лицензии", icon: "licenses", sub: "Все выданные ключи: расход, устройства, кошелёк." },
+        { id: "stats", title: "Расход", icon: "stats", sub: "Кто и на что тратит, в кредитах и деньгах." },
+      ];
+      let current = sessionStorage.getItem("vd-admin-page") || "overview";
+      let pollTimer = null;
+
+      $("nav").innerHTML = PAGES.map(
+        (p) => `<button data-page="${p.id}">${icon(p.icon, 18)}<span>${p.title}</span></button>`,
+      ).join("");
+      $("nav").addEventListener("click", (e) => {
+        const b = e.target.closest("[data-page]");
+        if (b) go(b.dataset.page);
+      });
+
+      function setHead(page, actions = "") {
+        $("page-title").textContent = page.title;
+        $("page-sub").textContent = page.sub;
+        $("page-actions").innerHTML = actions;
       }
 
-      $("l-search").addEventListener("input", renderLicenseList);
+      function skeleton(rows = 4, h = 86) {
+        return `<div class="list">${Array.from({ length: rows }, () => `<div class="skel" style="height:${h}px"></div>`).join("")}</div>`;
+      }
 
-      function renderLicenseList() {
-        const q = $("l-search").value.trim().toLowerCase();
-        const rows = q
-          ? licenseRows.filter((r) =>
-              [r.license_id, r.tier, r.note].some((f) => String(f || "").toLowerCase().includes(q)),
-            )
-          : licenseRows;
-        const box = $("license-list");
-        box.classList.remove("muted");
-        if (!rows.length) {
-          box.innerHTML = '<div class="muted">' + (q ? "Ничего не найдено" : "Пока ни одного ключа") + "</div>";
+      function view(html) {
+        const v = $("view");
+        v.innerHTML = html;
+        v.classList.remove("enter");
+        void v.offsetWidth;
+        v.classList.add("enter");
+        v.querySelectorAll(".stagger").forEach((list) =>
+          [...list.children].forEach((child, i) => child.style.setProperty("--i", Math.min(i, 12))),
+        );
+      }
+
+      async function go(pageId) {
+        const page = PAGES.find((p) => p.id === pageId) || PAGES[0];
+        current = page.id;
+        sessionStorage.setItem("vd-admin-page", current);
+        document.querySelectorAll("#nav [data-page]").forEach((b) => b.classList.toggle("on", b.dataset.page === current));
+        clearInterval(pollTimer);
+        if (!token) return showLogin();
+        setHead(page);
+        $("view").innerHTML = skeleton();
+        try {
+          await RENDER[current](page);
+        } catch (error) {
+          view(`<div class="empty">${icon("info", 30)}<div>${esc(error.message)}</div></div>`);
+        }
+      }
+
+      // Live strip in the sidebar: the queue, every few seconds.
+      async function refreshLive() {
+        if (!token) return;
+        try {
+          const o = await fetch("/admin/overview", { headers: { "x-vd-admin": token } }).then((r) => (r.ok ? r.json() : Promise.reject()));
+          $("live").classList.remove("off");
+          $("live-text").textContent = `в работе ${o.queue.inflight} · очередь ${o.queue.queued}`;
+        } catch {
+          $("live").classList.add("off");
+          $("live-text").textContent = "нет связи";
+        }
+      }
+      setInterval(refreshLive, 6000);
+
+      // ============================================================ overview
+      async function renderOverview(page) {
+        setHead(page, `<button class="btn" id="ov-refresh">${icon("refresh")}Обновить</button>`);
+        const [o, s, lic] = await Promise.all([
+          call("/admin/overview"),
+          call("/admin/stats?hours=24").catch(() => null),
+          call("/admin/licenses").catch(() => []),
+        ]);
+        const q = o.queue;
+        const pct = (a, b) => (b > 0 ? Math.min(100, (a / b) * 100) : 0);
+        const chat = o.models.filter((m) => m.enabled && !m.voice && !m.vision).length;
+        const ups = o.upstreams.filter((u) => u.enabled).length;
+        const active = lic.filter((l) => !l.revoked && (!l.expires_at || l.expires_at * 1000 > Date.now())).length;
+        const spent = s ? s.by_license.reduce((a, r) => a + r.credits, 0) : 0;
+        const calls = s ? s.by_license.reduce((a, r) => a + r.calls, 0) : 0;
+        const topModels = s ? [...s.by_model].sort((a, b) => b.credits - a.credits).slice(0, 6) : [];
+        const topLic = s ? [...s.by_license].sort((a, b) => b.credits - a.credits).slice(0, 6) : [];
+        const maxM = Math.max(1, ...topModels.map((r) => r.credits));
+        const maxL = Math.max(1, ...topLic.map((r) => r.credits));
+        const kpi = (ic, label, val, sub, meter) => `<div class="card kpi">
+            <div class="k-label">${icon(ic, 15)}${label}</div>
+            <div class="k-val">${val}</div>
+            ${meter != null ? `<div class="meter ${meter > 85 ? "bad" : meter > 60 ? "warn" : "ok"}"><i style="width:${meter}%"></i></div>` : ""}
+            <div class="k-sub">${sub}</div></div>`;
+        view(`
+          <div class="section-title">Прямо сейчас</div>
+          <div class="kpis stagger">
+            ${kpi("activity", "В работе", `${q.inflight}<small> / ${q.max_inflight}</small>`, "одновременных вызовов к провайдерам", pct(q.inflight, q.max_inflight))}
+            ${kpi("queue", "Ждут очереди", `${q.queued}<small> / ${q.max_queued}</small>`, "не дождавшиеся получают 503 + Retry-After", pct(q.queued, q.max_queued))}
+            ${kpi("users", "На одну лицензию", q.max_per_license, "чтобы один оператор не занял весь шлюз")}
+            ${kpi("coin", "Кредит", "$" + o.credit_usd, "себестоимость одного кредита")}
+          </div>
+          <div class="section-title">За сутки</div>
+          <div class="kpis stagger">
+            ${kpi("coin", "Потрачено", usd(spent * o.credit_usd), fmt(spent) + " кредитов")}
+            ${kpi("chat", "Запросов", fmt(calls), s ? "кеш: " + (s.cache_share * 100).toFixed(1) + "% входа" : "—")}
+            ${kpi("key", "Активных лицензий", active, `всего выдано ${lic.length}`)}
+            ${kpi("models", "Моделей чата", chat, `провайдеров включено ${ups} из ${o.upstreams.length}`)}
+          </div>
+          <div class="two" style="margin-top:14px">
+            <div class="card card-pad">
+              <div class="section-title" style="margin:0 0 14px">Модели по расходу</div>
+              ${topModels.length ? `<div class="bars stagger">${topModels
+                .map((r) => `<div class="bar-row"><span class="b-name mono ell">${esc(r.model)}</span>
+                  <span class="b-val">${usd(r.credits * o.credit_usd, 3)}</span>
+                  <div class="meter"><i style="width:${(r.credits / maxM) * 100}%"></i></div></div>`)
+                .join("")}</div>` : '<div class="dim">Тихо — запросов за сутки не было</div>'}
+            </div>
+            <div class="card card-pad">
+              <div class="section-title" style="margin:0 0 14px">Лицензии по расходу</div>
+              ${topLic.length ? `<div class="bars stagger">${topLic
+                .map((r) => `<div class="bar-row clickable" data-open-lic="${esc(r.license_id)}"><span class="b-name mono ell">${esc(r.license_id)}</span>
+                  <span class="b-val">${usd(r.credits * o.credit_usd, 3)} · ${r.calls} запр.</span>
+                  <div class="meter ok"><i style="width:${(r.credits / maxL) * 100}%"></i></div></div>`)
+                .join("")}</div>` : '<div class="dim">Тихо — запросов за сутки не было</div>'}
+            </div>
+          </div>`);
+        $("ov-refresh").onclick = () => go("overview");
+        document.querySelectorAll("[data-open-lic]").forEach((el) => (el.onclick = () => openLicense(el.dataset.openLic)));
+        pollTimer = setInterval(async () => {
+          if (current !== "overview" || $("drawer").classList.contains("on")) return;
+          try {
+            const fresh = await call("/admin/overview");
+            const cards = document.querySelectorAll(".kpis")[0]?.children;
+            if (!cards) return;
+            const fq = fresh.queue;
+            cards[0].querySelector(".k-val").innerHTML = `${fq.inflight}<small> / ${fq.max_inflight}</small>`;
+            cards[0].querySelector(".meter i").style.width = pct(fq.inflight, fq.max_inflight) + "%";
+            cards[1].querySelector(".k-val").innerHTML = `${fq.queued}<small> / ${fq.max_queued}</small>`;
+            cards[1].querySelector(".meter i").style.width = pct(fq.queued, fq.max_queued) + "%";
+          } catch {}
+        }, 5000);
+      }
+
+      // ============================================================ upstreams
+      let upstreamCache = [];
+
+      async function renderUpstreams(page) {
+        setHead(page, `<button class="btn primary" id="up-new">${icon("plus")}Добавить провайдера</button>`);
+        $("up-new").onclick = () => upstreamForm();
+        const data = await call("/admin/overview");
+        upstreamCache = data.upstreams;
+        const keys = await Promise.all(
+          data.upstreams.map((up) => call(`/admin/upstreams/${encodeURIComponent(up.id)}/keys`).catch(() => [])),
+        );
+        if (!data.upstreams.length) {
+          view(`<div class="empty">${icon("providers", 30)}<div>Провайдеров пока нет</div><button class="btn primary" onclick="upstreamForm()">${icon("plus")}Добавить первого</button></div>`);
           return;
         }
-        box.innerHTML = rows
-          .map((row) => {
-            const until = row.expires_at
-              ? "до " + new Date(row.expires_at * 1000).toLocaleDateString()
-              : "без срока";
-            return `<button class="keycard" data-open="${esc(row.license_id)}">
-              <span class="tag tier">${esc(row.tier)}</span>
-              <span class="kmain">
-                <span class="kid">${esc(row.license_id)}</span>
-                <span class="ksub">${until}${row.note ? " · " + esc(row.note) : ""} · ${row.max_peers} устр.</span>
-              </span>
-              ${row.revoked ? '<span class="pill off">отозвана</span>' : ""}
-              <span class="chev">›</span>
-            </button>`;
+        view(`<div class="list stagger">${data.upstreams
+          .map((up, i) => {
+            const ks = keys[i];
+            const live = ks.filter((k) => !k.cooling_seconds).length;
+            return `<div class="card up ${up.enabled ? "" : "is-off"}">
+              <div class="up-head">
+                <div class="avatar">${esc(initials(up.label || up.id))}</div>
+                <div style="min-width:0">
+                  <div class="i-title row" style="flex-wrap:wrap;gap:8px"><b class="ell" style="font-size:15.5px">${esc(up.label || up.id)}</b>
+                    <span class="badge">${esc(up.kind === "gemini" ? "Gemini" : "OpenAI-совместимый")}</span>
+                    ${up.reasoning_dialect && up.reasoning_dialect !== "auto" ? `<span class="badge violet">${esc(up.reasoning_dialect)}</span>` : ""}
+                    <span class="badge ${ks.length ? (live ? "green" : "amber") : "red"}"><span class="dot"></span>${ks.length ? `${live} из ${ks.length} ключей в строю` : "нет ключей"}</span>
+                  </div>
+                  <div class="i-sub"><span class="mono">${esc(up.id)}</span><span class="sep">·</span><span class="ell">${esc(up.base_url)}</span></div>
+                </div>
+                <div class="i-right">
+                  <label class="switch-row" title="${up.enabled ? "включён" : "выключен"}"><button class="switch ${up.enabled ? "on" : ""}" data-up-toggle="${esc(up.id)}" role="switch" aria-checked="${up.enabled}"></button></label>
+                  <button class="btn icon sm ghost" data-up-edit="${esc(up.id)}" title="изменить">${icon("edit")}</button>
+                  <button class="btn icon sm ghost danger" data-up-del="${esc(up.id)}" title="удалить">${icon("trash")}</button>
+                </div>
+              </div>
+              <div class="keys">
+                ${ks.length ? ks.map((k) => `<div class="key">
+                    <span class="mono ell">${esc(k.masked)}</span>
+                    ${k.cooling_seconds ? `<span class="badge amber"><span class="dot"></span>остывает ${k.cooling_seconds} с</span>` : `<span class="badge green"><span class="dot"></span>в строю</span>`}
+                    <span class="dim stats" style="font-size:12.5px">${k.successes} ок · ${k.failures} сбоев</span>
+                    <span class="err ell" title="${esc(k.last_error || "")}">${esc(k.last_error || "")}</span>
+                    <button class="btn icon sm ghost danger" data-key-del="${k.id}" title="удалить ключ">${icon("trash", 15)}</button>
+                  </div>`).join("") : '<div class="dim" style="padding:10px 8px">Ключей нет — добавьте хотя бы один, иначе провайдер не используется.</div>'}
+                <div class="add-key">
+                  <input placeholder="Вставьте ключ или несколько через запятую" data-key-for="${esc(up.id)}" />
+                  <button class="btn" data-key-add="${esc(up.id)}">${icon("plus")}Ключ</button>
+                </div>
+              </div>
+            </div>`;
           })
-          .join("");
-        box.querySelectorAll("[data-open]").forEach((card) => {
-          card.addEventListener("click", () => openLicense(card.dataset.open));
+          .join("")}</div>`);
+
+        document.querySelectorAll("[data-up-toggle]").forEach((b) => {
+          b.onclick = () => {
+            const up = upstreamCache.find((u) => u.id === b.dataset.upToggle);
+            b.classList.toggle("on");
+            act(b, () => call("/admin/upstreams", { method: "POST", body: JSON.stringify({ ...up, enabled: !up.enabled }) }))
+              .then(() => go("upstreams"));
+          };
         });
+        document.querySelectorAll("[data-up-edit]").forEach((b) => (b.onclick = () => upstreamForm(upstreamCache.find((u) => u.id === b.dataset.upEdit))));
+        document.querySelectorAll("[data-up-del]").forEach((b) => {
+          b.onclick = async () => {
+            const id = b.dataset.upDel;
+            if (!(await confirmBox({ title: `Удалить «${id}»?`, text: "Вместе с провайдером удалятся его ключи и модели. Это не отменить." }))) return;
+            act(b, () => call(`/admin/upstreams/${encodeURIComponent(id)}`, { method: "DELETE" }), "Провайдер удалён").then(() => go("upstreams"));
+          };
+        });
+        document.querySelectorAll("[data-key-del]").forEach((b) => {
+          b.onclick = async () => {
+            if (!(await confirmBox({ title: "Удалить ключ?", text: "Ключ исчезнет из пула сразу, запросы пойдут на остальные." }))) return;
+            act(b, () => call(`/admin/keys/${b.dataset.keyDel}`, { method: "DELETE" }), "Ключ удалён").then(() => go("upstreams"));
+          };
+        });
+        const addKey = (id, button) => {
+          const input = document.querySelector(`[data-key-for="${CSS.escape(id)}"]`);
+          if (!input.value.trim()) return input.focus();
+          act(button, async () => {
+            const r = await call(`/admin/upstreams/${encodeURIComponent(id)}/keys`, { method: "POST", body: JSON.stringify({ key: input.value }) });
+            toast(`Добавлено ключей: ${r.added}`);
+            go("upstreams");
+          });
+        };
+        document.querySelectorAll("[data-key-add]").forEach((b) => (b.onclick = () => addKey(b.dataset.keyAdd, b)));
+        document.querySelectorAll("[data-key-for]").forEach((input) =>
+          input.addEventListener("keydown", (e) => e.key === "Enter" && addKey(input.dataset.keyFor)),
+        );
       }
 
-      // -------------------------------------------------- one key: detail sheet
-      const dt = (ts) => new Date(ts * 1000).toLocaleDateString();
-      const dtime = (ts) => new Date(ts * 1000).toLocaleString();
-
-      function gauge(label, left, cap, cls, unit) {
-        const pct = cap > 0 ? Math.max(0, Math.min(100, (left / cap) * 100)) : 0;
-        const capTxt = cap > 0 ? `<small>из ${Math.round(cap)}</small>` : "";
-        return `<div class="gauge ${cls || ""}">
-          <div class="glabel">${label}</div>
-          <div class="gval">${Math.round(left)} ${capTxt}</div>
-          <div class="bar ${cls === "wallet" ? "" : "ok"}"><i style="width:${pct}%"></i></div>
-          ${unit ? `<div class="glabel" style="text-transform:none">${unit}</div>` : ""}
-        </div>`;
+      function upstreamForm(up) {
+        const edit = !!up;
+        up = up || { id: "", label: "", kind: "openai_compatible", base_url: "", api_version: "v1beta", reasoning_dialect: "auto" };
+        openDrawer({ title: edit ? `Провайдер «${up.label || up.id}»` : "Новый провайдер", sub: edit ? up.id : "Куда слать запросы: адрес API и его диалект" });
+        drawerBody(`
+          <div class="d-sec">
+            <h3>Кто это</h3>
+            <div class="form-grid">
+              <label class="field"><span>ID</span><input id="f-id" value="${esc(up.id)}" placeholder="openrouter" ${edit ? "disabled" : ""} /><small>Латиницей, навсегда</small></label>
+              <label class="field"><span>Название</span><input id="f-label" value="${esc(up.label)}" placeholder="OpenRouter" /></label>
+            </div>
+          </div>
+          <div class="d-sec">
+            <h3>Как с ним говорить</h3>
+            <div class="form-grid">
+              <label class="field"><span>Протокол</span><select id="f-kind">
+                <option value="openai_compatible" ${up.kind === "openai_compatible" ? "selected" : ""}>OpenAI-совместимый</option>
+                <option value="gemini" ${up.kind === "gemini" ? "selected" : ""}>Gemini</option></select></label>
+              <label class="field"><span>Диалект рассуждений</span><select id="f-dialect">
+                ${["auto", "openai", "openrouter", "qwen", "nvidia"].map((d) => `<option ${up.reasoning_dialect === d ? "selected" : ""}>${d}</option>`).join("")}
+              </select><small>auto — определяется по адресу</small></label>
+              <label class="field full"><span>Адрес API</span><input id="f-url" value="${esc(up.base_url)}" placeholder="https://openrouter.ai/api/v1" /></label>
+              <label class="field"><span>Версия API (Gemini)</span><input id="f-ver" value="${esc(up.api_version || "v1beta")}" placeholder="v1beta" /></label>
+            </div>
+          </div>`);
+        drawerFoot(`<button class="btn" id="f-cancel">Отмена</button><button class="btn primary" id="f-save">${edit ? "Сохранить" : "Добавить"}</button>`);
+        $("f-cancel").onclick = closeDrawer;
+        $("f-save").onclick = () => {
+          const id = $("f-id").value.trim();
+          if (!id) return toast("Нужен ID", true);
+          act($("f-save"), () =>
+            call("/admin/upstreams", {
+              method: "POST",
+              body: JSON.stringify({
+                ...up,
+                id,
+                label: $("f-label").value.trim(),
+                kind: $("f-kind").value,
+                base_url: $("f-url").value.trim(),
+                api_version: $("f-ver").value.trim() || "v1beta",
+                reasoning_dialect: $("f-dialect").value,
+                extra_headers: up.extra_headers || [],
+                enabled: edit ? up.enabled : true,
+                position: up.position || 0,
+              }),
+            }),
+          ).then((r) => {
+            if (r === undefined) return;
+            toast(edit ? "Сохранено" : "Провайдер добавлен — теперь добавьте ему ключ");
+            closeDrawer();
+            go("upstreams");
+          });
+        };
       }
 
-      // Inline SVG bar chart of daily spend — no libraries, scales to the box.
-      function chart(daily) {
-        if (!daily.length) return '<div class="muted">Расхода за период не было</div>';
-        const w = 640, h = 120, pad = 4;
-        const max = Math.max(...daily.map((d) => d.credits), 1);
-        const bw = (w - pad * 2) / daily.length;
-        const bars = daily
-          .map((d, i) => {
-            const bh = (d.credits / max) * (h - 20);
-            const x = pad + i * bw;
-            const y = h - bh;
-            const day = new Date(d.day * 1000).toLocaleDateString();
-            return `<rect x="${x + 1}" y="${y}" width="${Math.max(1, bw - 2)}" height="${bh}"
-              rx="2" fill="var(--accent)"><title>${day}: ${Math.round(d.credits)} кред. · ${d.calls} запр.</title></rect>`;
-          })
-          .join("");
-        return `<svg class="chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${bars}</svg>`;
+      // ============================================================ models
+      let modelCache = [];
+      let modelFilter = { kind: "all", q: "" };
+
+      function roleOf(m) {
+        return m.voice ? "voice" : m.vision ? "vision" : "chat";
       }
-
-      function closeSheet() {
-        $("sheet-back").classList.remove("on");
-        $("sheet").classList.remove("wide");
-        $("sheet-body").innerHTML = "";
-      }
-      $("sheet-x").addEventListener("click", closeSheet);
-      $("sheet-back").addEventListener("click", (e) => {
-        if (e.target === $("sheet-back")) closeSheet();
-      });
-      document.addEventListener("keydown", (e) => {
-        if (e.key === "Escape" && $("sheet-back").classList.contains("on")) closeSheet();
-      });
-
-      // ------------------------------------------------ OpenRouter hosts
-      // OpenRouter serves most models through several companies at once, at
-      // different prices, and by default balances price against speed - not
-      // the cheapest. Per model: cheapest first, fastest first, a hand-picked
-      // list, or OpenRouter's own choice.
-      const ROUTING_MODES = [
-        ["", "Как решит OpenRouter", "баланс цены и скорости"],
-        ["price", "Самый дешёвый сверху", "сначала самый дешёвый, при сбое — следующий по цене"],
-        ["throughput", "Самый быстрый", "по токенам в секунду за последние 30 минут"],
-        ["manual", "Выбрать вручную", "отмеченные в этом порядке, дальше — как решит OpenRouter"],
-      ];
-
       function routingMode(r) {
         if (r && r.order && r.order.length) return "manual";
         return (r && r.sort) || "";
       }
-
-      function routingPill(r) {
+      function routingBadge(r) {
         const mode = routingMode(r);
         if (!mode) return "";
-        const text =
-          mode === "price" ? "дешёвый" : mode === "throughput" ? "быстрый" : `вручную: ${r.order.length}`;
-        return ` <span class="pill on">${esc(text)}</span>`;
+        const text = mode === "price" ? "дешёвые хосты" : mode === "throughput" ? "быстрые хосты" : `хосты вручную · ${r.order.length}`;
+        return `<span class="badge violet">${icon("route", 12)}${text}</span>`;
       }
 
-      // OpenRouter gives speed as a number or as percentiles.
+      async function renderModels(page) {
+        setHead(page, `<button class="btn primary" id="m-new">${icon("plus")}Добавить модель</button>`);
+        $("m-new").onclick = () => modelForm();
+        const [models, overview] = await Promise.all([call("/admin/models"), call("/admin/overview")]);
+        modelCache = models;
+        upstreamCache = overview.upstreams;
+        const counts = { all: models.length, chat: 0, voice: 0, vision: 0 };
+        models.forEach((m) => counts[roleOf(m)]++);
+        view(`
+          <div class="toolbar">
+            <div class="seg" id="m-kind">
+              ${[["all", "Все"], ["chat", "Чат"], ["vision", "Изображения"], ["voice", "Голос"]]
+                .map(([k, t]) => `<button data-kind="${k}" class="${modelFilter.kind === k ? "on" : ""}">${t} <span class="faint">${counts[k]}</span></button>`)
+                .join("")}
+            </div>
+            <div class="search">${icon("search")}<input id="m-q" placeholder="Поиск по имени или провайдеру" value="${esc(modelFilter.q)}" /></div>
+          </div>
+          <div class="callout" style="margin-bottom:16px">${icon("info", 18)}<div>
+            Порядок — это порядок падения: запрос идёт в модель, что назвал клиент, а при сбое — дальше по списку.
+            «Только голос» и «только изображения» — служебные: в чате не отвечают и не подменяют упавшую модель.
+            Модели без зрения получают вместо фото подробное описание от модели «только изображения».</div></div>
+          <div class="list stagger" id="m-list"></div>`);
+        $("m-kind").onclick = (e) => {
+          const b = e.target.closest("[data-kind]");
+          if (!b) return;
+          modelFilter.kind = b.dataset.kind;
+          document.querySelectorAll("#m-kind button").forEach((x) => x.classList.toggle("on", x === b));
+          drawModelList();
+        };
+        $("m-q").oninput = (e) => {
+          modelFilter.q = e.target.value;
+          drawModelList();
+        };
+        drawModelList();
+      }
+
+      function drawModelList() {
+        const q = modelFilter.q.trim().toLowerCase();
+        const list = modelCache.filter(
+          (m) =>
+            (modelFilter.kind === "all" || roleOf(m) === modelFilter.kind) &&
+            (!q || [m.name, m.upstream_id, m.upstream_name].some((f) => String(f || "").toLowerCase().includes(q))),
+        );
+        const box = $("m-list");
+        if (!list.length) {
+          box.innerHTML = `<div class="empty">${icon("models", 30)}<div>${modelCache.length ? "Ничего не найдено" : "Моделей пока нет"}</div></div>`;
+          return;
+        }
+        const upLabel = (id) => (upstreamCache.find((u) => u.id === id) || {}).label || id;
+        box.innerHTML = list
+          .map((m, i) => {
+            const role = roleOf(m);
+            const roleBadge =
+              role === "voice"
+                ? `<span class="badge blue">${icon("mic", 12)}только голос</span>`
+                : role === "vision"
+                  ? `<span class="badge violet">${icon("image", 12)}только изображения</span>`
+                  : m.images
+                    ? `<span class="badge green">${icon("eye", 12)}видит фото</span>`
+                    : `<span class="badge amber">${icon("image", 12)}фото → описание</span>`;
+            const chips = [
+              ["вход", price(m.price_in)],
+              ["кеш", m.price_cached == null ? "как вход" : price(m.price_cached)],
+              ["выход", price(m.price_out)],
+              ...(m.price_request ? [["клип", usd(m.price_request, 4)]] : []),
+              ...(m.context_tokens ? [["контекст", Math.round(m.context_tokens / 1000) + "k"]] : []),
+              ["порядок", "#" + m.position],
+            ];
+            return `<div class="card item ${m.enabled ? "" : "off"}" style="--i:${Math.min(i, 12)}">
+              <div style="min-width:0">
+                <div class="i-title"><b class="ell">${esc(m.name)}</b>${roleBadge}${routingBadge(m.routing)}${m.enabled ? "" : '<span class="badge red">выключена</span>'}</div>
+                <div class="i-sub"><span>${esc(upLabel(m.upstream_id))}</span><span class="sep">·</span><span class="mono ell">${esc(m.upstream_name || m.name)}</span></div>
+                <div class="chips">${chips.map(([k, v]) => `<span class="chip"><i>${k}</i><b>${v}</b></span>`).join("")}
+                  ${role === "chat" ? `<label class="switch-row" style="margin-left:6px"><button class="switch sm ${m.images ? "on" : ""}" data-m-img="${esc(m.name)}" role="switch" aria-checked="${!!m.images}" title="понимает ли модель картинки сама"></button>видит фото</label>` : ""}
+                </div>
+              </div>
+              <div class="i-right">
+                ${role === "voice" ? "" : `<button class="btn sm" data-m-route="${esc(m.name)}">${icon("route")}Хосты</button>`}
+                <button class="btn icon sm ghost" data-m-edit="${esc(m.name)}" title="изменить">${icon("edit")}</button>
+                <button class="btn icon sm ghost danger" data-m-del="${esc(m.name)}" title="удалить">${icon("trash")}</button>
+                <button class="switch ${m.enabled ? "on" : ""}" data-m-on="${esc(m.name)}" role="switch" aria-checked="${m.enabled}" title="${m.enabled ? "включена" : "выключена"}"></button>
+              </div>
+            </div>`;
+          })
+          .join("");
+        [...box.children].forEach((c, i) => c.style.setProperty("--i", Math.min(i, 12)));
+
+        const find = (name) => modelCache.find((m) => m.name === name);
+        const save = (b, row, ok) =>
+          act(b, () => call("/admin/models", { method: "POST", body: JSON.stringify(row) }), ok).then(async () => {
+            modelCache = await call("/admin/models");
+            drawModelList();
+          });
+        box.querySelectorAll("[data-m-on]").forEach((b) => {
+          b.onclick = () => {
+            const m = find(b.dataset.mOn);
+            b.classList.toggle("on");
+            save(b, { ...m, enabled: !m.enabled }, m.enabled ? "Модель выключена" : "Модель включена");
+          };
+        });
+        box.querySelectorAll("[data-m-img]").forEach((b) => {
+          b.onclick = () => {
+            const m = find(b.dataset.mImg);
+            b.classList.toggle("on");
+            save(b, { ...m, images: !m.images }, m.images ? "Фото будут описываться" : "Фото уходят модели как есть");
+          };
+        });
+        box.querySelectorAll("[data-m-edit]").forEach((b) => (b.onclick = () => modelForm(find(b.dataset.mEdit))));
+        box.querySelectorAll("[data-m-route]").forEach((b) => (b.onclick = () => openRouting(b.dataset.mRoute)));
+        box.querySelectorAll("[data-m-del]").forEach((b) => {
+          b.onclick = async () => {
+            const name = b.dataset.mDel;
+            if (!(await confirmBox({ title: `Удалить модель «${name}»?`, text: "Клиенты, выбравшие её, пойдут по цепочке падения." }))) return;
+            act(b, () => call(`/admin/models/${encodeURIComponent(name)}`, { method: "DELETE" }), "Модель удалена").then(() => go("models"));
+          };
+        });
+      }
+
+      function modelForm(m) {
+        const edit = !!m;
+        m = m || { name: "", upstream_id: upstreamCache[0]?.id || "", upstream_name: "", price_in: "", price_cached: null, price_out: "", context_tokens: null, position: modelCache.length, voice: false, vision: false, images: false, price_request: 0, enabled: true };
+        let role = roleOf(m);
+        let catalogue = [];
+        openDrawer({ title: edit ? `Модель «${m.name}»` : "Новая модель", sub: edit ? "Имя модели не меняется — это её адрес для клиентов" : "Выберите из каталога провайдера — имя и цены подставятся сами" });
+        drawerBody(`
+          <div class="d-sec">
+            <h3>Откуда</h3>
+            <div class="form-grid">
+              <label class="field full"><span>Провайдер</span><select id="f-up">${upstreamCache
+                .map((u) => `<option value="${esc(u.id)}" ${u.id === m.upstream_id ? "selected" : ""}>${esc(u.label || u.id)}</option>`)
+                .join("")}</select></label>
+            </div>
+            <div class="catalog">
+              <div class="search">${icon("search")}<input id="f-cat-q" placeholder="Каталог провайдера: нажмите «Загрузить», потом ищите" disabled /></div>
+              <div class="cat-list" id="f-cat"><div class="dim" style="padding:14px 13px">Каталог не загружен.
+                <button class="btn sm" id="f-cat-load" style="margin-left:8px">${icon("refresh")}Загрузить</button></div></div>
+            </div>
+          </div>
+          <div class="d-sec">
+            <h3>Как называется</h3>
+            <div class="form-grid">
+              <label class="field"><span>Имя для клиентов</span><input id="f-name" value="${esc(m.name)}" placeholder="glm-flash" ${edit ? "disabled" : ""} /></label>
+              <label class="field"><span>Имя у провайдера</span><input id="f-uname" value="${esc(m.upstream_name)}" placeholder="z-ai/glm-5.3-flash" /><small>Пусто — такое же, как для клиентов</small></label>
+            </div>
+          </div>
+          <div class="d-sec">
+            <h3>Что умеет</h3>
+            <div class="choice" id="f-role">
+              <button data-role="chat" class="${role === "chat" ? "on" : ""}"><b>${icon("chat", 14)} Чат</b><span>Отвечает клиентам, участвует в цепочке падения</span></button>
+              <button data-role="vision" class="${role === "vision" ? "on" : ""}"><b>${icon("image", 14)} Только изображения</b><span>Описывает фото для моделей без зрения</span></button>
+              <button data-role="voice" class="${role === "voice" ? "on" : ""}"><b>${icon("mic", 14)} Только голос</b><span>Расшифровывает диктовку</span></button>
+            </div>
+            <label class="switch-row" id="f-img-row"><button class="switch ${m.images ? "on" : ""}" id="f-img" type="button" role="switch"></button>Видит фото сама — иначе фото заменяются описанием</label>
+          </div>
+          <div class="d-sec">
+            <h3>Цены, $ за 1M токенов</h3>
+            <div class="form-grid three">
+              <label class="field"><span>Вход</span><input id="f-in" value="${m.price_in ?? ""}" inputmode="decimal" placeholder="0.15" /></label>
+              <label class="field"><span>Кеш</span><input id="f-cached" value="${m.price_cached ?? ""}" inputmode="decimal" placeholder="как вход" /></label>
+              <label class="field"><span>Выход</span><input id="f-out" value="${m.price_out ?? ""}" inputmode="decimal" placeholder="0.60" /></label>
+              <label class="field"><span>Контекст, токенов</span><input id="f-ctx" value="${m.context_tokens ?? ""}" inputmode="numeric" placeholder="128000" /></label>
+              <label class="field"><span>Порядок</span><input id="f-pos" value="${m.position ?? 0}" inputmode="numeric" /></label>
+              <label class="field" id="f-req-row"><span>Цена за клип, $</span><input id="f-req" value="${m.price_request || ""}" inputmode="decimal" placeholder="0.002" /></label>
+            </div>
+            <p class="hint">Для OpenRouter списывается фактическая стоимость ответа; эти цены — запасные и для обзора.</p>
+          </div>`);
+        drawerFoot(`<button class="btn" id="f-cancel">Отмена</button><button class="btn primary" id="f-save">${edit ? "Сохранить" : "Добавить модель"}</button>`);
+
+        const syncRole = () => {
+          document.querySelectorAll("#f-role button").forEach((b) => b.classList.toggle("on", b.dataset.role === role));
+          $("f-img-row").classList.toggle("hidden", role !== "chat");
+          $("f-req-row").classList.toggle("hidden", role !== "voice");
+        };
+        syncRole();
+        $("f-role").onclick = (e) => {
+          const b = e.target.closest("[data-role]");
+          if (b) {
+            role = b.dataset.role;
+            syncRole();
+          }
+        };
+        $("f-img").onclick = () => $("f-img").classList.toggle("on");
+
+        const drawCatalog = () => {
+          const q = $("f-cat-q").value.trim().toLowerCase();
+          const hits = catalogue.filter((c) => !q || (c.id + " " + (c.label || "")).toLowerCase().includes(q)).slice(0, 150);
+          $("f-cat").innerHTML = hits.length
+            ? hits
+                .map((c) => `<button class="cat-item" data-cat="${esc(c.id)}"><span style="min-width:0"><span class="ell" style="display:block">${esc(c.label || c.id)}</span><span class="mono ell" style="display:block">${esc(c.id)}</span></span>
+                  <span class="row" style="gap:6px">${c.images ? `<span class="badge green">${icon("eye", 12)}</span>` : ""}${c.price_in != null ? `<span class="chip"><b>${price(c.price_in)}</b><i>/</i><b>${price(c.price_out)}</b></span>` : ""}</span></button>`)
+                .join("")
+            : '<div class="dim" style="padding:14px 13px">Ничего не найдено</div>';
+        };
+        const loadCatalog = () =>
+          act($("f-cat-load"), async () => {
+            const data = await call(`/admin/upstreams/${encodeURIComponent($("f-up").value)}/catalog`);
+            catalogue = data.models || [];
+            $("f-cat-q").disabled = false;
+            $("f-cat-q").placeholder = `Поиск среди ${catalogue.length} моделей`;
+            $("f-cat-q").focus();
+            drawCatalog();
+          });
+        $("f-cat-load").onclick = loadCatalog;
+        $("f-up").onchange = () => {
+          catalogue = [];
+          $("f-cat-q").disabled = true;
+          $("f-cat").innerHTML = `<div class="dim" style="padding:14px 13px">Каталог не загружен. <button class="btn sm" id="f-cat-load" style="margin-left:8px">${icon("refresh")}Загрузить</button></div>`;
+          $("f-cat-load").onclick = loadCatalog;
+        };
+        $("f-cat-q").oninput = drawCatalog;
+        $("f-cat").addEventListener("click", (e) => {
+          const b = e.target.closest("[data-cat]");
+          if (!b) return;
+          const c = catalogue.find((x) => x.id === b.dataset.cat);
+          document.querySelectorAll(".cat-item").forEach((x) => x.classList.toggle("on", x === b));
+          const short = c.id.includes("/") ? c.id.split("/").pop() : c.id;
+          if (!edit) $("f-name").value = short;
+          $("f-uname").value = c.id === short ? "" : c.id;
+          $("f-in").value = c.price_in ?? "";
+          $("f-cached").value = c.price_cached ?? "";
+          $("f-out").value = c.price_out ?? "";
+          $("f-ctx").value = c.context_tokens ?? "";
+          $("f-img").classList.toggle("on", !!c.images);
+          if (c.audio && !c.chat) role = "voice";
+          syncRole();
+          toast(`Подставлено: ${c.id}`);
+        });
+
+        $("f-cancel").onclick = closeDrawer;
+        $("f-save").onclick = () => {
+          const name = $("f-name").value.trim();
+          if (!name) return toast("Нужно имя модели", true);
+          const row = {
+            ...m,
+            name,
+            upstream_id: $("f-up").value,
+            upstream_name: $("f-uname").value.trim(),
+            price_in: num($("f-in").value),
+            price_cached: maybe($("f-cached").value),
+            price_out: num($("f-out").value),
+            context_tokens: maybe($("f-ctx").value),
+            position: num($("f-pos").value),
+            voice: role === "voice",
+            vision: role === "vision",
+            images: role === "vision" ? true : role === "chat" ? $("f-img").classList.contains("on") : false,
+            price_request: role === "voice" ? num($("f-req").value) : 0,
+            enabled: edit ? m.enabled : true,
+          };
+          // Routing is kept by the server when it is not sent.
+          delete row.routing;
+          act($("f-save"), () => call("/admin/models", { method: "POST", body: JSON.stringify(row) })).then((r) => {
+            if (r === undefined) return;
+            toast(edit ? "Сохранено" : "Модель добавлена");
+            closeDrawer();
+            go("models");
+          });
+        };
+      }
+
+      // ------------------------------------------------ OpenRouter hosts
+      const ROUTING_MODES = [
+        ["", "Как решит OpenRouter", "Баланс цены и скорости"],
+        ["price", "Самый дешёвый", "Сначала дешёвый, при сбое — следующий по цене"],
+        ["throughput", "Самый быстрый", "По токенам в секунду за 30 минут"],
+        ["manual", "Выбрать вручную", "Отмеченные по порядку, дальше — выбор OpenRouter"],
+      ];
       function tps(v) {
         if (v == null) return null;
         if (typeof v === "number") return v;
         return v.p50 ?? v.median ?? v.avg ?? null;
       }
       const cost = (h) => (h.price_in ?? 1e9) + (h.price_out ?? 1e9);
-      const price = (v) => (v == null ? "—" : "$" + (+v).toFixed(v < 0.1 ? 4 : 3));
 
       async function openRouting(name) {
-        $("sheet").classList.add("wide");
-        $("sheet-id").textContent = `${name} · провайдеры OpenRouter`;
-        $("sheet-body").innerHTML = '<div class="muted">Спрашиваю OpenRouter…</div>';
-        $("sheet-back").classList.add("on");
+        openDrawer({ title: `Хосты · ${name}`, sub: "Через кого OpenRouter обслуживает эту модель", wide: true });
         try {
-          const [d, models] = await Promise.all([
-            call(`/admin/models/${encodeURIComponent(name)}/providers`),
-            call("/admin/models"),
-          ]);
-          const model = models.find((m) => m.name === name);
+          const [d, models] = await Promise.all([call(`/admin/models/${encodeURIComponent(name)}/providers`), call("/admin/models")]);
           const st = {
-            model,
+            model: models.find((x) => x.name === name),
             slug: d.model,
             target: d.target,
             hosts: d.hosts || [],
@@ -992,15 +1284,13 @@
           };
           paintRouting(st);
         } catch (error) {
-          $("sheet-body").innerHTML = `<div class="muted">${esc(error.message)}</div>`;
+          drawerBody(`<div class="empty">${icon("info", 30)}<div>${esc(error.message)}</div></div>`);
         }
       }
 
       function orderedHosts(st) {
         const hosts = [...st.hosts];
-        if (st.mode === "throughput") {
-          return hosts.sort((a, b) => (tps(b.throughput) ?? -1) - (tps(a.throughput) ?? -1));
-        }
+        if (st.mode === "throughput") return hosts.sort((a, b) => (tps(b.throughput) ?? -1) - (tps(a.throughput) ?? -1));
         hosts.sort((a, b) => cost(a) - cost(b));
         if (st.mode === "manual") {
           const at = (h) => {
@@ -1017,86 +1307,65 @@
         const manual = st.mode === "manual";
         const first = manual ? hosts.find((h) => st.picked.includes(h.tag)) : st.mode ? hosts[0] : null;
         const m = st.model || {};
-        $("sheet-body").innerHTML = `
-          <div class="note-hint">Модель на OpenRouter: <code>${esc(st.slug)}</code>${
-            st.target && st.target !== st.slug
-              ? ` → сейчас это <code>${esc(st.target)}</code> (алиас сам переедет на новую версию, хосты — нет: выбор вручную
-                 держится за хосты этой версии)`
-              : ""
-          }. Сейчас в таблице цен:
-            вход ${price(m.price_in)} · кеш ${price(m.price_cached)} · выход ${price(m.price_out)} за 1M.</div>
-          <div class="modes">
-            ${ROUTING_MODES.map(
-              ([id, title, hint]) =>
-                `<button class="mode ${st.mode === id ? "on" : ""}" data-mode="${id}"><b>${esc(title)}</b><span>${esc(hint)}</span></button>`,
-            ).join("")}
+        drawerBody(`
+          <div class="callout">${icon("info", 18)}<div>Модель на OpenRouter: <span class="mono">${esc(st.slug)}</span>${
+            st.target && st.target !== st.slug ? ` → сейчас это <span class="mono">${esc(st.target)}</span>` : ""
+          }. Списывается фактическая стоимость ответившего хоста. Если выбранные недоступны — запрос уходит туда, куда выбрал бы OpenRouter.</div></div>
+          <div class="d-sec">
+            <h3>Режим</h3>
+            <div class="choice four" id="r-modes">${ROUTING_MODES.map(
+              ([id, t, h]) => `<button data-mode="${id}" class="${st.mode === id ? "on" : ""}"><b>${t}</b><span>${h}</span></button>`,
+            ).join("")}</div>
           </div>
-          ${hosts.length ? "" : '<div class="muted">OpenRouter не вернул ни одного хоста для этой модели.</div>'}
-          <div style="overflow-x:auto">
-          <table class="hosts"><thead><tr>
-            ${manual ? "<th></th>" : ""}<th>хост</th><th>вход</th><th>кеш</th><th>выход</th>
-            <th>контекст</th><th>ток/с</th><th>аптайм</th><th></th>${manual ? "<th></th>" : ""}
-          </tr></thead><tbody>
-          ${hosts
-            .map((h) => {
-              const picked = st.picked.includes(h.tag);
-              const speed = tps(h.throughput);
-              const down = h.status != null && h.status < 0;
-              return `<tr class="${manual && picked ? "picked" : ""} ${first && first.tag === h.tag ? "first" : ""}">
-                ${manual ? `<td><input type="checkbox" data-pick="${esc(h.tag)}" ${picked ? "checked" : ""} /></td>` : ""}
-                <td>${esc(h.provider)}${h.discount ? ` <span class="pill on">−${Math.round(h.discount * 100)}%</span>` : ""}
-                  <div class="tagline">${esc(h.tag)}${h.quantization ? "" : ""}</div></td>
-                <td>${price(h.price_in)}</td>
-                <td>${price(h.price_cached)}</td>
-                <td>${price(h.price_out)}</td>
-                <td>${h.context ? Math.round(h.context / 1000) + "k" : "—"}</td>
-                <td>${speed == null ? "—" : Math.round(speed)}</td>
-                <td>${h.uptime == null ? "—" : (+h.uptime).toFixed(1) + "%"}</td>
-                <td>${down ? '<span class="pill off">сбоит</span>' : ""}${h.tools ? "" : ' <span class="pill" title="не поддерживает tools">без tools</span>'}</td>
-                ${
-                  manual
-                    ? `<td style="white-space:nowrap">${
-                        picked
-                          ? `<button class="ghost mv" data-up="${esc(h.tag)}" title="выше">↑</button><button class="ghost mv" data-down="${esc(h.tag)}" title="ниже">↓</button>`
-                          : ""
-                      }</td>`
-                    : ""
-                }
-              </tr>`;
-            })
-            .join("")}
-          </tbody></table></div>
-          <label class="row" style="gap:6px;align-items:center">
-            <input type="checkbox" id="r-price" ${st.setPrice && first ? "checked" : ""} ${first ? "" : "disabled"} />
-            цены в таблице = цены ${first ? `<b>${esc(first.provider)}</b> (${price(first.price_in)} / ${price(first.price_out)})` : "первого хоста"}
-          </label>
-          <div class="note-hint">Списывается всегда по факту: OpenRouter в каждом ответе говорит, сколько он стоил у того
-            хоста, что ответил, — это и снимается с ключа. Цены из таблицы нужны только если OpenRouter стоимость не прислал,
-            и для обзора. Если выбранные хосты недоступны или пропали — запрос уходит туда, куда выбрал бы сам OpenRouter.
-            Зелёная полоса — хост, куда запрос пойдёт первым. «Без tools» — хост не умеет вызывать инструменты, агенту
-            такой не подходит.</div>
-          <div class="row"><button class="act" id="r-save">Сохранить</button></div>`;
+          <div class="d-sec">
+            <h3>Хосты — ${hosts.length}</h3>
+            ${hosts.length ? `<div class="table-wrap"><table class="hosts"><thead><tr>
+              ${manual ? "<th></th>" : ""}<th>Хост</th><th>Вход</th><th>Кеш</th><th>Выход</th><th>Контекст</th><th>Ток/с</th><th>Аптайм</th><th></th>${manual ? "<th></th>" : ""}
+            </tr></thead><tbody>${hosts
+              .map((h) => {
+                const picked = st.picked.includes(h.tag);
+                const speed = tps(h.throughput);
+                const down = h.status != null && h.status < 0;
+                return `<tr class="${manual && picked ? "picked" : ""} ${first && first.tag === h.tag ? "first" : ""}">
+                  ${manual ? `<td><input type="checkbox" data-pick="${esc(h.tag)}" ${picked ? "checked" : ""} /></td>` : ""}
+                  <td><div class="row" style="gap:6px"><b style="font-weight:600">${esc(h.provider)}</b>${h.discount ? `<span class="badge green">−${Math.round(h.discount * 100)}%</span>` : ""}</div><div class="mono faint" style="font-size:11px">${esc(h.tag)}</div></td>
+                  <td>${price(h.price_in)}</td><td>${price(h.price_cached)}</td><td>${price(h.price_out)}</td>
+                  <td>${h.context ? Math.round(h.context / 1000) + "k" : "—"}</td>
+                  <td>${speed == null ? '<span class="faint">—</span>' : Math.round(speed)}</td>
+                  <td>${h.uptime == null ? '<span class="faint">—</span>' : `<span style="color:${h.uptime > 98 ? "var(--ok)" : h.uptime > 93 ? "var(--warn)" : "var(--bad)"}">${(+h.uptime).toFixed(1)}%</span>`}</td>
+                  <td><div class="row" style="gap:5px">${down ? '<span class="badge red">сбоит</span>' : ""}${h.tools ? "" : '<span class="badge amber" title="агенту не подходит">без tools</span>'}</div></td>
+                  ${manual ? `<td>${picked ? `<div class="row" style="gap:4px"><button class="btn icon sm ghost" data-up="${esc(h.tag)}">${icon("up", 15)}</button><button class="btn icon sm ghost" data-down="${esc(h.tag)}">${icon("down", 15)}</button></div>` : ""}</td>` : ""}
+                </tr>`;
+              })
+              .join("")}</tbody></table></div>` : '<div class="empty">OpenRouter не вернул ни одного хоста для этой модели.</div>'}
+            <p class="hint">Зелёная полоса — хост, куда запрос пойдёт первым. «Без tools» — хост не вызывает инструменты, агенту не подходит.</p>
+          </div>
+          <div class="d-sec">
+            <h3>Цены в таблице</h3>
+            <label class="switch-row"><button class="switch ${st.setPrice && first ? "on" : ""}" id="r-price" type="button" ${first ? "" : "disabled"}></button>
+              ${first ? `Взять цены <b style="color:var(--text)">${esc(first.provider)}</b> — ${price(first.price_in)} / ${price(first.price_out)} (сейчас ${price(m.price_in)} / ${price(m.price_out)})` : "Выберите режим, чтобы подставить цены первого хоста"}</label>
+          </div>`);
+        drawerFoot(`<button class="btn" id="r-cancel">Отмена</button><button class="btn primary" id="r-save">Сохранить</button>`);
 
-        const body = $("sheet-body");
-        body.querySelectorAll("[data-mode]").forEach((b) =>
-          b.addEventListener("click", () => {
-            st.mode = b.dataset.mode;
-            if (st.mode === "manual" && !st.picked.length) {
-              st.picked = orderedHosts({ ...st, mode: "price" })
-                .filter((h) => h.status == null || h.status >= 0)
-                .slice(0, 3)
-                .map((h) => h.tag);
-            }
-            paintRouting(st);
-          }),
-        );
-        body.querySelectorAll("[data-pick]").forEach((box) =>
-          box.addEventListener("change", () => {
+        $("r-modes").onclick = (e) => {
+          const b = e.target.closest("[data-mode]");
+          if (!b) return;
+          st.mode = b.dataset.mode;
+          if (st.mode === "manual" && !st.picked.length) {
+            st.picked = orderedHosts({ ...st, mode: "price" })
+              .filter((h) => h.status == null || h.status >= 0)
+              .slice(0, 3)
+              .map((h) => h.tag);
+          }
+          paintRouting(st);
+        };
+        document.querySelectorAll("[data-pick]").forEach((box) => {
+          box.onchange = () => {
             const tag = box.dataset.pick;
             st.picked = box.checked ? [...st.picked, tag] : st.picked.filter((t) => t !== tag);
             paintRouting(st);
-          }),
-        );
+          };
+        });
         const move = (tag, by) => {
           const i = st.picked.indexOf(tag);
           const j = i + by;
@@ -1104,283 +1373,419 @@
           [st.picked[i], st.picked[j]] = [st.picked[j], st.picked[i]];
           paintRouting(st);
         };
-        body.querySelectorAll("[data-up]").forEach((b) => b.addEventListener("click", () => move(b.dataset.up, -1)));
-        body.querySelectorAll("[data-down]").forEach((b) => b.addEventListener("click", () => move(b.dataset.down, 1)));
-        $("r-price")?.addEventListener("change", (e) => (st.setPrice = e.target.checked));
-
-        $("r-save").addEventListener("click", async () => {
+        document.querySelectorAll("[data-up]").forEach((b) => (b.onclick = () => move(b.dataset.up, -1)));
+        document.querySelectorAll("[data-down]").forEach((b) => (b.onclick = () => move(b.dataset.down, 1)));
+        $("r-price").onclick = () => {
+          st.setPrice = !st.setPrice;
+          $("r-price").classList.toggle("on", st.setPrice);
+        };
+        $("r-cancel").onclick = closeDrawer;
+        $("r-save").onclick = () => {
           if (manual && !st.picked.length) return toast("Отметьте хотя бы один хост", true);
-          const routing = manual
-            ? { sort: "", order: st.picked, only: false }
-            : { sort: st.mode, order: [], only: false };
+          const routing = manual ? { sort: "", order: st.picked, only: false } : { sort: st.mode, order: [], only: false };
           const row = { ...st.model, routing };
-          if (first && $("r-price")?.checked) {
+          if (first && st.setPrice) {
             if (first.price_in != null) row.price_in = first.price_in;
             if (first.price_out != null) row.price_out = first.price_out;
             row.price_cached = first.price_cached ?? null;
           }
-          try {
-            await call("/admin/models", { method: "POST", body: JSON.stringify(row) });
-            toast("Сохранено");
-            closeSheet();
-            drawModels();
-          } catch (error) {
-            toast(error.message, true);
-          }
+          act($("r-save"), () => call("/admin/models", { method: "POST", body: JSON.stringify(row) })).then((r) => {
+            if (r === undefined) return;
+            toast("Хосты сохранены");
+            closeDrawer();
+            if (current === "models") go("models");
+          });
+        };
+      }
+
+      // ============================================================ tiers
+      let creditUsd = 0;
+
+      async function renderTiers(page) {
+        setHead(page, `<button class="btn primary" id="t-new">${icon("plus")}Добавить тариф</button>`);
+        $("t-new").onclick = () => tierForm();
+        const [tiers, o] = await Promise.all([call("/admin/tiers"), call("/admin/overview")]);
+        creditUsd = o.credit_usd;
+        const names = Object.keys(tiers).sort();
+        view(`
+          <div class="callout" style="margin-bottom:16px">${icon("info", 18)}<div>Кредит — это себестоимость: <b>$${o.credit_usd}</b> за кредит.
+            Лимиты окон возвращаются каждые 5 часов и каждую неделю; докупленные кредиты лежат в кошельке лицензии и тратятся после тарифных.</div></div>
+          ${names.length ? `<div class="kpis stagger">${names
+            .map((n) => {
+              const t = tiers[n];
+              return `<div class="card kpi">
+                <div class="row" style="justify-content:space-between"><span class="badge violet">${esc(n)}</span>
+                  <span class="row" style="gap:2px"><button class="btn icon sm ghost" data-t-edit="${esc(n)}">${icon("edit")}</button>
+                  <button class="btn icon sm ghost danger" data-t-del="${esc(n)}">${icon("trash")}</button></span></div>
+                <div class="k-val">${fmt(t.credits_5h)}<small> / 5 ч</small></div>
+                <div class="k-sub">≈ ${usd(t.credits_5h * o.credit_usd)} за окно</div>
+                <div class="k-val" style="font-size:19px;margin-top:6px">${fmt(t.credits_week)}<small> / неделя</small></div>
+                <div class="k-sub">≈ ${usd(t.credits_week * o.credit_usd)} в неделю · до ${t.max_peers} устройств</div>
+              </div>`;
+            })
+            .join("")}</div>` : `<div class="empty">${icon("tiers", 30)}<div>Тарифов нет</div></div>`}`);
+        document.querySelectorAll("[data-t-edit]").forEach((b) => (b.onclick = () => tierForm(b.dataset.tEdit, tiers[b.dataset.tEdit])));
+        document.querySelectorAll("[data-t-del]").forEach((b) => {
+          b.onclick = async () => {
+            const n = b.dataset.tDel;
+            if (!(await confirmBox({ title: `Удалить тариф «${n}»?`, text: "Лицензии этого тарифа получат лимиты по умолчанию." }))) return;
+            act(b, () => call(`/admin/tiers/${encodeURIComponent(n)}`, { method: "DELETE" }), "Тариф удалён").then(() => go("tiers"));
+          };
         });
       }
 
+      function tierForm(name, t) {
+        const edit = !!name;
+        t = t || { credits_5h: "", credits_week: "", max_peers: 2 };
+        openDrawer({ title: edit ? `Тариф «${name}»` : "Новый тариф", sub: "Лимиты в кредитах" });
+        drawerBody(`<div class="d-sec"><div class="form-grid">
+            <label class="field full"><span>Название</span><input id="f-tn" value="${esc(name || "")}" placeholder="business" ${edit ? "disabled" : ""} /></label>
+            <label class="field"><span>Кредитов за 5 часов</span><input id="f-t5" value="${t.credits_5h}" inputmode="decimal" /><small id="f-t5s"></small></label>
+            <label class="field"><span>Кредитов за неделю</span><input id="f-tw" value="${t.credits_week}" inputmode="decimal" /><small id="f-tws"></small></label>
+            <label class="field"><span>Устройств</span><input id="f-tp" value="${t.max_peers}" inputmode="numeric" /></label>
+          </div></div>`);
+        const hint = () => {
+          $("f-t5s").textContent = "≈ " + usd(num($("f-t5").value) * creditUsd) + " себестоимости";
+          $("f-tws").textContent = "≈ " + usd(num($("f-tw").value) * creditUsd) + " себестоимости";
+        };
+        ["f-t5", "f-tw"].forEach((id) => ($(id).oninput = hint));
+        hint();
+        drawerFoot(`<button class="btn" id="f-cancel">Отмена</button><button class="btn primary" id="f-save">Сохранить</button>`);
+        $("f-cancel").onclick = closeDrawer;
+        $("f-save").onclick = () =>
+          act($("f-save"), () =>
+            call("/admin/tiers", {
+              method: "POST",
+              body: JSON.stringify({ name: $("f-tn").value.trim(), credits_5h: num($("f-t5").value), credits_week: num($("f-tw").value), max_peers: num($("f-tp").value) || 2 }),
+            }),
+          ).then((r) => {
+            if (r === undefined) return;
+            toast("Тариф сохранён");
+            closeDrawer();
+            go("tiers");
+          });
+      }
+
+      // ============================================================ licences
+      let licenseRows = [];
+      let licFilter = { q: "", state: "all" };
+
+      async function renderLicenses(page) {
+        setHead(page, `<button class="btn primary" id="l-new">${icon("plus")}Выдать лицензию</button>`);
+        $("l-new").onclick = () => licenseForm();
+        licenseRows = await call("/admin/licenses");
+        view(`
+          <div class="toolbar">
+            <div class="seg" id="l-state">${[["all", "Все"], ["active", "Активные"], ["expired", "Истекли"], ["revoked", "Отозваны"]]
+              .map(([k, t]) => `<button data-st="${k}" class="${licFilter.state === k ? "on" : ""}">${t}</button>`)
+              .join("")}</div>
+            <div class="search">${icon("search")}<input id="l-q" placeholder="Поиск по ключу, тарифу, кому выдан" value="${esc(licFilter.q)}" /></div>
+          </div>
+          <div class="list" id="l-list"></div>`);
+        $("l-state").onclick = (e) => {
+          const b = e.target.closest("[data-st]");
+          if (!b) return;
+          licFilter.state = b.dataset.st;
+          document.querySelectorAll("#l-state button").forEach((x) => x.classList.toggle("on", x === b));
+          drawLicenseList();
+        };
+        $("l-q").oninput = (e) => {
+          licFilter.q = e.target.value;
+          drawLicenseList();
+        };
+        drawLicenseList();
+      }
+
+      function licState(r) {
+        if (r.revoked) return "revoked";
+        if (r.expires_at && r.expires_at * 1000 < Date.now()) return "expired";
+        return "active";
+      }
+
+      function drawLicenseList() {
+        const q = licFilter.q.trim().toLowerCase();
+        const rows = licenseRows.filter(
+          (r) =>
+            (licFilter.state === "all" || licState(r) === licFilter.state) &&
+            (!q || [r.license_id, r.tier, r.note].some((f) => String(f || "").toLowerCase().includes(q))),
+        );
+        const box = $("l-list");
+        if (!rows.length) {
+          box.innerHTML = `<div class="empty">${icon("licenses", 30)}<div>${licenseRows.length ? "Ничего не найдено" : "Пока ни одной лицензии"}</div></div>`;
+          return;
+        }
+        box.innerHTML = rows
+          .map((r, i) => {
+            const s = licState(r);
+            const days = r.expires_at ? Math.ceil((r.expires_at * 1000 - Date.now()) / 86400000) : null;
+            const status =
+              s === "revoked"
+                ? '<span class="badge red"><span class="dot"></span>отозвана</span>'
+                : s === "expired"
+                  ? '<span class="badge amber"><span class="dot"></span>истекла</span>'
+                  : '<span class="badge green"><span class="dot"></span>активна</span>';
+            return `<div class="card item clickable" data-open="${esc(r.license_id)}" style="--i:${Math.min(i, 12)};animation:rise .4s var(--ease) both;animation-delay:${Math.min(i, 12) * 35}ms">
+              <div class="row" style="gap:14px;min-width:0">
+                <div class="avatar" style="background:linear-gradient(135deg,#43306f,#2c2440)">${icon("key", 18)}</div>
+                <div style="min-width:0">
+                  <div class="i-title"><b class="mono ell" style="font-size:13.5px">${esc(r.license_id)}</b><span class="badge violet">${esc(r.tier)}</span>${status}</div>
+                  <div class="i-sub"><span>${r.note ? esc(r.note) : '<span class="faint">без пометки</span>'}</span><span class="sep">·</span>
+                    <span>${r.expires_at ? (s === "active" ? `ещё ${days} дн. · до ${dt(r.expires_at)}` : `до ${dt(r.expires_at)}`) : "без срока"}</span><span class="sep">·</span><span>${r.max_peers} устр.</span></div>
+                </div>
+              </div>
+              <div class="i-right faint">${icon("chev", 18)}</div>
+            </div>`;
+          })
+          .join("");
+        box.querySelectorAll("[data-open]").forEach((c) => (c.onclick = () => openLicense(c.dataset.open)));
+      }
+
+      function licenseForm() {
+        openDrawer({ title: "Новая лицензия", sub: "Ключ покажется один раз — сразу отдайте его клиенту" });
+        drawerBody(`<div class="d-sec"><div class="form-grid">
+            <label class="field full"><span>ID лицензии</span><input id="f-lid" placeholder="VD-PRO-0001" /><small>Пусто — сгенерируется</small></label>
+            <label class="field"><span>Тариф</span><input id="f-ltier" value="business" /></label>
+            <label class="field"><span>Дней</span><input id="f-ldays" inputmode="numeric" placeholder="30" /><small>0 — без срока</small></label>
+            <label class="field"><span>Устройств</span><input id="f-lpeers" inputmode="numeric" placeholder="из тарифа" /><small>0 — из тарифа</small></label>
+            <label class="field"><span>Кому</span><input id="f-lnote" placeholder="Имя, контакт" /></label>
+          </div></div><div id="f-lout"></div>`);
+        drawerFoot(`<button class="btn" id="f-cancel">Закрыть</button><button class="btn primary" id="f-save">${icon("key")}Выдать</button>`);
+        $("f-cancel").onclick = closeDrawer;
+        $("f-save").onclick = () =>
+          act($("f-save"), () =>
+            call("/admin/licenses", {
+              method: "POST",
+              body: JSON.stringify({
+                license_id: $("f-lid").value.trim(),
+                tier: $("f-ltier").value.trim(),
+                days: num($("f-ldays").value),
+                max_peers: num($("f-lpeers").value),
+                note: $("f-lnote").value.trim(),
+              }),
+            }),
+          ).then((r) => {
+            if (!r) return;
+            $("f-lout").innerHTML = secretBox(r.license, "Отдайте это оператору — второй раз ключ не покажется");
+            bindCopy(r.license);
+            $("f-save").disabled = true;
+            if (current === "licenses") call("/admin/licenses").then((rows) => ((licenseRows = rows), drawLicenseList()));
+          });
+      }
+
+      function secretBox(text, title) {
+        return `<div class="secret" style="animation:rise .35s var(--ease) both"><div class="callout warn" style="padding:10px 12px">${icon("info", 16)}<div>${esc(title)}</div></div>
+          <code>${esc(text)}</code><div><button class="btn sm" id="copy-secret">${icon("copy")}Скопировать</button></div></div>`;
+      }
+      function bindCopy(text) {
+        $("copy-secret").onclick = () => navigator.clipboard.writeText(text).then(() => toast("Скопировано в буфер"));
+      }
+
       async function openLicense(id) {
-        $("sheet-id").textContent = id;
-        $("sheet-body").innerHTML = '<div class="muted">Загружаю…</div>';
-        $("sheet-back").classList.add("on");
+        openDrawer({ title: id, sub: "Лицензия" });
         try {
           await paintLicense(id);
         } catch (error) {
-          $("sheet-body").innerHTML = `<div class="muted">${esc(error.message)}</div>`;
+          drawerBody(`<div class="empty">${icon("info", 30)}<div>${esc(error.message)}</div></div>`);
         }
+      }
+
+      function gauge(label, left, cap, cls, sub) {
+        const pct = cap > 0 ? Math.max(0, Math.min(100, (left / cap) * 100)) : 0;
+        return `<div class="gauge ${cls || ""}"><div class="g-l">${label}</div>
+          <div class="g-v">${fmt(Math.round(left))}${cap > 0 ? ` <small>из ${fmt(Math.round(cap))}</small>` : ""}</div>
+          ${cls === "wallet" ? "" : `<div class="meter ${pct < 15 ? "bad" : pct < 40 ? "warn" : "ok"}"><i style="width:${pct}%"></i></div>`}
+          <div class="g-s">${sub}</div></div>`;
+      }
+
+      function chart(daily, days = 30) {
+        if (!daily.length) return '<div class="dim">Расхода за период не было</div>';
+        const w = 640, h = 130, pad = 2;
+        // One slot per day of the window: days without spend stay empty
+        // rather than one busy day stretching across the whole chart.
+        const today = Math.floor(Date.now() / 86400000) * 86400;
+        const byDay = new Map(daily.map((d) => [Math.floor(d.day / 86400) * 86400, d]));
+        const slots = Array.from({ length: days }, (_, i) => {
+          const day = today - (days - 1 - i) * 86400;
+          return byDay.get(day) || { day, credits: 0, calls: 0 };
+        });
+        const max = Math.max(...slots.map((d) => d.credits), 1);
+        const bw = (w - pad * 2) / slots.length;
+        const bars = slots
+          .map((d, i) => {
+            if (!d.credits) return `<rect x="${pad + i * bw + 1.5}" y="${h - 2}" width="${Math.max(1, bw - 3)}" height="2" rx="1" fill="rgb(255 255 255 / .08)"><title>${dt(d.day)}: без расхода</title></rect>`;
+            const bh = Math.max(3, (d.credits / max) * (h - 16));
+            return `<rect x="${pad + i * bw + 1.5}" y="${h - bh}" width="${Math.max(1, bw - 3)}" height="${bh}" rx="3" fill="url(#g)">
+              <title>${dt(d.day)}: ${Math.round(d.credits)} кред. · ${d.calls} запр.</title></rect>`;
+          })
+          .join("");
+        return `<svg class="chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#ff6fb5"/><stop offset="1" stop-color="#a979ff"/></linearGradient></defs>${bars}</svg>`;
       }
 
       async function paintLicense(id) {
         const d = await call(`/admin/licenses/${encodeURIComponent(id)}/detail`);
         const row = d.license || {};
-        const money = (c) => "$" + (c * (d.credit_usd || 0)).toFixed(2);
-        const totalSpent = (d.daily || []).reduce((s, x) => s + x.credits, 0);
-        const totalCalls = (d.daily || []).reduce((s, x) => s + x.calls, 0);
-        const resetTxt = d.allowance.reset_at ? dtime(d.allowance.reset_at) : "—";
-
-        $("sheet-body").innerHTML = `
-          <div class="row" style="gap:8px">
-            <span class="tag tier">${esc(row.tier || "")}</span>
-            <span class="tag">${row.expires_at ? "до " + dt(row.expires_at) : "без срока"}</span>
-            ${row.revoked ? '<span class="pill off">отозвана</span>' : '<span class="pill on">активна</span>'}
-            ${row.note ? `<span class="tag">${esc(row.note)}</span>` : ""}
+        const money = (c) => usd(c * (d.credit_usd || 0));
+        const spent = (d.daily || []).reduce((s, x) => s + x.credits, 0);
+        const calls = (d.daily || []).reduce((s, x) => s + x.calls, 0);
+        const s = licState(row);
+        $("d-sub").textContent = `${row.tier || ""} · ${row.expires_at ? "до " + dt(row.expires_at) : "без срока"}${row.note ? " · " + row.note : ""}`;
+        drawerBody(`
+          <div class="row" style="gap:8px;flex-wrap:wrap">
+            <span class="badge violet">${esc(row.tier || "")}</span>
+            ${s === "revoked" ? '<span class="badge red"><span class="dot"></span>отозвана</span>' : s === "expired" ? '<span class="badge amber"><span class="dot"></span>истекла</span>' : '<span class="badge green"><span class="dot"></span>активна</span>'}
+            <span class="badge">${row.expires_at ? "до " + dt(row.expires_at) : "без срока"}</span>
           </div>
-
-          <div>
-            <p class="subhead">Кредиты</p>
+          <div class="d-sec">
+            <h3>Кредиты</h3>
             <div class="gauges">
-              ${gauge("за 5 часов", d.allowance.left_5h, d.tier.credits_5h, "", "обновляется каждые 5 ч")}
-              ${gauge("за неделю", d.allowance.left_week, d.tier.credits_week, "", "обновляется раз в неделю")}
-              ${gauge("кошелёк", d.allowance.wallet, 0, "wallet", "докупленные — навсегда, тратятся после тарифных")}
+              ${gauge("За 5 часов", d.allowance.left_5h, d.tier.credits_5h, "", "окно обновляется каждые 5 ч")}
+              ${gauge("За неделю", d.allowance.left_week, d.tier.credits_week, "", "окно обновляется раз в неделю")}
+              ${gauge("Кошелёк", d.allowance.wallet, 0, "wallet", "докупленные, не сгорают")}
             </div>
-            <p class="note-hint" style="margin-top:10px">
-              Тарифные кредиты возвращаются в начале каждого окна (следующее — ${resetTxt}).
-              «Кошелёк» — то, что докуплено сверх тарифа: не сгорает и тратится, только когда
-              тарифные кончились. Кнопка ниже кладёт кредиты именно в кошелёк.
-            </p>
-            <div class="row" style="margin-top:10px">
-              <input id="d-credits" placeholder="кредитов в кошелёк (минус — списать)" inputmode="numeric" style="max-width:280px" />
-              <button class="act" id="d-add-credits">Добавить в кошелёк</button>
+            <p class="hint">${d.allowance.reset_at ? `Исчерпанное окно откроется ${dtime(d.allowance.reset_at)}.` : "Окна не исчерпаны."} Кошелёк тратится, только когда тарифные закончились.</p>
+            <div class="row"><input id="d-credits" placeholder="Кредитов в кошелёк (минус — списать)" inputmode="numeric" style="max-width:300px" />
+              <button class="btn" id="d-add-credits">${icon("plus")}В кошелёк</button></div>
+          </div>
+          <div class="d-sec">
+            <h3>Расход по дням · ${d.days} дн.</h3>
+            <div class="card card-pad" style="background:rgb(0 0 0 / .25)">${chart(d.daily || [], d.days || 30)}</div>
+            <div class="gauges">
+              <div class="gauge"><div class="g-l">Кредитов</div><div class="g-v">${fmt(Math.round(spent))}</div></div>
+              <div class="gauge"><div class="g-l">Себестоимость</div><div class="g-v">${money(spent)}</div></div>
+              <div class="gauge"><div class="g-l">Запросов</div><div class="g-v">${fmt(calls)}</div></div>
             </div>
           </div>
-
-          <div>
-            <p class="subhead">Расход по дням (за ${d.days} дн.)</p>
-            ${chart(d.daily || [])}
-            <div class="stat-row" style="margin-top:12px">
-              <div class="stat"><b>${Math.round(totalSpent)}</b><span>кредитов потрачено</span></div>
-              <div class="stat"><b>${money(totalSpent)}</b><span>в деньгах</span></div>
-              <div class="stat"><b>${totalCalls}</b><span>запросов</span></div>
-            </div>
+          <div class="d-sec">
+            <h3>Устройства · ${(d.devices || []).length} из ${row.max_peers}</h3>
+            <div class="row"><input id="d-peers" value="${row.max_peers}" inputmode="numeric" style="width:90px" /><button class="btn" id="d-save-peers">Изменить лимит мест</button></div>
+            <div class="devices">${(d.devices || []).length
+              ? d.devices
+                  .map((dev) => `<div class="device"><div style="min-width:0"><span class="mono ell" style="display:block">${esc(dev.device_id)}</span>
+                    <small>впервые ${dtime(dev.first_seen)} · последний раз ${dtime(dev.last_seen)}</small></div>
+                    <button class="btn sm danger" data-free="${esc(dev.device_id)}">Отвязать</button></div>`)
+                  .join("")
+              : '<div class="dim">Ни одного устройства ещё не заходило</div>'}</div>
           </div>
+          <div class="d-sec">
+            <h3>Ключ</h3>
+            <p class="hint">Сам ключ показывается один раз и не хранится. Потерял — перевыпусти: вернётся ровно тот же ключ.</p>
+            <div><button class="btn" id="d-reissue">${icon("key")}Показать / перевыпустить</button></div>
+            <div id="d-key-out"></div>
+          </div>`);
+        drawerFoot(`<button class="btn" id="d-mailbox">Очистить обмен</button><span style="flex:1"></span>
+          <button class="btn ${row.revoked ? "primary" : "danger"}" id="d-revoke">${row.revoked ? "Вернуть ключ" : "Отозвать ключ"}</button>`);
 
-          <div>
-            <p class="subhead">Устройства — ${(d.devices || []).length} из ${row.max_peers}</p>
-            <div class="row" style="margin-bottom:8px">
-              <input id="d-peers" value="${row.max_peers}" inputmode="numeric" style="width:80px" />
-              <button class="ghost" id="d-save-peers">изменить лимит мест</button>
-            </div>
-            <div id="d-devices">${
-              (d.devices || []).length
-                ? (d.devices || [])
-                    .map(
-                      (dev) => `<div class="devrow">
-                        <div class="dinfo">
-                          <code>${esc(dev.device_id)}</code>
-                          <small>заходило ${dtime(dev.first_seen)} · последний раз ${dtime(dev.last_seen)}</small>
-                        </div>
-                        <button class="ghost danger" data-free="${esc(dev.device_id)}">отвязать</button>
-                      </div>`,
-                    )
-                    .join("")
-                : '<div class="muted">Ни одного устройства ещё не заходило</div>'
-            }</div>
-          </div>
-
-          <div>
-            <p class="subhead">Ключ</p>
-            <p class="note-hint">Сам ключ показывается клиенту один раз при выдаче и не хранится.
-              Если оператор его потерял — перевыпусти: вернётся ровно тот же ключ, лицензия не меняется.</p>
-            <div class="row" style="margin-top:8px">
-              <button class="ghost" id="d-reissue">показать / перевыпустить ключ</button>
-            </div>
-            <div id="d-key-out" style="margin-top:10px"></div>
-          </div>
-
-          <div class="row" style="gap:8px;justify-content:space-between;border-top:1px solid var(--line);padding-top:14px">
-            <button class="ghost" id="d-mailbox">очистить обмен</button>
-            <button class="ghost ${row.revoked ? "" : "danger"}" id="d-revoke">${row.revoked ? "вернуть ключ" : "отозвать ключ"}</button>
-          </div>`;
-
-        $("d-reissue").addEventListener("click", async () => {
-          try {
-            const out = await call(`/admin/licenses/${encodeURIComponent(id)}/reissue`, { method: "POST" });
-            $("d-key-out").innerHTML = `<div class="gauge" style="gap:10px">
-              <div class="glabel" style="text-transform:none;color:var(--accent)">Отдайте это клиенту — попросите сохранить, повторно он не показывается:</div>
-              <code style="display:block;white-space:pre-wrap">${esc(out.license)}</code>
-              <div class="row"><button class="ghost" id="d-key-copy">скопировать</button></div>
-            </div>`;
-            $("d-key-copy").addEventListener("click", () => {
-              navigator.clipboard.writeText(out.license).then(() => toast("В буфере"));
-            });
-          } catch (error) {
-            toast(error.message, true);
-          }
-        });
-
-        $("d-add-credits").addEventListener("click", async () => {
+        $("d-reissue").onclick = () =>
+          act($("d-reissue"), () => call(`/admin/licenses/${encodeURIComponent(id)}/reissue`, { method: "POST" })).then((out) => {
+            if (!out) return;
+            $("d-key-out").innerHTML = secretBox(out.license, "Отдайте клиенту и попросите сохранить");
+            bindCopy(out.license);
+          });
+        $("d-add-credits").onclick = () => {
           const typed = $("d-credits").value.trim();
-          if (typed === "") return;
-          try {
-            const out = await call(`/admin/licenses/${encodeURIComponent(id)}/credits`, {
-              method: "POST",
-              body: JSON.stringify({ credits: num(typed) }),
-            });
+          if (!typed) return $("d-credits").focus();
+          act($("d-add-credits"), () =>
+            call(`/admin/licenses/${encodeURIComponent(id)}/credits`, { method: "POST", body: JSON.stringify({ credits: num(typed) }) }),
+          ).then((out) => {
+            if (!out) return;
             toast(`Кошелёк: ${Math.round(out.credits_left)} кред.`);
             paintLicense(id);
-          } catch (error) {
-            toast(error.message, true);
-          }
-        });
-
-        $("d-save-peers").addEventListener("click", async () => {
-          try {
-            await call(`/admin/licenses/${encodeURIComponent(id)}/peers`, {
-              method: "POST",
-              body: JSON.stringify({ max_peers: num($("d-peers").value) }),
-            });
-            toast("Сохранено");
-            await drawLicenses();
+          });
+        };
+        $("d-save-peers").onclick = () =>
+          act($("d-save-peers"), () =>
+            call(`/admin/licenses/${encodeURIComponent(id)}/peers`, { method: "POST", body: JSON.stringify({ max_peers: num($("d-peers").value) }) }),
+          ).then((r) => {
+            if (r === undefined) return;
+            toast("Лимит мест сохранён");
             paintLicense(id);
-          } catch (error) {
-            toast(error.message, true);
-          }
+          });
+        document.querySelectorAll("[data-free]").forEach((b) => {
+          b.onclick = async () => {
+            if (!(await confirmBox({ title: "Отвязать устройство?", text: "Место освободится; устройство сможет зайти снова, если есть свободные места.", ok: "Отвязать" }))) return;
+            act(b, () => call(`/admin/licenses/${encodeURIComponent(id)}/devices/${encodeURIComponent(b.dataset.free)}`, { method: "DELETE" }), "Устройство отвязано").then(() => paintLicense(id));
+          };
         });
-
-        $("sheet-body").querySelectorAll("[data-free]").forEach((btn) => {
-          btn.addEventListener("click", async () => {
-            try {
-              await call(
-                `/admin/licenses/${encodeURIComponent(id)}/devices/${encodeURIComponent(btn.dataset.free)}`,
-                { method: "DELETE" },
-              );
-              toast("Устройство отвязано — место освободилось");
-              paintLicense(id);
-            } catch (error) {
-              toast(error.message, true);
+        $("d-mailbox").onclick = async () => {
+          if (!(await confirmBox({ title: "Очистить обмен?", text: "Удалятся зашифрованные записи синхронизации этой лицензии на сервере. На устройствах данные останутся.", ok: "Очистить" }))) return;
+          act($("d-mailbox"), () => call(`/admin/licenses/${encodeURIComponent(id)}/mailbox`, { method: "DELETE" })).then((out) => out && toast(`Очищено записей: ${out.cleared}`));
+        };
+        $("d-revoke").onclick = async () => {
+          if (!row.revoked && !(await confirmBox({ title: "Отозвать ключ?", text: "Клиент сразу потеряет доступ к облаку. Вернуть можно в любой момент.", ok: "Отозвать" }))) return;
+          act($("d-revoke"), () =>
+            call(row.revoked ? "/admin/unrevoke" : "/admin/revoke", { method: "POST", body: JSON.stringify({ license_id: id, reason: "admin" }) }),
+          ).then(async (r) => {
+            if (r === undefined) return;
+            toast(row.revoked ? "Ключ возвращён" : "Ключ отозван");
+            if (current === "licenses") {
+              licenseRows = await call("/admin/licenses");
+              drawLicenseList();
             }
-          });
-        });
-
-        $("d-mailbox").addEventListener("click", async () => {
-          try {
-            const out = await call(`/admin/licenses/${encodeURIComponent(id)}/mailbox`, { method: "DELETE" });
-            toast(`Очищено записей: ${out.cleared}`);
-          } catch (error) {
-            toast(error.message, true);
-          }
-        });
-
-        $("d-revoke").addEventListener("click", async () => {
-          const path = row.revoked ? "/admin/unrevoke" : "/admin/revoke";
-          try {
-            await call(path, { method: "POST", body: JSON.stringify({ license_id: id, reason: "admin" }) });
-            await drawLicenses();
             paintLicense(id);
-          } catch (error) {
-            toast(error.message, true);
-          }
-        });
+          });
+        };
       }
 
-      $("l-add").addEventListener("click", async () => {
-        try {
-          const result = await call("/admin/licenses", {
-            method: "POST",
-            body: JSON.stringify({
-              license_id: $("l-id").value.trim(),
-              tier: $("l-tier").value.trim(),
-              days: num($("l-days").value),
-              max_peers: num($("l-peers").value),
-              note: $("l-note").value.trim(),
-            }),
-          });
-          // Shown once: the gateway does not keep the licence, only the fact
-          // that it was issued.
-          $("l-out").innerHTML = `<div class="card" style="background:#0c0e13">
-            <div class="muted">Отдайте это оператору — второй раз оно не покажется:</div>
-            <div style="margin-top:6px"><code>${esc(result.license)}</code></div>
-            <div class="row" style="margin-top:8px"><button class="ghost" id="l-copy">Скопировать</button></div>
-          </div>`;
-          $("l-copy").addEventListener("click", () => {
-            navigator.clipboard.writeText(result.license).then(() => toast("В буфере"));
-          });
-          drawLicenses();
-        } catch (error) {
-          toast(error.message, true);
-        }
-      });
+      // ============================================================ stats
+      let statHours = 24;
 
-      // ------------------------------------------------------------ stats
-      async function drawStats() {
-        const data = await call(`/admin/stats?hours=${$("s-hours").value}`);
-        const money = (credits) => "$" + (credits * data.credit_usd).toFixed(2);
-        $("stats-out").innerHTML = `
-          <div class="row" style="gap:20px;margin-bottom:12px">
-            <div><div class="muted">попаданий кеша</div><strong>${(data.cache_share * 100).toFixed(1)}%</strong></div>
-            <div><div class="muted">окно</div><strong>${data.hours} ч</strong></div>
+      async function renderStats(page) {
+        setHead(page, `<div class="seg" id="s-seg">${[[24, "Сутки"], [168, "Неделя"], [720, "Месяц"]]
+          .map(([h, t]) => `<button data-h="${h}" class="${statHours === h ? "on" : ""}">${t}</button>`)
+          .join("")}</div>`);
+        $("s-seg").onclick = (e) => {
+          const b = e.target.closest("[data-h]");
+          if (!b) return;
+          statHours = Number(b.dataset.h);
+          go("stats");
+        };
+        const data = await call(`/admin/stats?hours=${statHours}`);
+        const money = (c) => usd(c * data.credit_usd, 2);
+        const total = data.by_license.reduce((a, r) => a + r.credits, 0);
+        const calls = data.by_license.reduce((a, r) => a + r.calls, 0);
+        const byL = [...data.by_license].sort((a, b) => b.credits - a.credits);
+        const byM = [...data.by_model].sort((a, b) => b.credits - a.credits);
+        const maxL = Math.max(1, ...byL.map((r) => r.credits));
+        const maxM = Math.max(1, ...byM.map((r) => r.credits));
+        const kpi = (ic, label, val, sub) => `<div class="card kpi"><div class="k-label">${icon(ic, 15)}${label}</div><div class="k-val">${val}</div><div class="k-sub">${sub}</div></div>`;
+        view(`
+          <div class="kpis stagger">
+            ${kpi("coin", "Себестоимость", money(total), fmt(total) + " кредитов")}
+            ${kpi("chat", "Запросов", fmt(calls), calls ? "≈ " + usd((total * data.credit_usd) / calls, 4) + " за запрос" : "—")}
+            ${kpi("users", "Лицензий с расходом", byL.length, "за выбранный период")}
+            ${kpi("activity", "Попадание в кеш", (data.cache_share * 100).toFixed(1) + "%", "входных токенов из кеша провайдера")}
           </div>
-          <table><thead><tr><th>лицензия</th><th>кредитов</th><th>себестоимость</th><th>запросов</th></tr></thead><tbody>
-            ${data.by_license
-              .map(
-                (row) => `<tr><td><code>${esc(row.license_id)}</code></td>
-                  <td>${row.credits.toFixed(1)}</td><td>${money(row.credits)}</td><td>${row.calls}</td></tr>`,
-              )
-              .join("") || '<tr><td colspan="4" class="muted">тихо</td></tr>'}
-          </tbody></table>
-          <table style="margin-top:16px"><thead><tr><th>модель</th><th>кредитов</th><th>себестоимость</th><th>кеш</th></tr></thead><tbody>
-            ${data.by_model
-              .map(
-                (row) => `<tr><td><code>${esc(row.model)}</code></td>
-                  <td>${row.credits.toFixed(1)}</td><td>${money(row.credits)}</td>
-                  <td>${(row.cache_share * 100).toFixed(1)}%</td></tr>`,
-              )
-              .join("") || '<tr><td colspan="4" class="muted">тихо</td></tr>'}
-          </tbody></table>`;
-      }
-      $("s-load").addEventListener("click", () => drawStats().catch((error) => toast(error.message, true)));
-
-      // ------------------------------------------------------------- load
-      async function load() {
-        if (!token) {
-          toast("Введите admin-токен и нажмите «Войти»", true);
-          $("token").focus();
-          return;
-        }
-        const tab = document.querySelector("nav button.on").dataset.tab;
-        try {
-          if (tab === "upstreams") await drawUpstreams();
-          if (tab === "models") await drawModels();
-          if (tab === "tiers") await drawTiers();
-          if (tab === "licenses") await drawLicenses();
-          if (tab === "stats") await drawStats();
-        } catch (error) {
-          toast(error.message, true);
-        }
+          <div class="two" style="margin-top:14px">
+            <div class="card card-pad"><div class="section-title" style="margin:0 0 14px">По лицензиям</div>
+              ${byL.length ? `<div class="bars stagger">${byL
+                .map((r) => `<div class="bar-row clickable" data-open-lic="${esc(r.license_id)}"><span class="b-name mono ell">${esc(r.license_id)}</span>
+                  <span class="b-val">${money(r.credits)} · ${fmt(r.calls)} запр.</span><div class="meter ok"><i style="width:${(r.credits / maxL) * 100}%"></i></div></div>`)
+                .join("")}</div>` : '<div class="dim">Тихо</div>'}</div>
+            <div class="card card-pad"><div class="section-title" style="margin:0 0 14px">По моделям</div>
+              ${byM.length ? `<div class="bars stagger">${byM
+                .map((r) => `<div class="bar-row"><span class="b-name mono ell">${esc(r.model)}</span>
+                  <span class="b-val">${money(r.credits)} · кеш ${(r.cache_share * 100).toFixed(0)}%</span><div class="meter"><i style="width:${(r.credits / maxM) * 100}%"></i></div></div>`)
+                .join("")}</div>` : '<div class="dim">Тихо</div>'}</div>
+          </div>`);
+        document.querySelectorAll("[data-open-lic]").forEach((el) => (el.onclick = () => openLicense(el.dataset.openLic)));
       }
 
-      load();
+      // ============================================================ boot
+      const RENDER = {
+        overview: renderOverview,
+        upstreams: renderUpstreams,
+        models: renderModels,
+        tiers: renderTiers,
+        licenses: renderLicenses,
+        stats: renderStats,
+      };
+
+      if (!token) showLogin();
+      else {
+        go(current);
+        refreshLive();
+      }
     </script>
   </body>
 </html>
