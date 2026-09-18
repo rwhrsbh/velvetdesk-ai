@@ -283,6 +283,9 @@ export interface SyncReport {
   conflicts: number;
   rejected: number;
   finished_at: string | null;
+  /** The last round that failed since the last success, as an error. */
+  failed?: unknown;
+  failed_at?: string | null;
 }
 
 /** Whether this device is paired with another, and how the last round went. */
@@ -300,6 +303,8 @@ export interface SyncState {
   devices: number;
   /** The pairing came from the licence, so nothing had to be typed in. */
   from_license: boolean;
+  /** Business: records wait on the server. Pro: live, both machines on. */
+  mailbox: boolean;
 }
 
 /** What the plan allows. Null anywhere means no ceiling. */
@@ -310,6 +315,7 @@ export interface PlanLimits {
   devices: number;
   cloud: boolean;
   sync: boolean;
+  mailbox?: boolean;
 }
 
 /** The plan, the day's meter, and what is left of both. */

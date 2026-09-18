@@ -116,34 +116,72 @@ pub fn run() {
             let sync_paths = state.paths.clone();
             app.manage(state);
 
-            // A paired device catches up by itself every few minutes. Each
-            // round is a fresh comparison of what both sides hold, so one that
-            // fails costs nothing but the next interval.
+            // Sync runs by itself for a licence that covers more than one
+            // machine. Business leaves sealed records on the gateway, so each
+            // round is a visit to the mailbox every few minutes and the other
+            // machine may well be off. Pro keeps nothing on the server: the
+            // device waits in the relay room for the other one and they
+            // exchange directly the moment both are on - then again about a
+            // minute later, for as long as both stay on.
             tauri::async_runtime::spawn(async move {
+                use std::time::Duration;
+                let http = reqwest::Client::new();
                 loop {
-                    tokio::time::sleep(std::time::Duration::from_secs(300)).await;
-                    let Ok(Some(pairing)) = sync::pair::Pairing::load(&sync_paths) else {
-                        continue;
-                    };
-                    if !pairing.auto {
-                        continue;
-                    }
+                    let limits = entitlement::limits();
                     let license = config::Secrets::load(&sync_paths)
                         .ok()
                         .and_then(|secrets| {
                             secrets.for_provider("velvetdesk-cloud").first().cloned()
                         })
                         .unwrap_or_default();
-                    // Through the mailbox rather than the live relay: the
-                    // other machine is usually not awake at the same second,
-                    // and a round that needs both of them is a round that
-                    // mostly does not happen.
-                    let http = reqwest::Client::new();
+                    let pairing = if limits.sync {
+                        sync::pair::for_license(&sync_paths, &license)
+                            .ok()
+                            .flatten()
+                    } else {
+                        None
+                    };
+                    let Some(pairing) = pairing.filter(|p| p.auto) else {
+                        tokio::time::sleep(Duration::from_secs(60)).await;
+                        continue;
+                    };
                     let device = crate::hwid::device_id(&sync_paths);
-                    match sync::mailbox::run_round(&http, &sync_paths, &pairing, &license, &device)
-                        .await
-                    {
-                        Ok(report) if report.pulled + report.pushed > 0 => {
+
+                    let round = sync::ROUND.lock().await;
+                    let (outcome, pause) = if limits.mailbox {
+                        (
+                            sync::mailbox::run_round(
+                                &http,
+                                &sync_paths,
+                                &pairing,
+                                &license,
+                                &device,
+                            )
+                            .await
+                            .map(Some),
+                            Duration::from_secs(300),
+                        )
+                    } else {
+                        let outcome = sync::transport::run_round(
+                            &sync_paths,
+                            &pairing,
+                            &license,
+                            Duration::from_secs(600),
+                            Some(&sync::KICK),
+                        )
+                        .await;
+                        // Nobody came (or the button wants the room): straight
+                        // back in. After a round, a minute's pause, so two
+                        // machines left on do not trade digests non-stop.
+                        let pause = match &outcome {
+                            Ok(None) => Duration::from_secs(2),
+                            _ => Duration::from_secs(60),
+                        };
+                        (outcome, pause)
+                    };
+                    drop(round);
+                    match outcome {
+                        Ok(Some(report)) if report.pulled + report.pushed > 0 => {
                             log::info!(
                                 "sync: {} in, {} out, {} conflicts",
                                 report.pulled,
@@ -152,8 +190,12 @@ pub fn run() {
                             );
                         }
                         Ok(_) => {}
-                        Err(err) => log::warn!("sync: {err}"),
+                        Err(err) => {
+                            log::warn!("sync: {err}");
+                            sync::record_failure(&sync_paths, &err);
+                        }
                     }
+                    tokio::time::sleep(pause).await;
                 }
             });
             Ok(())

@@ -702,8 +702,12 @@ export async function openKeysModal(deps: ModalDeps) {
           parts.push(t("keys.syncPaidOnly"));
         } else if (state.from_license) {
           // Nothing was typed in and nothing needs to be: the second machine
-          // joins by being given the same licence.
-          parts.push(t("keys.syncByLicense", { n: state.devices }));
+          // joins by being given the same licence. How the data travels is
+          // the plan's: Pro live between machines that are both on, Business
+          // through the server's sealed store.
+          parts.push(
+            t(state.mailbox ? "keys.syncMailbox" : "keys.syncLive", { n: state.devices }),
+          );
         } else {
           parts.push(state.paired ? t("keys.syncPaired") : t("keys.syncUnpaired"));
         }
@@ -721,7 +725,25 @@ export async function openKeysModal(deps: ModalDeps) {
             parts.push(t("keys.syncConflicts", { n: state.last.conflicts }));
           }
         }
+        // Automatic rounds that fail used to leave only an old success on
+        // show. A failure newer than the last success is said, in words.
+        const failedAt = state.last?.failed_at ? new Date(state.last.failed_at) : null;
+        const okAt = state.last?.finished_at ? new Date(state.last.finished_at) : null;
+        const failed = Boolean(failedAt && state.last?.failed && (!okAt || failedAt > okAt));
+        if (failed && failedAt) {
+          parts.push(
+            t("keys.syncFailed", {
+              date: failedAt.toLocaleString(),
+              reason: errorText(state.last?.failed),
+            }),
+          );
+        }
         line.textContent = parts.join(" · ");
+        line.classList.toggle("error", failed);
+        // A licence pairing comes straight back the moment it is undone, so
+        // the button would only seem broken.
+        const forget = card.querySelector<HTMLElement>("#btnSyncForget");
+        if (forget) forget.hidden = state.from_license;
       } catch (error) {
         line.textContent = errorText(error);
       }

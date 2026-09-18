@@ -790,6 +790,18 @@ fn room_for_token(headers: &HeaderMap, query: &HashMap<String, String>) -> Optio
     Some(B64URL.encode(&room.finalize()[..16]))
 }
 
+/// The mailbox keeps sealed records on this server for a machine that is
+/// switched off. That storage is what Business pays for; Pro syncs live, the
+/// two machines meeting in the relay while both are on, and nothing is kept.
+fn mailbox_allowed(caller: &Caller) -> Result<(), ApiError> {
+    if caller.license.tier.trim().eq_ignore_ascii_case("business") {
+        return Ok(());
+    }
+    Err(ApiError::Forbidden(
+        "keeping sync records on the server is part of Business; Pro syncs live while both machines are on".into(),
+    ))
+}
+
 /// Check the room the caller named is the one their licence gives them.
 fn allowed_room(
     named: &str,
@@ -818,6 +830,7 @@ async fn sync_push(
     Json(body): Json<PushBody>,
 ) -> Result<Json<Value>, ApiError> {
     let caller = authenticate(&state, &headers, &query)?;
+    mailbox_allowed(&caller)?;
     seat(&state, &caller, &headers)?;
     let room = allowed_room(&body.room, &headers, &query)?;
     state.db.note_room(&caller.license.license_id, &room)?;
@@ -876,6 +889,7 @@ async fn sync_pull(
     Query(query): Query<HashMap<String, String>>,
 ) -> Result<Json<Value>, ApiError> {
     let caller = authenticate(&state, &headers, &query)?;
+    mailbox_allowed(&caller)?;
     seat(&state, &caller, &headers)?;
     let named = query
         .get("room")

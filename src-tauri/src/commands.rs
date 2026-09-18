@@ -1259,6 +1259,9 @@ pub struct SyncState {
     /// True when the pairing came from the licence rather than an invite:
     /// nothing was typed in, and nothing has to be.
     pub from_license: bool,
+    /// Business: sealed records wait on the gateway for a machine that is
+    /// off. Pro: live only, both machines on at once.
+    pub mailbox: bool,
 }
 
 /// The relay to meet at: the cloud provider's address, minus its API path.
@@ -1297,13 +1300,14 @@ fn license_key(state: &AppState) -> String {
 pub fn sync_state(state: State<'_, AppState>) -> Result<SyncState> {
     let limits = crate::entitlement::limits();
     let license = license_key(&state);
-    let mut pairing = crate::sync::pair::Pairing::load(&state.paths)?;
-    if pairing.is_none() && limits.sync && !license.trim().is_empty() {
-        let relay = relay_base(&state);
-        if !relay.is_empty() {
-            pairing = crate::sync::pair::from_license(&state.paths, &license, &relay).ok();
-        }
-    }
+    // With sync in the licence the pairing is the licence's own, made or
+    // replaced here as needed: a pairing from another key cannot use this
+    // licence's room, and the gateway says so on every round.
+    let pairing = if limits.sync && !license.trim().is_empty() {
+        crate::sync::pair::for_license(&state.paths, &license)?
+    } else {
+        crate::sync::pair::Pairing::load(&state.paths)?
+    };
     let from_license = pairing.as_ref().is_some_and(|p| {
         !license.trim().is_empty()
             && p.key
@@ -1324,6 +1328,7 @@ pub fn sync_state(state: State<'_, AppState>) -> Result<SyncState> {
             allowed: limits.sync,
             devices: limits.devices,
             from_license,
+            mailbox: limits.mailbox,
         },
         None => SyncState {
             paired: false,
@@ -1335,6 +1340,7 @@ pub fn sync_state(state: State<'_, AppState>) -> Result<SyncState> {
             allowed: limits.sync,
             devices: limits.devices,
             from_license: false,
+            mailbox: limits.mailbox,
         },
     })
 }
@@ -1375,22 +1381,50 @@ pub fn sync_set_auto(state: State<'_, AppState>, auto: bool) -> Result<SyncState
 }
 
 /// One round, now, because the operator pressed the button.
+///
+/// Business visits the mailbox. Pro takes the relay room from the automatic
+/// loop (which is usually sitting in it, waiting) and gives the other machine
+/// a few seconds to answer; if it is off, that is said plainly rather than
+/// reported as an exchange of nothing.
 #[tauri::command]
 pub async fn sync_now(state: State<'_, AppState>) -> Result<crate::sync::Report> {
-    if !crate::entitlement::limits().sync {
+    let limits = crate::entitlement::limits();
+    if !limits.sync {
         return Err(AppError::message("limit.sync", json!({})));
     }
-    let pairing = crate::sync::pair::Pairing::load(&state.paths)?
-        .ok_or_else(|| AppError::message("sync.notPaired", json!({})))?;
     let license = license_key(&state);
-    crate::sync::mailbox::run_round(
-        &state.llm.http,
-        &state.paths,
-        &pairing,
-        &license,
-        &crate::hwid::device_id(&state.paths),
-    )
-    .await
+    let pairing = crate::sync::pair::for_license(&state.paths, &license)?
+        .ok_or_else(|| AppError::message("sync.notPaired", json!({})))?;
+    let device = crate::hwid::device_id(&state.paths);
+    let outcome = if limits.mailbox {
+        let _round = crate::sync::ROUND.lock().await;
+        crate::sync::mailbox::run_round(&state.llm.http, &state.paths, &pairing, &license, &device)
+            .await
+    } else {
+        crate::sync::KICK.notify_one();
+        let _round = crate::sync::ROUND.lock().await;
+        // The waiting loop has just left the room; give the relay a moment to
+        // count it gone, or this device would briefly be in it twice and the
+        // relay would turn the round away as a crowd.
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        match crate::sync::transport::run_round(
+            &state.paths,
+            &pairing,
+            &license,
+            std::time::Duration::from_secs(20),
+            None,
+        )
+        .await
+        {
+            Ok(Some(report)) => Ok(report),
+            Ok(None) => return Err(AppError::message("sync.noPeer", json!({}))),
+            Err(err) => Err(err),
+        }
+    };
+    if let Err(err) = &outcome {
+        crate::sync::record_failure(&state.paths, err);
+    }
+    outcome
 }
 
 /// The plan, the day's meter and what is left of both.

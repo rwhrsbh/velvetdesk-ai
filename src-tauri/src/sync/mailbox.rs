@@ -128,7 +128,7 @@ pub async fn run_round(
             }))
             .send()
             .await
-            .map_err(|err| AppError::Provider(format!("sync: {err}")))?;
+            .map_err(unreachable)?;
         if !response.status().is_success() {
             return Err(refusal(response).await);
         }
@@ -154,14 +154,11 @@ pub async fn run_round(
             .header(crate::entitlement::DEVICE_HEADER, device_id)
             .send()
             .await
-            .map_err(|err| AppError::Provider(format!("sync: {err}")))?;
+            .map_err(unreachable)?;
         if !response.status().is_success() {
             return Err(refusal(response).await);
         }
-        let page: Value = response
-            .json()
-            .await
-            .map_err(|err| AppError::Provider(format!("sync: {err}")))?;
+        let page: Value = response.json().await.map_err(unreachable)?;
 
         let empty = vec![];
         let rows = page
@@ -215,6 +212,14 @@ pub async fn run_round(
     Ok(report)
 }
 
+/// The gateway could not be reached, or answered with something unreadable.
+/// Not a provider failure - nothing here is a model - so it is named for the
+/// interface to phrase.
+fn unreachable(err: reqwest::Error) -> AppError {
+    log::warn!("sync: {err}");
+    AppError::message("sync.offline", json!({}))
+}
+
 /// The gateway's own words when it refuses, which are the ones worth showing:
 /// a seat taken, a licence expired, a room that is not yours.
 async fn refusal(response: reqwest::Response) -> AppError {
@@ -226,9 +231,10 @@ async fn refusal(response: reqwest::Response) -> AppError {
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
-    if said.is_empty() {
-        AppError::Provider(format!("sync: the gateway answered {status}"))
+    let reason = if said.is_empty() {
+        status.to_string()
     } else {
-        AppError::Provider(format!("sync: {said}"))
-    }
+        said
+    };
+    AppError::message("sync.refused", json!({ "reason": reason }))
 }

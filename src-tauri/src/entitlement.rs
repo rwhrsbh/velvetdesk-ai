@@ -174,6 +174,12 @@ pub struct Limits {
     pub cloud: bool,
     /// May sync with another machine.
     pub sync: bool,
+    /// Sync may leave sealed records on the gateway for a device that is
+    /// switched off (Business). Without it (Pro) sync is live only: the two
+    /// machines exchange directly through the relay while both are on, and
+    /// the server keeps nothing.
+    #[serde(default)]
+    pub mailbox: bool,
 }
 
 impl Limits {
@@ -185,6 +191,7 @@ impl Limits {
             devices: 1,
             cloud: false,
             sync: false,
+            mailbox: false,
         }
     }
 
@@ -196,6 +203,16 @@ impl Limits {
             devices: devices.max(1),
             cloud: true,
             sync: devices > 1,
+            mailbox: false,
+        }
+    }
+
+    /// Paid limits for a plan: the server-side mailbox is Business only.
+    pub fn for_plan(plan: Plan, devices: u32) -> Limits {
+        let limits = Limits::paid(devices);
+        Limits {
+            mailbox: limits.sync && plan == Plan::Business,
+            ..limits
         }
     }
 }
@@ -273,7 +290,7 @@ pub fn read(token: &str) -> Entitlement {
                 limits: if expired {
                     Limits::free()
                 } else {
-                    Limits::paid(devices)
+                    Limits::for_plan(plan, devices)
                 },
             }
         }
@@ -366,7 +383,7 @@ pub fn read_here(paths: &Paths, token: &str) -> Entitlement {
         limits: if expired {
             Limits::free()
         } else {
-            Limits::paid(verdict.max_peers.max(1))
+            Limits::for_plan(plan, verdict.max_peers.max(1))
         },
     }
 }
@@ -407,6 +424,7 @@ static CURRENT: RwLock<Limits> = RwLock::new(Limits {
     devices: 1,
     cloud: false,
     sync: false,
+    mailbox: false,
 });
 
 pub fn limits() -> Limits {

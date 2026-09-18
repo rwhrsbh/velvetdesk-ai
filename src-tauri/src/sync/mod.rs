@@ -371,6 +371,38 @@ pub struct Report {
     pub rejected: usize,
     #[serde(default)]
     pub finished_at: Option<DateTime<Utc>>,
+    /// The last round that failed, as the interface reads an error, and when.
+    /// Cleared by the next round that succeeds. Automatic rounds used to fail
+    /// into the log only, so the panel kept showing an old success.
+    #[serde(default)]
+    pub failed: Option<Value>,
+    #[serde(default)]
+    pub failed_at: Option<DateTime<Utc>>,
+}
+
+/// One round at a time on this device. The automatic loop and the button
+/// share the relay room and the mailbox cursor; two rounds at once would
+/// fight over both.
+pub static ROUND: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Wakes the automatic loop out of a live wait, so the button can have the
+/// room to itself.
+pub static KICK: tokio::sync::Notify = tokio::sync::Notify::const_new();
+
+/// A round failed: keep the last success, and say what went wrong since. (A
+/// round that succeeds writes a fresh report, which clears this.)
+pub fn record_failure(paths: &Paths, error: &AppError) {
+    let mut report = read_report(paths).ok().flatten().unwrap_or_default();
+    report.failed = serde_json::to_value(error).ok();
+    report.failed_at = Some(Utc::now());
+    let _ = write_report(paths, &report);
+}
+
+/// Forget how far this device got with a room it no longer uses: what it
+/// believes the others already hold, and where it stopped reading.
+pub fn forget_progress(paths: &Paths) {
+    let _ = std::fs::remove_file(base_file(paths));
+    let _ = mailbox::rewind(paths);
 }
 
 /// The last round, kept so the interface can say when it happened.

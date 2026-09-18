@@ -165,6 +165,34 @@ pub fn from_license(paths: &Paths, token: &str, relay: &str) -> Result<Pairing> 
     Ok(pairing)
 }
 
+/// The pairing this device syncs with: the one its licence implies.
+///
+/// The gateway accepts a room only when it is the one derived from the
+/// licence presented, so a pairing left from another key - a renewed or
+/// replaced licence, an old invite - could never exchange anything again
+/// ("this room does not belong to this licence"), and it was only ever made
+/// afresh when there was no pairing at all. Now a pairing that does not match
+/// the licence is replaced, keeping the device's identity and its auto
+/// setting. The new room starts empty, so what this device believes it has
+/// already handed over and how far it has read are forgotten with the old one.
+///
+/// `None` without a licence; with one, a pairing is always there to use.
+pub fn for_license(paths: &Paths, license: &str) -> Result<Option<Pairing>> {
+    let existing = Pairing::load(paths)?;
+    if license.trim().is_empty() {
+        return Ok(existing);
+    }
+    let expected = B64.encode(secret_from_license(license));
+    if let Some(pairing) = existing.as_ref().filter(|p| p.key == expected) {
+        return Ok(Some(pairing.clone()));
+    }
+    let pairing = from_license(paths, license, &gateway_relay())?;
+    if existing.is_some() {
+        crate::sync::forget_progress(paths);
+    }
+    Ok(Some(pairing))
+}
+
 /// Start a pairing on this device and hand back the invite.
 pub fn create(paths: &Paths, relay: &str) -> Result<Pairing> {
     use rand::RngCore;
