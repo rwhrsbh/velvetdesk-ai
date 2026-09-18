@@ -236,7 +236,23 @@ impl AppState {
                 pool.clear_cooldowns();
             }
 
-            match self.llm.chat(&provider, pool, request, on_event).await {
+            let mut outcome = self
+                .llm
+                .chat(&provider, pool.clone(), request, on_event)
+                .await;
+            // Host routing is a preference, never a reason to fail: a picked
+            // host can vanish from OpenRouter, or the routing itself be
+            // refused. Once more, then, the way OpenRouter would pick.
+            if let Err(err) = &outcome {
+                if !provider.extra_body.is_null() && matches!(err, LlmError::Provider(_)) {
+                    log::warn!("{model_name} with host routing failed ({err}); trying OpenRouter's own pick");
+                    let mut plain = provider.clone();
+                    plain.extra_body = Value::Null;
+                    pool.clear_cooldowns();
+                    outcome = self.llm.chat(&plain, pool, request, on_event).await;
+                }
+            }
+            match outcome {
                 Ok(mut response) => {
                     response.model = model_name.clone();
                     return Ok((model_name, response));

@@ -906,7 +906,7 @@
         ["", "Как решит OpenRouter", "баланс цены и скорости"],
         ["price", "Самый дешёвый сверху", "сначала самый дешёвый, при сбое — следующий по цене"],
         ["throughput", "Самый быстрый", "по токенам в секунду за последние 30 минут"],
-        ["manual", "Выбрать вручную", "отмеченные, в этом порядке"],
+        ["manual", "Выбрать вручную", "отмеченные в этом порядке, дальше — как решит OpenRouter"],
       ];
 
       function routingMode(r) {
@@ -918,7 +918,7 @@
         const mode = routingMode(r);
         if (!mode) return "";
         const text =
-          mode === "price" ? "дешёвый" : mode === "throughput" ? "быстрый" : `вручную: ${r.order.length}${r.only ? ", только" : ""}`;
+          mode === "price" ? "дешёвый" : mode === "throughput" ? "быстрый" : `вручную: ${r.order.length}`;
         return ` <span class="pill on">${esc(text)}</span>`;
       }
 
@@ -949,7 +949,6 @@
             hosts: d.hosts || [],
             mode: routingMode(d.routing),
             picked: [...((d.routing && d.routing.order) || [])],
-            only: !!(d.routing && d.routing.only),
             setPrice: true,
           };
           paintRouting(st);
@@ -1028,21 +1027,15 @@
             })
             .join("")}
           </tbody></table></div>
-          ${
-            manual
-              ? `<label class="row" style="gap:6px;align-items:center">
-                  <input type="checkbox" id="r-only" ${st.only ? "checked" : ""} />
-                  только отмеченные — если все они лягут, запрос упадёт, а не уйдёт к другим
-                </label>`
-              : ""
-          }
           <label class="row" style="gap:6px;align-items:center">
             <input type="checkbox" id="r-price" ${st.setPrice && first ? "checked" : ""} ${first ? "" : "disabled"} />
-            цены модели = цены ${first ? `<b>${esc(first.provider)}</b> (${price(first.price_in)} / ${price(first.price_out)})` : "первого хоста"}
-            — чтобы клиентам списывалось столько, сколько платим мы
+            цены в таблице = цены ${first ? `<b>${esc(first.provider)}</b> (${price(first.price_in)} / ${price(first.price_out)})` : "первого хоста"}
           </label>
-          <div class="note-hint">Зелёная полоса — хост, куда запрос пойдёт первым. «Без tools» — хост не умеет вызывать
-            инструменты, агенту такой не подходит.</div>
+          <div class="note-hint">Списывается всегда по факту: OpenRouter в каждом ответе говорит, сколько он стоил у того
+            хоста, что ответил, — это и снимается с ключа. Цены из таблицы нужны только если OpenRouter стоимость не прислал,
+            и для обзора. Если выбранные хосты недоступны или пропали — запрос уходит туда, куда выбрал бы сам OpenRouter.
+            Зелёная полоса — хост, куда запрос пойдёт первым. «Без tools» — хост не умеет вызывать инструменты, агенту
+            такой не подходит.</div>
           <div class="row"><button class="act" id="r-save">Сохранить</button></div>`;
 
         const body = $("sheet-body");
@@ -1074,13 +1067,12 @@
         };
         body.querySelectorAll("[data-up]").forEach((b) => b.addEventListener("click", () => move(b.dataset.up, -1)));
         body.querySelectorAll("[data-down]").forEach((b) => b.addEventListener("click", () => move(b.dataset.down, 1)));
-        $("r-only")?.addEventListener("change", (e) => (st.only = e.target.checked));
         $("r-price")?.addEventListener("change", (e) => (st.setPrice = e.target.checked));
 
         $("r-save").addEventListener("click", async () => {
           if (manual && !st.picked.length) return toast("Отметьте хотя бы один хост", true);
           const routing = manual
-            ? { sort: "", order: st.picked, only: st.only }
+            ? { sort: "", order: st.picked, only: false }
             : { sort: st.mode, order: [], only: false };
           const row = { ...st.model, routing };
           if (first && $("r-price")?.checked) {

@@ -87,7 +87,10 @@ pub struct Routing {
     /// Endpoint tags (`deepinfra/fp4`) or provider slugs, tried in order.
     #[serde(default)]
     pub order: Vec<String>,
-    /// Use only the hosts in `order`, never fall back to another one.
+    /// Kept for rows saved before it went away; never honoured. A hand-picked
+    /// host can disappear from OpenRouter overnight, and a model pinned to
+    /// hosts that are gone answers nobody - so the rest are always allowed
+    /// behind the picked ones, in OpenRouter's own order.
     #[serde(default)]
     pub only: bool,
 }
@@ -111,7 +114,7 @@ impl Routing {
             .collect();
         if !order.is_empty() {
             provider.insert("order".into(), serde_json::json!(order));
-            provider.insert("allow_fallbacks".into(), serde_json::json!(!self.only));
+            provider.insert("allow_fallbacks".into(), serde_json::json!(true));
         }
         let sort = self.sort.trim();
         if matches!(sort, "price" | "throughput" | "latency") {
@@ -604,11 +607,13 @@ mod tests {
             order: vec!["deepinfra/fp4".into(), "novita/bf16".into()],
             only: true,
         };
+        // Even a row saved with "only" lets OpenRouter fall back: the picked
+        // hosts may be gone tomorrow.
         assert_eq!(
             provider_for(&openrouter, &m).extra_body,
             serde_json::json!({ "provider": {
                 "order": ["deepinfra/fp4", "novita/bf16"],
-                "allow_fallbacks": false,
+                "allow_fallbacks": true,
             } })
         );
 
