@@ -859,8 +859,9 @@ async fn stats(
     Query(window): Query<Window>,
 ) -> Result<Json<Value>, ApiError> {
     admin(&state, &headers)?;
-    let hours = window.hours.unwrap_or(24).clamp(1, 24 * 90);
-    let since = now() - hours * 3600;
+    // `hours=0` is all time: the book is small enough to sum whole.
+    let hours = window.hours.unwrap_or(24).clamp(0, 24 * 3650);
+    let since = if hours == 0 { 0 } else { now() - hours * 3600 };
 
     let by_license: Vec<Value> = state
         .db

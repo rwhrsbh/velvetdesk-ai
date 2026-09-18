@@ -118,12 +118,12 @@
       .main { min-width: 0; padding: 30px 36px 80px; }
       .page-head {
         display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; flex-wrap: wrap;
-        margin-bottom: 24px; max-width: 1240px;
+        margin-bottom: 24px; max-width: 1600px;
       }
       .page-head h1 { margin: 0; font-size: 25px; font-weight: 700; letter-spacing: -0.02em; }
       .page-head p { margin: 5px 0 0; color: var(--dim); max-width: 680px; }
       .page-actions { display: flex; gap: 10px; flex-wrap: wrap; }
-      #view { max-width: 1240px; }
+      #view { max-width: 1600px; }
       .enter { animation: viewIn 0.38s var(--ease) both; }
       @keyframes viewIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
       .stagger > * { animation: rise 0.42s var(--ease) both; animation-delay: calc(var(--i, 0) * 40ms); }
@@ -759,12 +759,31 @@
       }
       setInterval(refreshLive, 6000);
 
+      // Periods the spend figures can cover; 0 hours is all time.
+      const PERIODS = [
+        [24, "Сутки", "за сутки"],
+        [168, "Неделя", "за неделю"],
+        [720, "Месяц", "за месяц"],
+        [0, "Всё время", "за всё время"],
+      ];
+      const periodSeg = (id, value) =>
+        `<div class="seg" id="${id}">${PERIODS.map(([h, t]) => `<button data-h="${h}" class="${value === h ? "on" : ""}">${t}</button>`).join("")}</div>`;
+      let overviewHours = Number(sessionStorage.getItem("vd-admin-ov-hours") ?? 24);
+
       // ============================================================ overview
       async function renderOverview(page) {
-        setHead(page, `<button class="btn" id="ov-refresh">${icon("refresh")}Обновить</button>`);
+        setHead(page, `${periodSeg("ov-seg", overviewHours)}<button class="btn" id="ov-refresh">${icon("refresh")}Обновить</button>`);
+        $("ov-seg").onclick = (e) => {
+          const b = e.target.closest("[data-h]");
+          if (!b) return;
+          overviewHours = Number(b.dataset.h);
+          sessionStorage.setItem("vd-admin-ov-hours", overviewHours);
+          go("overview");
+        };
+        const periodText = (PERIODS.find(([h]) => h === overviewHours) || PERIODS[0])[2];
         const [o, s, lic] = await Promise.all([
           call("/admin/overview"),
-          call("/admin/stats?hours=24").catch(() => null),
+          call(`/admin/stats?hours=${overviewHours}`).catch(() => null),
           call("/admin/licenses").catch(() => []),
         ]);
         const q = o.queue;
@@ -791,9 +810,9 @@
             ${kpi("users", "На одну лицензию", q.max_per_license, "чтобы один оператор не занял весь шлюз")}
             ${kpi("coin", "Кредит", "$" + o.credit_usd, "себестоимость одного кредита")}
           </div>
-          <div class="section-title">За сутки</div>
+          <div class="section-title">${periodText[0].toUpperCase() + periodText.slice(1)}</div>
           <div class="kpis stagger">
-            ${kpi("coin", "Потрачено", usd(spent * o.credit_usd), fmt(spent) + " кредитов")}
+            ${kpi("coin", "Себестоимость", usd(spent * o.credit_usd), fmt(spent) + " кредитов " + periodText)}
             ${kpi("chat", "Запросов", fmt(calls), s ? "кеш: " + (s.cache_share * 100).toFixed(1) + "% входа" : "—")}
             ${kpi("key", "Активных лицензий", active, `всего выдано ${lic.length}`)}
             ${kpi("models", "Моделей чата", chat, `провайдеров включено ${ups} из ${o.upstreams.length}`)}
@@ -805,7 +824,7 @@
                 .map((r) => `<div class="bar-row"><span class="b-name mono ell">${esc(r.model)}</span>
                   <span class="b-val">${usd(r.credits * o.credit_usd, 3)}</span>
                   <div class="meter"><i style="width:${(r.credits / maxM) * 100}%"></i></div></div>`)
-                .join("")}</div>` : '<div class="dim">Тихо — запросов за сутки не было</div>'}
+                .join("")}</div>` : `<div class="dim">Тихо — запросов ${periodText} не было</div>`}
             </div>
             <div class="card card-pad">
               <div class="section-title" style="margin:0 0 14px">Лицензии по расходу</div>
@@ -813,7 +832,7 @@
                 .map((r) => `<div class="bar-row clickable" data-open-lic="${esc(r.license_id)}"><span class="b-name mono ell">${esc(r.license_id)}</span>
                   <span class="b-val">${usd(r.credits * o.credit_usd, 3)} · ${r.calls} запр.</span>
                   <div class="meter ok"><i style="width:${(r.credits / maxL) * 100}%"></i></div></div>`)
-                .join("")}</div>` : '<div class="dim">Тихо — запросов за сутки не было</div>'}
+                .join("")}</div>` : `<div class="dim">Тихо — запросов ${periodText} не было</div>`}
             </div>
           </div>`);
         $("ov-refresh").onclick = () => go("overview");
@@ -1731,9 +1750,7 @@
       let statHours = 24;
 
       async function renderStats(page) {
-        setHead(page, `<div class="seg" id="s-seg">${[[24, "Сутки"], [168, "Неделя"], [720, "Месяц"]]
-          .map(([h, t]) => `<button data-h="${h}" class="${statHours === h ? "on" : ""}">${t}</button>`)
-          .join("")}</div>`);
+        setHead(page, periodSeg("s-seg", statHours));
         $("s-seg").onclick = (e) => {
           const b = e.target.closest("[data-h]");
           if (!b) return;
