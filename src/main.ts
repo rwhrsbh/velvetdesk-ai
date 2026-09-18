@@ -3417,6 +3417,15 @@ async function refreshPlanChip() {
 /** When the free-version notice was last on screen. */
 let nagShownAt = 0;
 
+/**
+ * A notice is on screen or waiting in the dialog queue. The idle check runs
+ * every minute, and while any dialog stayed open - this notice itself, left
+ * up by somebody who walked away - each run queued one more behind it, since
+ * nothing had been shown yet to reset the clock. Hours later closing one
+ * notice only brought up the next of dozens.
+ */
+let nagPending = false;
+
 /** The last thing the operator did — a key, a click, a message sent. */
 let lastActivity = Date.now();
 
@@ -3440,6 +3449,8 @@ function nagWhenIdle() {
   const now = Date.now();
   if (now - nagShownAt < NAG_EVERY) return;
   if (now - lastActivity < AWAY_FOR) return;
+  if (nagPending || document.querySelector("[data-free-nag]")) return;
+  nagPending = true;
   whenFree(() => nagAboutFree(true));
 }
 
@@ -3458,14 +3469,16 @@ function watchActivity() {
 }
 
 function nagAboutFree(force = false) {
+  nagPending = false;
   const plan = store.plan;
   if (!plan || plan.plan !== "free") return;
   if (nagShownAt > 0 && !force) return;
+  if (document.querySelector("[data-free-nag]")) return;
   nagShownAt = Date.now();
   const cap = plan.limits.requests_per_day ?? 0;
   const card = openModal(
     `
-    <h3>${t("plan.nagTitle")}</h3>
+    <h3 data-free-nag>${t("plan.nagTitle")}</h3>
     <div class="modal-sub">${t("plan.nagBody", { used: plan.used_today, cap })}</div>
     <ul class="plan-perks">
       <li>${t("plan.perkUnlimited")}</li>
