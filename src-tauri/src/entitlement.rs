@@ -70,19 +70,18 @@ pub const DEVICE_HEADER: &str = "X-VD-Device";
 /// as a name (`http://203.0.113.10:8787/v1`), and a test build points at a
 /// gateway on the bench the same way.
 ///
-/// Until there is a server to point at, the default is the gateway on this
-/// machine: a build made without the variable is a build for the bench, and
-/// the bench is where the gateway currently runs. Releases are built with
-/// the variable set to the real address, which is an IP for as long as there
-/// is no name to use.
+/// A build made without the variable goes to the live gateway. It used to go
+/// to one on this machine, from before there was a server - and a build that
+/// missed the variable (a dev run, a CI secret left blank) then sent the
+/// subscription and sync to `127.0.0.1:8787`, where nothing answers. The bench
+/// is the exception now: point a debug run at it with `VD_CLOUD_BASE_URL`.
 pub const CLOUD_BASE_URL: &str = match option_env!("VD_CLOUD_BASE_URL") {
     Some(url) => url,
     None => DEFAULT_CLOUD_BASE_URL,
 };
 
-/// Where a build with no address of its own looks: the gateway on this
-/// machine, which is where it runs until there is a server to point at.
-pub const DEFAULT_CLOUD_BASE_URL: &str = "http://127.0.0.1:8787/v1";
+/// Where a build with no address of its own looks: the live gateway.
+pub const DEFAULT_CLOUD_BASE_URL: &str = "https://51-68-34-189.sslip.io/v1";
 
 /// The address this run uses.
 ///
@@ -524,11 +523,10 @@ pub fn charge(paths: &Paths) -> Result<Meter> {
 // only once it has heard from the gateway today, so a wiped install that
 // cannot reach it has nothing to spend.
 
-/// Whether a real gateway was built in. A development build pointed at the
-/// default local address has nobody to ask, and is not held to it.
+/// Whether a real gateway is in use. A development build pointed at a
+/// gateway on this machine has nobody to ask, and is not held to it.
 fn gateway_counts() -> bool {
-    let base = cloud_base_url();
-    !base.is_empty() && base != DEFAULT_CLOUD_BASE_URL
+    !crate::sync::pair::is_loopback(&cloud_base_url())
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]

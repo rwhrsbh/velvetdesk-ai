@@ -39,7 +39,21 @@ impl Pairing {
     }
 
     pub fn load(paths: &Paths) -> Result<Option<Pairing>> {
-        read_json(&Pairing::file(paths))
+        let Some(mut pairing) = read_json::<Pairing>(&Pairing::file(paths))? else {
+            return Ok(None);
+        };
+        // The relay is written once, when the pairing is made - and a pairing
+        // made while the build still pointed at the bench gateway kept
+        // `http://127.0.0.1:8787` forever, so every round failed with "error
+        // sending request" long after the app itself had moved to the real
+        // gateway. Where to meet is the build's decision, like the cloud
+        // address it comes from: follow it whenever it is a real server.
+        let current = gateway_relay();
+        if !is_loopback(&current) && pairing.relay != current {
+            pairing.relay = current;
+            pairing.save(paths)?;
+        }
+        Ok(Some(pairing))
     }
 
     pub fn save(&self, paths: &Paths) -> Result<()> {
@@ -104,6 +118,26 @@ pub fn secret_from_license(token: &str) -> [u8; 32] {
     hash.update(b"velvetdesk-sync-secret/v1");
     hash.update(token.trim().as_bytes());
     hash.finalize().into()
+}
+
+/// The relay of the gateway this build talks to: the cloud address minus its
+/// API path, which is how the gateway serves `/sync/*`.
+pub fn gateway_relay() -> String {
+    crate::entitlement::cloud_base_url()
+        .trim_end_matches('/')
+        .trim_end_matches("/v1")
+        .to_string()
+}
+
+/// A relay on this machine: the bench gateway, never a real one.
+pub fn is_loopback(relay: &str) -> bool {
+    let rest = relay.trim().split("://").nth(1).unwrap_or(relay.trim());
+    let authority = rest.split('/').next().unwrap_or("").to_ascii_lowercase();
+    if authority.starts_with("[::1]") {
+        return true;
+    }
+    let host = authority.split(':').next().unwrap_or("");
+    host.is_empty() || host == "localhost" || host == "0.0.0.0" || host.starts_with("127.")
 }
 
 /// Pair this device off the licence, keeping the identity it already has.
@@ -245,5 +279,17 @@ mod tests {
             ..pairing()
         };
         assert!(short.secret().is_err());
+    }
+
+    /// Only a gateway on this machine counts as the bench; a real one, by IP
+    /// or by name, is followed by every pairing.
+    #[test]
+    fn loopback_is_only_this_machine() {
+        assert!(is_loopback("http://127.0.0.1:8787"));
+        assert!(is_loopback("http://localhost:8787/v1"));
+        assert!(is_loopback("http://[::1]:8787"));
+        assert!(is_loopback(""));
+        assert!(!is_loopback("https://51-68-34-189.sslip.io"));
+        assert!(!is_loopback("http://203.0.113.10:8787"));
     }
 }
