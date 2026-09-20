@@ -624,9 +624,17 @@ function entryHtml(entry: UiEntry): string {
         : bubbleText(entry, meta.reply_key);
       const stepsHtml = meta.live ? `<div class="live-steps">${steps}</div>` : steps;
       const tail = meta.live ? working : `${working}${usageLine(meta.usage, extras)}${actions}${asked}`;
+      // The operator's own bubble is a row: everything it says on the left,
+      // retry and edit on the right. Everything it says therefore has to be
+      // ONE flex item - a picture, the text and "show more" as three of them
+      // each got a column of their own, and "show more" ended up a letter
+      // wide.
+      const column = `${recipient}${thinking}${shots}${bodyHtml}${stepsHtml}`;
+      const inside =
+        entry.sender === "user" ? `<div class="bubble-main">${column}</div>${tail}` : `${column}${tail}`;
       return (
         `<div class="msg ${entry.sender}${picked ? " picked" : ""}" data-entry="${escapeHtml(entry.id)}">` +
-        `<div class="bubble">${recipient}${thinking}${shots}${bodyHtml}${stepsHtml}${tail}</div></div>`
+        `<div class="bubble">${inside}</div></div>`
       );
   }
 }
