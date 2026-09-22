@@ -36,6 +36,11 @@ pub fn router() -> Router<AppState> {
         .route("/admin/upstreams/{id}", delete(delete_upstream))
         .route("/admin/upstreams/{id}/keys", get(list_keys).post(add_key))
         .route("/admin/keys/{id}", delete(delete_key))
+        .route("/admin/grok/status", get(grok_status_all))
+        .route("/admin/upstreams/{id}/grok/login", post(grok_login_start))
+        .route("/admin/upstreams/{id}/grok/poll", post(grok_login_poll))
+        .route("/admin/upstreams/{id}/grok/logout", post(grok_logout))
+        .route("/admin/upstreams/{id}/grok", get(grok_status_one))
         .route("/admin/models", get(list_models).post(save_model))
         .route("/admin/models/{name}", delete(delete_model))
         .route("/admin/models/{name}/providers", get(model_providers))
@@ -93,6 +98,11 @@ async fn page() -> Html<&'static str> {
 #[derive(Debug, Deserialize)]
 struct KeyBody {
     key: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct PollBody {
+    device_code: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -173,7 +183,7 @@ async fn save_upstream(
     Json(body): Json<UpstreamRow>,
 ) -> Result<Json<Value>, ApiError> {
     admin(&state, &headers)?;
-    if body.id.trim().is_empty() || body.base_url.trim().is_empty() {
+    if body.id.trim().is_empty() || (!body.grok && body.base_url.trim().is_empty()) {
         return Err(ApiError::BadRequest(
             "an id and a base_url are required".into(),
         ));
@@ -239,6 +249,12 @@ async fn add_key(
     Json(body): Json<KeyBody>,
 ) -> Result<Json<Value>, ApiError> {
     admin(&state, &headers)?;
+    if state.db.upstream_is_grok(&id)? {
+        return Err(ApiError::BadRequest(
+            "a Grok subscription signs in through the browser; a pasted key is not accepted"
+                .into(),
+        ));
+    }
     // One paste, many keys: a pool is usually assembled somewhere else and
     // arrives as a list.
     let added: Vec<&str> = body
@@ -255,6 +271,105 @@ async fn add_key(
     }
     state.reload()?;
     Ok(Json(json!({ "added": added.len() })))
+}
+
+fn grok_status_value(state: &AppState, upstream_id: Option<&str>) -> Result<Value, ApiError> {
+    crate::grok_auth::public_status(&state.db, upstream_id).map_err(ApiError::Upstream)
+}
+
+async fn grok_status_all(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, ApiError> {
+    admin(&state, &headers)?;
+    Ok(Json(grok_status_value(&state, None)?))
+}
+
+async fn grok_status_one(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    admin(&state, &headers)?;
+    Ok(Json(grok_status_value(&state, Some(&id))?))
+}
+
+async fn grok_login_start(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    admin(&state, &headers)?;
+    if !state.db.upstream_is_grok(&id)? {
+        return Err(ApiError::BadRequest(
+            "this upstream is not a Grok subscription".into(),
+        ));
+    }
+    let code = crate::grok_auth::start_device(&state.llm.http, &state.grok_auth)
+        .await
+        .map_err(ApiError::Upstream)?;
+    Ok(Json(json!({
+        "device_code": code.device_code,
+        "user_code": code.user_code,
+        "verification_uri": code.verification_uri,
+        "verification_uri_complete": code.verification_uri_complete,
+        "interval": code.interval,
+        "expires_in": code.expires_in,
+    })))
+}
+
+async fn grok_login_poll(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    body: String,
+) -> Result<Json<Value>, ApiError> {
+    admin(&state, &headers)?;
+    if !state.db.upstream_is_grok(&id)? {
+        return Err(ApiError::BadRequest(
+            "this upstream is not a Grok subscription".into(),
+        ));
+    }
+    let body: PollBody = serde_json::from_str(&body)
+        .map_err(|_| ApiError::BadRequest("device_code is required".into()))?;
+    if body.device_code.trim().is_empty() {
+        return Err(ApiError::BadRequest("device_code is required".into()));
+    }
+    match crate::grok_auth::poll_device(&state.llm.http, &state.grok_auth, &body.device_code)
+        .await
+        .map_err(ApiError::Upstream)?
+    {
+        crate::grok_auth::PollOutcome::Pending => {
+            Ok(Json(json!({"status": "pending", "message": "", "expires_at": 0})))
+        }
+        crate::grok_auth::PollOutcome::Error(message) => {
+            Ok(Json(json!({"status": "error", "message": message, "expires_at": 0})))
+        }
+        crate::grok_auth::PollOutcome::Approved(tokens) => {
+            state.db.insert_grok_session(
+                &id,
+                &tokens.access_token,
+                &tokens.refresh_token,
+                tokens.expires_at,
+                now(),
+            )?;
+            state.reload()?;
+            Ok(Json(
+                json!({"status": "ok", "message": "", "expires_at": tokens.expires_at}),
+            ))
+        }
+    }
+}
+
+async fn grok_logout(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    admin(&state, &headers)?;
+    state.db.delete_grok_sessions(&id)?;
+    state.reload()?;
+    Ok(Json(grok_status_value(&state, Some(&id))?))
 }
 
 async fn delete_key(
@@ -373,6 +488,9 @@ async fn catalog(
     Path(id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     admin(&state, &headers)?;
+    if let Err(err) = state.prepare_grok().await {
+        log::warn!("grok session was not refreshed: {err}");
+    }
     let (provider, pool) = {
         let registry = state.registry.read();
         let upstream = registry

@@ -47,6 +47,9 @@ pub struct AppState {
     /// conversation resends its whole history on every turn, pictures
     /// included; without this every turn would pay to describe them again.
     pub descriptions: Arc<Mutex<HashMap<String, String>>>,
+    /// Where a Grok subscription refreshes. Production is auth.x.ai; a test
+    /// points this at a stand-in before the pool is asked for a key.
+    pub grok_auth: crate::grok_auth::AuthUrls,
 }
 
 /// A call made on the way to an answer that is billed on its own - a
@@ -93,7 +96,23 @@ impl AppState {
                 wait: std::time::Duration::from_secs(limits.3),
             })),
             descriptions: Arc::new(Mutex::new(HashMap::new())),
+            grok_auth: crate::grok_auth::AuthUrls::production(),
         })
+    }
+
+    /// Mint a fresh access token for any Grok session that is missing one or
+    /// is within five minutes of expiry, then put that token in the pool.
+    ///
+    /// Called before a pool lends a key. A session that is still good is left
+    /// alone, cooldowns included, because the reload below keeps a pool whose
+    /// keys did not change.
+    pub(crate) async fn prepare_grok(&self) -> Result<(), String> {
+        if crate::grok_auth::refresh_due(&self.db, &self.llm.http, &self.grok_auth, crate::registry::now())
+            .await?
+        {
+            self.reload().map_err(|err| err.to_string())?;
+        }
+        Ok(())
     }
 
     /// Read the registry again after an edit, keeping the pools whose keys did
@@ -258,6 +277,9 @@ impl AppState {
         audio_base64: &str,
         mime: &str,
     ) -> Result<(String, f64, String), LlmError> {
+        if let Err(err) = self.prepare_grok().await {
+            log::warn!("grok session was not refreshed: {err}");
+        }
         let attempts: Vec<(String, f64, ProviderConfig)> = {
             let registry = self.registry.read();
             registry
@@ -335,6 +357,9 @@ impl AppState {
         request: &ChatRequest,
         on_event: &(dyn Fn(Value) + Send + Sync),
     ) -> Result<(String, ChatResponse, Vec<Spent>), LlmError> {
+        if let Err(err) = self.prepare_grok().await {
+            log::warn!("grok session was not refreshed: {err}");
+        }
         // The chain is copied out from under the lock: a round of calls takes
         // minutes, and the admin page must not wait that long to save a key.
         let attempts: Vec<(String, bool, ProviderConfig)> = {

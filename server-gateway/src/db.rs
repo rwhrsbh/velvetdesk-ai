@@ -26,6 +26,18 @@ pub struct Db {
     conn: Arc<Mutex<Connection>>,
 }
 
+/// One Grok subscription credential. The access token is also the key the
+/// pool sends; the refresh token is how the next one is minted. Neither is
+/// returned by the admin list.
+#[derive(Debug, Clone)]
+pub struct GrokSessionRow {
+    pub id: i64,
+    pub upstream_id: String,
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_at: i64,
+}
+
 /// One answer's cost, as it goes into the book.
 #[derive(Debug, Clone)]
 pub struct Spend {
@@ -231,6 +243,21 @@ impl Db {
         Db::add_column(conn, "model", "routing", "TEXT NOT NULL DEFAULT ''");
         Db::add_column(conn, "model", "images", "INTEGER NOT NULL DEFAULT 0");
         Db::add_column(conn, "model", "vision", "INTEGER NOT NULL DEFAULT 0");
+        // A Grok subscription is a refreshable session sitting on the same
+        // key row the pool already reads. Older databases have neither
+        // column; an empty refresh token means "this is a pasted key".
+        Db::add_column(
+            conn,
+            "upstream_key",
+            "refresh_token",
+            "TEXT NOT NULL DEFAULT ''",
+        );
+        Db::add_column(
+            conn,
+            "upstream_key",
+            "expires_at",
+            "INTEGER NOT NULL DEFAULT 0",
+        );
         Ok(())
     }
 
@@ -784,6 +811,7 @@ impl Db {
                     extra_headers: serde_json::from_str(&headers).unwrap_or_default(),
                     enabled: row.get::<_, i64>(7)? != 0,
                     position: row.get(8)?,
+                    grok: kind == "grok",
                     key_count: 0,
                 })
             })?
@@ -792,9 +820,20 @@ impl Db {
     }
 
     pub fn save_upstream(&self, upstream: &UpstreamRow) -> rusqlite::Result<()> {
-        let kind = match upstream.kind {
-            ProviderKind::Gemini => "gemini",
-            ProviderKind::OpenaiCompatible => "openai_compatible",
+        // A subscription upstream has one address and does not keep the
+        // headers the client crate fills in itself: a stored version string
+        // would go stale, and a stored token-auth header would win over it.
+        let mut base_url = upstream.base_url.clone();
+        let mut headers = upstream.extra_headers.clone();
+        let kind = if upstream.grok {
+            base_url = crate::grok_auth::SUBSCRIPTION_BASE.to_string();
+            headers.retain(|(name, _)| !vd_llm::grok::is_managed_header(name));
+            "grok"
+        } else {
+            match upstream.kind {
+                ProviderKind::Gemini => "gemini",
+                ProviderKind::OpenaiCompatible => "openai_compatible",
+            }
         };
         self.conn.lock().execute(
             "INSERT INTO upstream (id, label, kind, base_url, api_version, reasoning_dialect,
@@ -813,10 +852,10 @@ impl Db {
                 upstream.id,
                 upstream.label,
                 kind,
-                upstream.base_url,
+                base_url,
                 upstream.api_version,
                 upstream.reasoning_dialect,
-                serde_json::to_string(&upstream.extra_headers).unwrap_or_else(|_| "[]".into()),
+                serde_json::to_string(&headers).unwrap_or_else(|_| "[]".into()),
                 upstream.enabled as i64,
                 upstream.position,
             ],
@@ -853,15 +892,19 @@ impl Db {
     pub fn list_keys(&self, upstream_id: &str) -> rusqlite::Result<Vec<KeyRow>> {
         let conn = self.conn.lock();
         let mut statement = conn.prepare(
-            "SELECT id, api_key, added_at FROM upstream_key WHERE upstream_id = ?1 ORDER BY id",
+            "SELECT id, api_key, added_at, refresh_token, expires_at
+             FROM upstream_key WHERE upstream_id = ?1 ORDER BY id",
         )?;
         let rows = statement
             .query_map([upstream_id], |row| {
                 let key: String = row.get(1)?;
+                let refresh: String = row.get(3)?;
                 Ok(KeyRow {
                     id: row.get(0)?,
                     masked: vd_llm::mask_key(&key),
                     added_at: row.get(2)?,
+                    expires_at: row.get(4)?,
+                    session: !refresh.trim().is_empty(),
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -882,6 +925,77 @@ impl Db {
         self.conn
             .lock()
             .execute("DELETE FROM upstream_key WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    pub fn upstream_is_grok(&self, id: &str) -> rusqlite::Result<bool> {
+        let conn = self.conn.lock();
+        let kind: Option<String> = conn
+            .query_row("SELECT kind FROM upstream WHERE id = ?1", [id], |row| row.get(0))
+            .optional()?;
+        Ok(kind.as_deref() == Some("grok"))
+    }
+
+    /// Sessions only: a pasted key has an empty refresh token and is not one.
+    pub fn grok_sessions(&self) -> rusqlite::Result<Vec<GrokSessionRow>> {
+        let conn = self.conn.lock();
+        let mut statement = conn.prepare(
+            "SELECT id, upstream_id, api_key, refresh_token, expires_at
+             FROM upstream_key WHERE refresh_token != '' ORDER BY id",
+        )?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok(GrokSessionRow {
+                    id: row.get(0)?,
+                    upstream_id: row.get(1)?,
+                    access_token: row.get(2)?,
+                    refresh_token: row.get(3)?,
+                    expires_at: row.get(4)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    /// Another browser sign-in. It does not replace the sessions already stored.
+    pub fn insert_grok_session(
+        &self,
+        upstream_id: &str,
+        access_token: &str,
+        refresh_token: &str,
+        expires_at: i64,
+        now: i64,
+    ) -> rusqlite::Result<()> {
+        self.conn.lock().execute(
+            "INSERT INTO upstream_key (upstream_id, api_key, added_at, refresh_token, expires_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![upstream_id, access_token, now, refresh_token, expires_at],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_grok_session(
+        &self,
+        id: i64,
+        access_token: &str,
+        refresh_token: &str,
+        expires_at: i64,
+    ) -> rusqlite::Result<()> {
+        self.conn.lock().execute(
+            "UPDATE upstream_key
+             SET api_key = ?2, refresh_token = ?3, expires_at = ?4
+             WHERE id = ?1",
+            rusqlite::params![id, access_token, refresh_token, expires_at],
+        )?;
+        Ok(())
+    }
+
+    /// Sign-out: every refreshable session on this upstream, not pasted keys.
+    pub fn delete_grok_sessions(&self, upstream_id: &str) -> rusqlite::Result<()> {
+        self.conn.lock().execute(
+            "DELETE FROM upstream_key WHERE upstream_id = ?1 AND refresh_token != ''",
+            [upstream_id],
+        )?;
         Ok(())
     }
 

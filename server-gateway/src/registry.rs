@@ -33,6 +33,9 @@ pub struct UpstreamRow {
     pub enabled: bool,
     #[serde(default)]
     pub position: i64,
+    /// Browser sign-in for the Grok subscription proxy, not a pasted key.
+    #[serde(default)]
+    pub grok: bool,
     /// How many keys it has. Read-only: keys are added and removed one at a
     /// time, and never travel back out of the gateway.
     #[serde(default)]
@@ -142,6 +145,12 @@ pub struct KeyRow {
     /// `AIzaS...9fA` — enough to tell two keys apart, not enough to use one.
     pub masked: String,
     pub added_at: i64,
+    /// When a subscription access token dies. Zero for a pasted key.
+    #[serde(default)]
+    pub expires_at: i64,
+    /// A refreshable Grok session, rather than a key that was pasted.
+    #[serde(default)]
+    pub session: bool,
 }
 
 /// A licence the gateway has issued.
@@ -241,6 +250,7 @@ impl Registry {
                 extra_headers: upstream.extra_headers.clone(),
                 enabled: true,
                 position: index as i64,
+                grok: false,
                 key_count: 0,
             })?;
             for key in upstream.resolved_keys() {
@@ -456,6 +466,15 @@ pub fn provider_for(upstream: &UpstreamRow, model: &ModelRow) -> ProviderConfig 
         context_tokens: model.context_tokens,
         key_count: upstream.key_count,
     };
+    // The subscription proxy is one host. A stored copy of the headers this
+    // crate applies itself would either go stale or override them.
+    if upstream.grok {
+        provider.base_url = crate::grok_auth::SUBSCRIPTION_BASE.to_string();
+        provider.kind = ProviderKind::OpenaiCompatible;
+        provider
+            .extra_headers
+            .retain(|(name, _)| !vd_llm::grok::is_managed_header(name));
+    }
     // Routing is OpenRouter's; any other endpoint would reject the field.
     if provider.dialect() == "openrouter" {
         provider.extra_body = model.routing.body();
@@ -482,6 +501,7 @@ mod tests {
             extra_headers: vec![],
             enabled,
             position: 0,
+            grok: false,
             key_count: 1,
         }
     }

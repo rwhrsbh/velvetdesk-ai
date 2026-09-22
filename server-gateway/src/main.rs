@@ -7,6 +7,7 @@
 mod admin;
 mod config;
 mod db;
+mod grok_auth;
 mod queue;
 mod quota;
 mod registry;

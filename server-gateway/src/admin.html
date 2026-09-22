@@ -308,6 +308,14 @@
       .key:hover { background: rgb(255 255 255 / 0.025); }
       .key .err { color: var(--faint); font-size: 12px; }
       .add-key { display: flex; gap: 8px; padding: 8px 8px 0; }
+      .grok-box { display: grid; gap: 10px; padding: 8px 8px 2px; }
+      .grok-wait {
+        display: grid; gap: 6px; padding: 12px 14px; border-radius: 12px;
+        background: var(--accent-soft); border: 1px solid rgb(169 121 255 / 0.28);
+      }
+      .grok-wait .code { font-size: 22px; letter-spacing: 0.14em; font-weight: 700; }
+      .grok-wait a { color: #d9c8ff; font-weight: 600; }
+      .grok-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 
       /* ----------------------------------------------------------------- drawer */
       .scrim {
@@ -854,6 +862,57 @@
 
       // ============================================================ upstreams
       let upstreamCache = [];
+      const GROK_BASE = "https://cli-chat-proxy.grok.com/v1";
+      // In-flight browser sign-ins, so a redraw of the list keeps the user code up.
+      const grokWaits = {};
+
+      function kindBadge(up) {
+        if (up.grok) return "Подписка Grok";
+        return up.kind === "gemini" ? "Gemini" : "OpenAI-совместимый";
+      }
+
+      function keyRows(ks, grok) {
+        if (!ks.length) {
+          return grok
+            ? `<div class="dim" style="padding:10px 8px">Сессий нет — войдите через браузер, затем назначьте модель как у остальных провайдеров.</div>`
+            : `<div class="dim" style="padding:10px 8px">Ключей нет — добавьте хотя бы один, иначе провайдер не используется.</div>`;
+        }
+        return ks.map((k) => `<div class="key">
+            <span class="mono ell">${esc(k.masked)}</span>
+            ${k.cooling_seconds ? `<span class="badge amber"><span class="dot"></span>остывает ${k.cooling_seconds} с</span>` : `<span class="badge green"><span class="dot"></span>в строю</span>`}
+            <span class="dim stats" style="font-size:12.5px">${k.session && k.expires_at ? `до ${dtime(k.expires_at)} · ` : ""}${k.successes} ок · ${k.failures} сбоев</span>
+            <span class="err ell" title="${esc(k.last_error || "")}">${esc(k.last_error || "")}</span>
+            <button class="btn icon sm ghost danger" data-key-del="${k.id}" title="${grok ? "выйти из этой сессии" : "удалить ключ"}">${icon("trash", 15)}</button>
+          </div>`).join("");
+      }
+
+      function grokPanel(up, ks) {
+        const wait = grokWaits[up.id];
+        return `<div class="grok-box" data-grok-box="${esc(up.id)}" data-grok-signin="browser" data-flow="user-code verification-link">
+            <div class="hint">Подписка Grok — вход через браузер, не ключ с console.x.ai. Здесь появятся код подтверждения (user code) и ссылка (verification link). Версию CLI шлюз подставляет сам.</div>
+            ${keyRows(ks, true)}
+            <div class="grok-wait${wait ? "" : " hidden"}" data-grok-wait="${esc(up.id)}">${wait ? grokWaitHtml(wait) : ""}</div>
+            <div class="grok-actions">
+              <button class="btn primary" data-grok-start="${esc(up.id)}">${ks.length ? "Добавить ещё вход" : "Войти через браузер"}</button>
+              ${ks.length ? `<button class="btn" data-grok-out="${esc(up.id)}">Выйти</button>` : ""}
+            </div>
+          </div>`;
+      }
+
+      function grokWaitHtml(wait) {
+        return `<div class="dim">Код подтверждения — user code</div>
+          <div class="mono code">${esc(wait.user_code)}</div>
+          <a href="${esc(wait.link)}" target="_blank" rel="noreferrer">Открыть ссылку подтверждения — verification link</a>
+          <div class="${wait.error ? "err" : "dim"}">${esc(wait.message)}</div>`;
+      }
+
+      function paintGrokWait(id) {
+        const wait = grokWaits[id];
+        const host = document.querySelector(`[data-grok-wait="${CSS.escape(id)}"]`);
+        if (!host || !wait) return;
+        host.classList.remove("hidden");
+        host.innerHTML = grokWaitHtml(wait);
+      }
 
       async function renderUpstreams(page) {
         setHead(page, `<button class="btn primary" id="up-new">${icon("plus")}Добавить провайдера</button>`);
@@ -876,9 +935,9 @@
                 <div class="avatar">${esc(initials(up.label || up.id))}</div>
                 <div style="min-width:0">
                   <div class="i-title row" style="flex-wrap:wrap;gap:8px"><b class="ell" style="font-size:15.5px">${esc(up.label || up.id)}</b>
-                    <span class="badge">${esc(up.kind === "gemini" ? "Gemini" : "OpenAI-совместимый")}</span>
+                    <span class="badge">${esc(kindBadge(up))}</span>
                     ${up.reasoning_dialect && up.reasoning_dialect !== "auto" ? `<span class="badge violet">${esc(up.reasoning_dialect)}</span>` : ""}
-                    <span class="badge ${ks.length ? (live ? "green" : "amber") : "red"}"><span class="dot"></span>${ks.length ? `${live} из ${ks.length} ключей в строю` : "нет ключей"}</span>
+                    <span class="badge ${ks.length ? (live ? "green" : "amber") : "red"}"><span class="dot"></span>${ks.length ? `${live} из ${ks.length} ${up.grok ? "сессий" : "ключей"} в строю` : (up.grok ? "нет сессии" : "нет ключей")}</span>
                   </div>
                   <div class="i-sub"><span class="mono">${esc(up.id)}</span><span class="sep">·</span><span class="ell">${esc(up.base_url)}</span></div>
                 </div>
@@ -889,17 +948,11 @@
                 </div>
               </div>
               <div class="keys">
-                ${ks.length ? ks.map((k) => `<div class="key">
-                    <span class="mono ell">${esc(k.masked)}</span>
-                    ${k.cooling_seconds ? `<span class="badge amber"><span class="dot"></span>остывает ${k.cooling_seconds} с</span>` : `<span class="badge green"><span class="dot"></span>в строю</span>`}
-                    <span class="dim stats" style="font-size:12.5px">${k.successes} ок · ${k.failures} сбоев</span>
-                    <span class="err ell" title="${esc(k.last_error || "")}">${esc(k.last_error || "")}</span>
-                    <button class="btn icon sm ghost danger" data-key-del="${k.id}" title="удалить ключ">${icon("trash", 15)}</button>
-                  </div>`).join("") : '<div class="dim" style="padding:10px 8px">Ключей нет — добавьте хотя бы один, иначе провайдер не используется.</div>'}
+                ${up.grok ? grokPanel(up, ks) : `${keyRows(ks, false)}
                 <div class="add-key">
                   <input placeholder="Вставьте ключ или несколько через запятую" data-key-for="${esc(up.id)}" />
                   <button class="btn" data-key-add="${esc(up.id)}">${icon("plus")}Ключ</button>
-                </div>
+                </div>`}
               </div>
             </div>`;
           })
@@ -940,38 +993,112 @@
         document.querySelectorAll("[data-key-for]").forEach((input) =>
           input.addEventListener("keydown", (e) => e.key === "Enter" && addKey(input.dataset.keyFor)),
         );
+        document.querySelectorAll("[data-grok-start]").forEach((b) => (b.onclick = () => startGrok(b.dataset.grokStart, b)));
+        document.querySelectorAll("[data-grok-out]").forEach((b) => {
+          b.onclick = async () => {
+            const id = b.dataset.grokOut;
+            if (!(await confirmBox({ title: "Выйти из подписки Grok?", text: "Сессии этого провайдера будут удалены. Войти можно снова.", ok: "Выйти" }))) return;
+            act(b, () => call(`/admin/upstreams/${encodeURIComponent(id)}/grok/logout`, { method: "POST" }), "Вышли").then(() => go("upstreams"));
+          };
+        });
+      }
+
+      async function startGrok(id, button) {
+        await act(button, async () => {
+          const start = await call(`/admin/upstreams/${encodeURIComponent(id)}/grok/login`, { method: "POST" });
+          grokWaits[id] = {
+            user_code: start.user_code,
+            link: start.verification_uri_complete || start.verification_uri,
+            message: "Жду подтверждения в браузере…",
+            error: false,
+          };
+          paintGrokWait(id);
+          const deadline = Date.now() + (start.expires_in || 600) * 1000;
+          const interval = Math.max(2, start.interval || 5) * 1000;
+          while (Date.now() < deadline) {
+            await new Promise((resolve) => setTimeout(resolve, interval));
+            if (!grokWaits[id]) return;
+            let poll;
+            try {
+              poll = await call(`/admin/upstreams/${encodeURIComponent(id)}/grok/poll`, {
+                method: "POST",
+                body: JSON.stringify({ device_code: start.device_code }),
+              });
+            } catch (error) {
+              if (!grokWaits[id]) return;
+              grokWaits[id].message = error.message;
+              grokWaits[id].error = true;
+              paintGrokWait(id);
+              return;
+            }
+            if (poll.status === "ok") {
+              delete grokWaits[id];
+              toast("Вход выполнен. Сессия обновится сама.");
+              if (current === "upstreams") await go("upstreams");
+              return;
+            }
+            if (poll.status === "error") {
+              grokWaits[id].message = poll.message || "Вход не удался";
+              grokWaits[id].error = true;
+              paintGrokWait(id);
+              toast(grokWaits[id].message, true);
+              return;
+            }
+          }
+          if (!grokWaits[id]) return;
+          grokWaits[id].message = "Код истёк. Начните вход ещё раз.";
+          grokWaits[id].error = true;
+          paintGrokWait(id);
+        });
       }
 
       function upstreamForm(up) {
         const edit = !!up;
-        up = up || { id: "", label: "", kind: "openai_compatible", base_url: "", api_version: "v1beta", reasoning_dialect: "auto" };
+        up = up || { id: "", label: "", kind: "openai_compatible", base_url: "", api_version: "v1beta", reasoning_dialect: "auto", grok: false };
+        const kindValue = up.grok ? "grok" : up.kind || "openai_compatible";
         openDrawer({ title: edit ? `Провайдер «${up.label || up.id}»` : "Новый провайдер", sub: edit ? up.id : "Куда слать запросы: адрес API и его диалект" });
         drawerBody(`
           <div class="d-sec">
             <h3>Кто это</h3>
             <div class="form-grid">
-              <label class="field"><span>ID</span><input id="f-id" value="${esc(up.id)}" placeholder="openrouter" ${edit ? "disabled" : ""} /><small>Латиницей, навсегда</small></label>
-              <label class="field"><span>Название</span><input id="f-label" value="${esc(up.label)}" placeholder="OpenRouter" /></label>
+              <label class="field"><span>ID</span><input id="f-id" value="${esc(up.id)}" placeholder="grok" ${edit ? "disabled" : ""} /><small>Латиницей, навсегда</small></label>
+              <label class="field"><span>Название</span><input id="f-label" value="${esc(up.label)}" placeholder="Grok" /></label>
             </div>
           </div>
           <div class="d-sec">
             <h3>Как с ним говорить</h3>
             <div class="form-grid">
               <label class="field"><span>Протокол</span><select id="f-kind">
-                <option value="openai_compatible" ${up.kind === "openai_compatible" ? "selected" : ""}>OpenAI-совместимый</option>
-                <option value="gemini" ${up.kind === "gemini" ? "selected" : ""}>Gemini</option></select></label>
+                <option value="openai_compatible" ${kindValue === "openai_compatible" ? "selected" : ""}>OpenAI-совместимый</option>
+                <option value="gemini" ${kindValue === "gemini" ? "selected" : ""}>Gemini</option>
+                <option value="grok" ${kindValue === "grok" ? "selected" : ""}>Подписка Grok</option></select></label>
               <label class="field"><span>Диалект рассуждений</span><select id="f-dialect">
                 ${["auto", "openai", "openrouter", "qwen", "nvidia"].map((d) => `<option ${up.reasoning_dialect === d ? "selected" : ""}>${d}</option>`).join("")}
               </select><small>auto — определяется по адресу</small></label>
-              <label class="field full"><span>Адрес API</span><input id="f-url" value="${esc(up.base_url)}" placeholder="https://openrouter.ai/api/v1" /></label>
+              <label class="field full"><span>Адрес API</span><input id="f-url" value="${esc(up.grok ? GROK_BASE : up.base_url)}" placeholder="https://openrouter.ai/api/v1" /></label>
               <label class="field"><span>Версия API (Gemini)</span><input id="f-ver" value="${esc(up.api_version || "v1beta")}" placeholder="v1beta" /></label>
             </div>
+            <p class="hint hidden" id="f-grok-note">Это подписка Grok, не ключ с console.x.ai. Адрес фиксирован. После сохранения на карточке провайдера — вход через браузер: код подтверждения и ссылка. Модель назначается в разделе «Модели», как у остальных.</p>
           </div>`);
         drawerFoot(`<button class="btn" id="f-cancel">Отмена</button><button class="btn primary" id="f-save">${edit ? "Сохранить" : "Добавить"}</button>`);
+        const applyKind = () => {
+          const grok = $("f-kind").value === "grok";
+          $("f-url").disabled = grok;
+          $("f-grok-note").classList.toggle("hidden", !grok);
+          if (grok) {
+            $("f-url").value = GROK_BASE;
+            if (!$("f-label").value.trim()) $("f-label").value = "Grok";
+          } else if ($("f-url").value.trim() === GROK_BASE) {
+            $("f-url").value = "";
+          }
+        };
+        $("f-kind").onchange = applyKind;
+        applyKind();
         $("f-cancel").onclick = closeDrawer;
         $("f-save").onclick = () => {
           const id = $("f-id").value.trim();
           if (!id) return toast("Нужен ID", true);
+          const grok = $("f-kind").value === "grok";
           act($("f-save"), () =>
             call("/admin/upstreams", {
               method: "POST",
@@ -979,9 +1106,10 @@
                 ...up,
                 id,
                 label: $("f-label").value.trim(),
-                kind: $("f-kind").value,
-                base_url: $("f-url").value.trim(),
-                api_version: $("f-ver").value.trim() || "v1beta",
+                kind: grok ? "openai_compatible" : $("f-kind").value,
+                grok,
+                base_url: grok ? GROK_BASE : $("f-url").value.trim(),
+                api_version: $("f-ver").value.trim() || (grok ? "v1" : "v1beta"),
                 reasoning_dialect: $("f-dialect").value,
                 extra_headers: up.extra_headers || [],
                 enabled: edit ? up.enabled : true,
@@ -990,7 +1118,7 @@
             }),
           ).then((r) => {
             if (r === undefined) return;
-            toast(edit ? "Сохранено" : "Провайдер добавлен — теперь добавьте ему ключ");
+            toast(edit ? "Сохранено" : grok ? "Провайдер добавлен — войдите через браузер" : "Провайдер добавлен — теперь добавьте ему ключ");
             closeDrawer();
             go("upstreams");
           });
