@@ -4,6 +4,7 @@ pub mod config;
 pub mod doctor;
 pub mod entitlement;
 pub mod error;
+pub mod grok_auth;
 pub mod hwid;
 pub mod llm;
 pub mod models;
@@ -286,6 +287,10 @@ pub fn run() {
             commands::delete_local_model,
             commands::local_models_base_url,
             commands::test_provider,
+            grok_auth::grok_login_start,
+            grok_auth::grok_login_poll,
+            grok_auth::grok_logout,
+            grok_auth::grok_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running VelvetDesk");

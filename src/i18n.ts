@@ -616,6 +616,12 @@ const ru: Dict = {
   "keys.sub":
     "Ключи хранятся на этом устройстве и уходят только к выбранному провайдеру. Несколько ключей работают как пул с ротацией.",
   "keys.provider": "Провайдер",
+  "keys.grokSignIn": "Войти через подписку Grok",
+  "keys.grokWaiting": "Код {code}. Подтверди вход в браузере — жду.",
+  "keys.grokSignedIn": "Вход выполнен. Сессия обновится сама.",
+  "keys.grokUntil": "действует до {time}",
+  "keys.grokSignOut": "Выйти",
+  "keys.grokHint": "Это подписка Grok, не ключ с console.x.ai. Версию CLI приложение подставляет само.",
   "keys.step1": "Шаг 1 — ключи API ({n})",
   "keys.step2": "Шаг 2 — модель",
   "keys.noKeysGemini":
@@ -1360,6 +1366,12 @@ const en: Dict = {
   "keys.sub":
     "Keys stay on this device and travel only to the chosen provider. Several keys work as a rotating pool.",
   "keys.provider": "Provider",
+  "keys.grokSignIn": "Sign in with a Grok subscription",
+  "keys.grokWaiting": "Code {code}. Approve the sign-in in the browser — waiting.",
+  "keys.grokSignedIn": "Signed in. The session refreshes on its own.",
+  "keys.grokUntil": "valid until {time}",
+  "keys.grokSignOut": "Sign out",
+  "keys.grokHint": "This is the Grok subscription, not a console.x.ai key. The app fills in the current CLI version itself.",
   "keys.step1": "Step 1 — API keys ({n})",
   "keys.step2": "Step 2 — model",
   "keys.noKeysGemini":

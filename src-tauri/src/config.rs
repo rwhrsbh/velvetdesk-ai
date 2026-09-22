@@ -199,6 +199,26 @@ impl Default for Settings {
                     key_count: 0,
                 },
                 ProviderConfig {
+                    id: "grok".into(),
+                    label: "Grok".into(),
+                    kind: ProviderKind::OpenaiCompatible,
+                    base_url: "https://cli-chat-proxy.grok.com/v1".into(),
+                    api_version: "v1".into(),
+                    model: "grok-4.7".into(),
+                    extra_headers: vec![],
+                    temperature: 0.85,
+                    max_output_tokens: None,
+                    transcribe_model: String::new(),
+                    thinking_effort: String::new(),
+                    thinking_budget: None,
+                    model_chain: vec![],
+                    chain_rounds: 3,
+                    extra_body: serde_json::Value::Null,
+                    reasoning_dialect: default_dialect(),
+                    context_tokens: Some(500_000),
+                    key_count: 0,
+                },
+                ProviderConfig {
                     id: "velvetdesk-cloud".into(),
                     label: "VelvetDesk Cloud".into(),
                     kind: ProviderKind::OpenaiCompatible,
@@ -282,6 +302,7 @@ impl Settings {
             }
         }
         settings.pin_cloud(&crate::hwid::device_id(paths));
+        settings.pin_grok();
         Ok(settings)
     }
 
@@ -317,6 +338,19 @@ impl Settings {
         }
     }
 
+    /// The Grok subscription endpoint is fixed. The CLI version header is not
+    /// stored here: it is read from the stable channel at request time.
+    pub fn pin_grok(&mut self) {
+        if let Some(grok) = self.providers.iter_mut().find(|p| p.id == "grok") {
+            grok.base_url = "https://cli-chat-proxy.grok.com/v1".into();
+            grok.api_version = "v1".into();
+            grok.extra_headers.retain(|(name, _)| {
+                !name.eq_ignore_ascii_case("X-XAI-Token-Auth")
+                    && !name.eq_ignore_ascii_case("x-grok-client-version")
+            });
+        }
+    }
+
     pub fn provider(&self, id: &str) -> Option<&ProviderConfig> {
         self.providers.iter().find(|p| p.id == id)
     }
@@ -338,12 +372,26 @@ impl Settings {
     }
 }
 
+/// Refreshable Grok subscription session. The access token is also the key
+/// the pool sends; this is what mints the next one.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GrokSession {
+    #[serde(default)]
+    pub access_token: String,
+    #[serde(default)]
+    pub refresh_token: String,
+    #[serde(default)]
+    pub expires_at: i64,
+}
+
 /// API keys live in a separate file so the settings blob can be shared safely.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Secrets {
     /// provider id -> ordered key pool
     #[serde(default)]
     pub keys: std::collections::HashMap<String, Vec<String>>,
+    #[serde(default)]
+    pub grok: Option<GrokSession>,
 }
 
 impl Secrets {

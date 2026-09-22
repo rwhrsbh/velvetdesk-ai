@@ -217,6 +217,21 @@ export const api = {
   deleteLocalModel: (modelId: string) => invoke<LocalModel[]>("delete_local_model", { modelId }),
   localModelsBaseUrl: () => invoke<string>("local_models_base_url"),
   testProvider: () => invoke<Record<string, unknown>>("test_provider"),
+  grokLoginStart: () =>
+    invoke<{
+      device_code: string;
+      user_code: string;
+      verification_uri: string;
+      verification_uri_complete: string;
+      interval: number;
+      expires_in: number;
+    }>("grok_login_start"),
+  grokLoginPoll: (deviceCode: string) =>
+    invoke<{ status: string; message: string; expires_at: number }>("grok_login_poll", {
+      deviceCode,
+    }),
+  grokLogout: () => invoke<{ signed_in: boolean; expires_at: number }>("grok_logout"),
+  grokStatus: () => invoke<{ signed_in: boolean; expires_at: number }>("grok_status"),
 
   deleteAgentEntries: (model_id: string, man_id: string | null, ids: string[]) =>
     invoke<AgentLog>("delete_agent_entries", { modelId: model_id, manId: man_id, ids }),

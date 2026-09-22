@@ -255,6 +255,11 @@ export async function openKeysModal(deps: ModalDeps) {
     }
     const catalog = catalogs.get(p.id) ?? null;
     const isGemini = p.kind === "gemini";
+    const isGrok = p.id === "grok";
+    const providerTabs = [
+      ...settings.providers.filter((item) => item.id !== "velvetdesk-cloud"),
+      ...settings.providers.filter((item) => item.id === "velvetdesk-cloud"),
+    ];
     let plan: PlanState | null = null;
     try {
       plan = await api.planState();
@@ -293,7 +298,7 @@ export async function openKeysModal(deps: ModalDeps) {
       <div class="field">
         <label>${t("keys.provider")}</label>
         <div class="segmented-control wide" id="providerTabs">
-          ${settings.providers
+          ${providerTabs
             .map(
               (item) =>
                 `<button class="segmented-btn ${item.id === p.id ? "active" : ""}" data-provider="${escapeHtml(
@@ -311,7 +316,15 @@ export async function openKeysModal(deps: ModalDeps) {
           ? ""
           : `<div class="field">
         <label>${t("keys.step1", { n: keys.length })}</label>
-        <div id="keyList">
+        ${
+          isGrok
+            ? `<div class="hint-inline" id="grokHint">${t("keys.grokHint")}</div>
+        <div class="row-inline" style="margin-top:8px">
+          <button class="btn btn-primary" id="btnGrokLogin" ${keys.length ? 'style="display:none"' : ""}>${t("keys.grokSignIn")}</button>
+          <button class="btn btn-secondary" id="btnGrokLogout" ${keys.length ? "" : 'style="display:none"'}>${t("keys.grokSignOut")}</button>
+        </div>
+        <div class="meta" id="grokSession"></div>`
+            : `<div id="keyList">
           ${
             keys.length === 0
               ? `<div class="empty-hint">${
@@ -337,7 +350,8 @@ export async function openKeysModal(deps: ModalDeps) {
         <div class="row-inline">
           <input class="field-input" id="newKey" placeholder="${t("keys.addPlaceholder")}" autocomplete="off" />
           <button class="btn btn-primary" id="btnAddKey">${t("keys.add")}</button>
-        </div>
+        </div>`
+        }
       </div>
 
       <div class="field">
@@ -844,6 +858,59 @@ export async function openKeysModal(deps: ModalDeps) {
     card.querySelector<HTMLInputElement>("#newKey")?.addEventListener("keydown", (raw) => {
       if ((raw as KeyboardEvent).key === "Enter") void addKey();
     });
+
+    card.querySelector<HTMLButtonElement>("#btnGrokLogin")?.addEventListener("click", () => {
+      void (async () => {
+        const hint = card.querySelector<HTMLElement>("#grokHint");
+        try {
+          const start = await api.grokLoginStart();
+          const { openUrl } = await import("@tauri-apps/plugin-opener");
+          const url = start.verification_uri_complete || start.verification_uri;
+          if (url) await openUrl(url);
+          if (hint) hint.textContent = t("keys.grokWaiting", { code: start.user_code });
+          const interval = Math.max(2, start.interval || 5) * 1000;
+          const deadline = Date.now() + (start.expires_in || 600) * 1000;
+          while (Date.now() < deadline) {
+            await new Promise((resolve) => setTimeout(resolve, interval));
+            const poll = await api.grokLoginPoll(start.device_code);
+            if (poll.status === "pending") continue;
+            if (poll.status === "ok") {
+              toast(t("keys.grokSignedIn"), "success");
+              await deps.refresh();
+              settings = store.settings ?? settings;
+              await reloadModels(true);
+              return;
+            }
+            throw new Error(poll.message || "login failed");
+          }
+        } catch (error) {
+          toast(errorText(error), "error");
+        }
+      })();
+    });
+
+    card.querySelector<HTMLButtonElement>("#btnGrokLogout")?.addEventListener("click", () => {
+      void (async () => {
+        try {
+          await api.grokLogout();
+          catalogs.delete("grok");
+          await deps.refresh();
+          settings = store.settings ?? settings;
+          await draw();
+        } catch (error) {
+          toast(errorText(error), "error");
+        }
+      })();
+    });
+
+    if (isGrok && keys.length) {
+      void api.grokStatus().then((status) => {
+        const line = card.querySelector<HTMLElement>("#grokSession");
+        if (!line || !status.signed_in || !status.expires_at) return;
+        const time = new Date(status.expires_at * 1000).toLocaleString();
+        line.textContent = t("keys.grokUntil", { time });
+      });
+    }
 
     card.querySelectorAll<HTMLButtonElement>("#speechEngine .segmented-btn").forEach((btn) => {
       btn.addEventListener("click", async () => {

@@ -8,6 +8,7 @@
 pub mod catalog;
 pub mod error;
 pub mod gemini;
+pub mod grok;
 pub mod keypool;
 pub mod openai;
 pub mod provider;

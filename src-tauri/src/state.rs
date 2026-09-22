@@ -83,6 +83,7 @@ impl AppState {
     pub fn save_settings(&self, next: Settings) -> Result<()> {
         let mut next = next;
         next.pin_cloud(&crate::hwid::device_id(&self.paths));
+        next.pin_grok();
         next.save(&self.paths)?;
         *self.settings.write() = next;
         self.reload_pools();

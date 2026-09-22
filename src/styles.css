@@ -213,6 +213,11 @@ a {
   text-overflow: ellipsis;
 }
 
+/* VelvetDesk Cloud stays on its own row, under every other provider. */
+#providerTabs [data-provider="velvetdesk-cloud"] {
+  flex: 1 1 100%;
+}
+
 /* The subscription panel: what the plan is, what is left of it, and the one
    field that changes any of it. */
 .plan-card {

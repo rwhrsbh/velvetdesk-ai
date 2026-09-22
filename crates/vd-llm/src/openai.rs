@@ -26,8 +26,11 @@ pub async fn call(
         req = req.header("authorization", format!("Bearer {api_key}"));
     }
     for (k, v) in &provider.extra_headers {
-        req = req.header(k.as_str(), v.as_str());
+        if !(crate::grok::is_subscription(provider) && crate::grok::is_managed_header(k)) {
+            req = req.header(k.as_str(), v.as_str());
+        }
     }
+    req = crate::grok::apply(http, provider, req).await;
 
     let response = req
         .json(&body)
@@ -93,8 +96,11 @@ pub async fn call_streaming(
         .header("authorization", format!("Bearer {api_key}"))
         .header("content-type", "application/json");
     for (k, v) in &provider.extra_headers {
-        req = req.header(k.as_str(), v.as_str());
+        if !(crate::grok::is_subscription(provider) && crate::grok::is_managed_header(k)) {
+            req = req.header(k.as_str(), v.as_str());
+        }
     }
+    req = crate::grok::apply(http, provider, req).await;
 
     let response = req
         .json(&body)

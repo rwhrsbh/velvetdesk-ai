@@ -628,6 +628,7 @@ pub async fn digest_chat(
     keep_last: Option<usize>,
 ) -> Result<agent::DigestPreview> {
     entitlement::ensure_room_online(&state.paths, &state.llm.http).await?;
+    crate::grok_auth::prepare(&state).await?;
     let settings = state.settings_view();
     let provider = state.active_provider()?;
     let pool = state.pool(&provider.id);
@@ -674,6 +675,7 @@ pub async fn learn_voice(
     model_id: String,
     samples: Option<usize>,
 ) -> Result<Profile> {
+    crate::grok_auth::prepare(&state).await?;
     let settings = state.settings_view();
     let provider = state.active_provider()?;
     let pool = state.pool(&provider.id);
@@ -751,6 +753,7 @@ pub async fn run_agent(
     input: RunInput,
 ) -> Result<RunOutput> {
     entitlement::ensure_room_online(&state.paths, &state.llm.http).await?;
+    crate::grok_auth::prepare(&state).await?;
     let settings = state.settings_view();
     let provider = state.active_provider()?;
     let pool = state.pool(&provider.id);
@@ -799,6 +802,7 @@ pub async fn context_stats(
     model_id: String,
     man_id: Option<String>,
 ) -> Result<agent::ContextStats> {
+    crate::grok_auth::prepare(&state).await?;
     let settings = state.settings_view();
     let provider = state.active_provider()?;
     let scope = state.paths.scope(&model_id)?;
@@ -861,6 +865,7 @@ pub async fn compact_chat(
     man_id: Option<String>,
 ) -> Result<AgentLog> {
     entitlement::ensure_room_online(&state.paths, &state.llm.http).await?;
+    crate::grok_auth::prepare(&state).await?;
     let settings = state.settings_view();
     let provider = state.active_provider()?;
     let pool = state.pool(&provider.id);
@@ -891,6 +896,7 @@ pub async fn compact_context(
     man_id: String,
     keep_last: Option<usize>,
 ) -> Result<agent::ContextStats> {
+    crate::grok_auth::prepare(&state).await?;
     let settings = state.settings_view();
     let provider = state.active_provider()?;
     let pool = state.pool(&provider.id);
@@ -921,6 +927,7 @@ pub async fn write_letters(
     state: State<'_, AppState>,
     input: agent::LettersInput,
 ) -> Result<agent::LettersOutput> {
+    crate::grok_auth::prepare(&state).await?;
     let settings = state.settings_view();
     let provider = state.active_provider()?;
     let pool = state.pool(&provider.id);
@@ -947,6 +954,7 @@ pub async fn master_chat(
     input: agent::master::MasterInput,
 ) -> Result<agent::master::MasterOutput> {
     entitlement::ensure_room_online(&state.paths, &state.llm.http).await?;
+    crate::grok_auth::prepare(&state).await?;
     let settings = state.settings_view();
     let provider = state.active_provider()?;
     let pool = state.pool(&provider.id);
@@ -980,6 +988,7 @@ pub async fn master_context_stats(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<agent::ContextStats> {
+    crate::grok_auth::prepare(&state).await?;
     let settings = state.settings_view();
     let provider = state.active_provider()?;
     let pool = state.pool(&provider.id);
@@ -1990,6 +1999,7 @@ pub async fn list_provider_models(
     state: State<'_, AppState>,
     provider_id: String,
 ) -> Result<crate::llm::catalog::ModelCatalog> {
+    crate::grok_auth::prepare(&state).await?;
     let provider = {
         let settings = state.settings.read();
         settings
@@ -2108,6 +2118,7 @@ pub async fn transcribe(
     // Dictation is a model call like any other, and costs the free plan one
     // — once it has come back with words.
     entitlement::ensure_room_online(&state.paths, &state.llm.http).await?;
+    crate::grok_auth::prepare(&state).await?;
     let provider = {
         let settings = state.settings.read();
         settings
@@ -2190,6 +2201,7 @@ pub fn delete_local_model(
 /// Cheap connectivity probe: one-token request through the pool.
 #[tauri::command]
 pub async fn test_provider(app: AppHandle, state: State<'_, AppState>) -> Result<Value> {
+    crate::grok_auth::prepare(&state).await?;
     let provider = state.active_provider()?;
     let pool = state.pool(&provider.id);
     let emit = emitter(&app, None);
