@@ -636,28 +636,31 @@ mod tests {
             .key;
         assert_eq!(plain, "sk-openai-plain");
 
-        let registry = state.registry.read();
-        let (grok_up, grok_model) = registry.find_model("grok-4.7").unwrap();
-        assert_eq!(grok_up.id, "my-grok");
-        assert!(grok_up.grok);
-        assert_eq!(grok_up.base_url, SUBSCRIPTION_BASE);
-        assert_eq!(
-            grok_up.extra_headers,
-            vec![("X-Custom".into(), "keep".into())]
-        );
-        let grok_provider = provider_for(grok_up, grok_model);
-        assert!(vd_llm::grok::is_subscription(&grok_provider));
-        assert_eq!(grok_provider.base_url, SUBSCRIPTION_BASE);
-        assert!(grok_provider
-            .extra_headers
-            .iter()
-            .all(|(name, _)| !vd_llm::grok::is_managed_header(name)));
+        {
+            // The read guard must end before the next `.await`: clippy treats
+            // a guard kept in this async test as held across that point.
+            let registry = state.registry.read();
+            let (grok_up, grok_model) = registry.find_model("grok-4.7").unwrap();
+            assert_eq!(grok_up.id, "my-grok");
+            assert!(grok_up.grok);
+            assert_eq!(grok_up.base_url, SUBSCRIPTION_BASE);
+            assert_eq!(
+                grok_up.extra_headers,
+                vec![("X-Custom".into(), "keep".into())]
+            );
+            let grok_provider = provider_for(grok_up, grok_model);
+            assert!(vd_llm::grok::is_subscription(&grok_provider));
+            assert_eq!(grok_provider.base_url, SUBSCRIPTION_BASE);
+            assert!(grok_provider
+                .extra_headers
+                .iter()
+                .all(|(name, _)| !vd_llm::grok::is_managed_header(name)));
 
-        let (openai_up, openai_model) = registry.find_model("gpt-4o").unwrap();
-        let openai_provider = provider_for(openai_up, openai_model);
-        assert!(!vd_llm::grok::is_subscription(&openai_provider));
-        assert_eq!(openai_provider.base_url, "https://api.openai.com/v1");
-        drop(registry);
+            let (openai_up, openai_model) = registry.find_model("gpt-4o").unwrap();
+            let openai_provider = provider_for(openai_up, openai_model);
+            assert!(!vd_llm::grok::is_subscription(&openai_provider));
+            assert_eq!(openai_provider.base_url, "https://api.openai.com/v1");
+        }
 
         // A hand-edited row still goes to the subscription proxy.
         let mut edited = grok_upstream();
@@ -722,7 +725,7 @@ mod tests {
         assert_eq!(state.db.grok_sessions().unwrap().len(), 2);
         let pool = state.registry.read().pool("my-grok").unwrap();
         assert_eq!(pool.len(), 2);
-        let mut sent_keys = vec![pool.acquire().unwrap().key, pool.acquire().unwrap().key];
+        let mut sent_keys = [pool.acquire().unwrap().key, pool.acquire().unwrap().key];
         sent_keys.sort();
         assert!(sent_keys.contains(&access.to_string()));
         assert!(sent_keys.contains(&tokens.access_token));
