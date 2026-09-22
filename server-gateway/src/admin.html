@@ -1209,6 +1209,7 @@
                   : m.images
                     ? `<span class="badge green">${icon("eye", 12)}видит фото</span>`
                     : `<span class="badge amber">${icon("image", 12)}фото → описание</span>`;
+            const rank = modelCache.findIndex((row) => row.name === m.name);
             const chips = [
               ["вход", price(m.price_in)],
               ["кеш", m.price_cached == null ? "как вход" : price(m.price_cached)],
@@ -1217,7 +1218,6 @@
               ...(m.context_tokens ? [["контекст", Math.round(m.context_tokens / 1000) + "k"]] : []),
               ["приоритет", String(rank + 1)],
             ];
-            const rank = modelCache.findIndex((row) => row.name === m.name);
             return `<div class="card item ${m.enabled ? "" : "off"}" data-m-name="${esc(m.name)}" style="--i:${Math.min(i, 12)}">
               <div style="min-width:0">
                 <div class="i-title"><b class="ell">${esc(m.name)}</b>${roleBadge}${routingBadge(m.routing)}${m.enabled ? "" : '<span class="badge red">выключена</span>'}</div>
