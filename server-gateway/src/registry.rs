@@ -670,6 +670,35 @@ mod tests {
             .is_null());
     }
 
+    /// A card moved to the top of the list is the first model the chain tries.
+    #[test]
+    fn moving_a_model_up_makes_it_the_first_in_the_chain() {
+        let db = crate::db::Db::memory().unwrap();
+        db.save_upstream(&upstream("openrouter", true)).unwrap();
+        for (index, name) in ["alpha", "beta", "gamma"].iter().enumerate() {
+            let mut row = model(name, "openrouter", true);
+            row.position = index as i64;
+            db.save_model(&row).unwrap();
+        }
+        assert!(!crate::db::model_order_is_complete(
+            &["alpha".into(), "beta".into(), "gamma".into()],
+            &["gamma".into(), "beta".into()],
+        ));
+        assert!(!db
+            .reorder_models(&["gamma".into(), "beta".into()])
+            .unwrap());
+        assert!(db
+            .reorder_models(&["gamma".into(), "alpha".into(), "beta".into()])
+            .unwrap());
+        let loaded = Registry::load(&db, None).unwrap();
+        let names: Vec<String> = loaded
+            .chain_from("")
+            .into_iter()
+            .map(|(_, row)| row.name.clone())
+            .collect();
+        assert_eq!(names, vec!["gamma".to_string(), "alpha".into(), "beta".into()]);
+    }
+
     /// Describers and dictation models are tools, not chat models: neither
     /// answers a chat nor stands in for one that failed.
     #[test]

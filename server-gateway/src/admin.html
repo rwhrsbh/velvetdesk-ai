@@ -282,6 +282,11 @@
       .i-sub { display: flex; align-items: center; gap: 7px; margin-top: 5px; color: var(--dim); font-size: 12.5px; min-width: 0; }
       .i-sub .sep { color: var(--faint); }
       .i-right { display: flex; align-items: center; gap: 8px; }
+      .move { display: flex; align-items: center; gap: 2px; }
+      .drag { cursor: grab; touch-action: none; }
+      .drag:active { cursor: grabbing; }
+      .item.dragging { opacity: 0.45; }
+      .item.drop-above { box-shadow: inset 0 2px 0 var(--accent); }
       .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 11px; }
       .chip {
         display: inline-flex; align-items: baseline; gap: 6px; padding: 5px 10px; border-radius: 9px;
@@ -565,6 +570,7 @@
         key: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/>',
         copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
         up: '<path d="m18 15-6-6-6 6"/>',
+        grip: '<circle cx="9" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="18" r="1"/>',
         down: '<path d="m6 9 6 6 6-6"/>',
         refresh: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/>',
       };
@@ -1161,7 +1167,7 @@
             <div class="search">${icon("search")}<input id="m-q" placeholder="Поиск по имени или провайдеру" value="${esc(modelFilter.q)}" /></div>
           </div>
           <div class="callout" style="margin-bottom:16px">${icon("info", 18)}<div>
-            Порядок — это порядок падения: запрос идёт в модель, что назвал клиент, а при сбое — дальше по списку.
+            Карточка выше — приоритетнее: её можно перетащить или подвинуть кнопками. Число «Порядок» в форме — тот же список. Запрос идёт в модель, что назвал клиент, а при сбое — дальше по списку.
             «Только голос» и «только изображения» — служебные: в чате не отвечают и не подменяют упавшую модель.
             Модели без зрения получают вместо фото подробное описание от модели «только изображения».</div></div>
           <div class="list stagger" id="m-list"></div>`);
@@ -1209,9 +1215,10 @@
               ["выход", price(m.price_out)],
               ...(m.price_request ? [["клип", usd(m.price_request, 4)]] : []),
               ...(m.context_tokens ? [["контекст", Math.round(m.context_tokens / 1000) + "k"]] : []),
-              ["порядок", "#" + m.position],
+              ["приоритет", String(rank + 1)],
             ];
-            return `<div class="card item ${m.enabled ? "" : "off"}" style="--i:${Math.min(i, 12)}">
+            const rank = modelCache.findIndex((row) => row.name === m.name);
+            return `<div class="card item ${m.enabled ? "" : "off"}" data-m-name="${esc(m.name)}" style="--i:${Math.min(i, 12)}">
               <div style="min-width:0">
                 <div class="i-title"><b class="ell">${esc(m.name)}</b>${roleBadge}${routingBadge(m.routing)}${m.enabled ? "" : '<span class="badge red">выключена</span>'}</div>
                 <div class="i-sub"><span>${esc(upLabel(m.upstream_id))}</span><span class="sep">·</span><span class="mono ell">${esc(m.upstream_name || m.name)}</span></div>
@@ -1220,6 +1227,11 @@
                 </div>
               </div>
               <div class="i-right">
+                <span class="move">
+                  <button class="btn icon sm ghost drag" draggable="true" data-m-drag="${esc(m.name)}" title="перетащить — выше приоритетнее">${icon("grip", 15)}</button>
+                  <button class="btn icon sm ghost" data-m-up="${esc(m.name)}" title="выше, приоритетнее" ${i === 0 ? "disabled" : ""}>${icon("up", 15)}</button>
+                  <button class="btn icon sm ghost" data-m-down="${esc(m.name)}" title="ниже" ${i === list.length - 1 ? "disabled" : ""}>${icon("down", 15)}</button>
+                </span>
                 ${role === "voice" ? "" : `<button class="btn sm" data-m-route="${esc(m.name)}">${icon("route")}Хосты</button>`}
                 <button class="btn icon sm ghost" data-m-edit="${esc(m.name)}" title="изменить">${icon("edit")}</button>
                 <button class="btn icon sm ghost danger" data-m-del="${esc(m.name)}" title="удалить">${icon("trash")}</button>
@@ -1258,6 +1270,75 @@
             if (!(await confirmBox({ title: `Удалить модель «${name}»?`, text: "Клиенты, выбравшие её, пойдут по цепочке падения." }))) return;
             act(b, () => call(`/admin/models/${encodeURIComponent(name)}`, { method: "DELETE" }), "Модель удалена").then(() => go("models"));
           };
+        });
+        const visibleNames = () => list.map((row) => row.name);
+        const placeVisible = (nextVisible) => {
+          const shown = new Set(list.map((row) => row.name));
+          const gaps = [];
+          modelCache.forEach((row, index) => {
+            if (shown.has(row.name)) gaps.push(index);
+          });
+          const next = modelCache.map((row) => row.name);
+          nextVisible.forEach((name, index) => {
+            next[gaps[index]] = name;
+          });
+          return next;
+        };
+        const commitOrder = (nextVisible, button) => {
+          const names = placeVisible(nextVisible);
+          act(button, () => call("/admin/models/order", { method: "POST", body: JSON.stringify({ names }) }), "Порядок сохранён").then(async (saved) => {
+            if (saved === undefined) return;
+            modelCache = await call("/admin/models");
+            drawModelList();
+          });
+        };
+        box.querySelectorAll("[data-m-up]").forEach((b) => {
+          b.onclick = () => {
+            const names = visibleNames();
+            const index = names.indexOf(b.dataset.mUp);
+            if (index <= 0) return;
+            [names[index - 1], names[index]] = [names[index], names[index - 1]];
+            commitOrder(names, b);
+          };
+        });
+        box.querySelectorAll("[data-m-down]").forEach((b) => {
+          b.onclick = () => {
+            const names = visibleNames();
+            const index = names.indexOf(b.dataset.mDown);
+            if (index < 0 || index === names.length - 1) return;
+            [names[index + 1], names[index]] = [names[index], names[index + 1]];
+            commitOrder(names, b);
+          };
+        });
+        let dragName = "";
+        box.querySelectorAll("[data-m-drag]").forEach((handle) => {
+          handle.addEventListener("dragstart", (event) => {
+            dragName = handle.dataset.mDrag;
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("text/plain", dragName);
+            handle.closest(".item").classList.add("dragging");
+          });
+          handle.addEventListener("dragend", () => {
+            dragName = "";
+            box.querySelectorAll(".item").forEach((card) => card.classList.remove("dragging", "drop-above"));
+          });
+        });
+        box.querySelectorAll(".item").forEach((card) => {
+          card.addEventListener("dragover", (event) => {
+            if (!dragName || card.dataset.mName === dragName) return;
+            event.preventDefault();
+            box.querySelectorAll(".item").forEach((other) => other.classList.remove("drop-above"));
+            card.classList.add("drop-above");
+          });
+          card.addEventListener("drop", (event) => {
+            event.preventDefault();
+            const before = card.dataset.mName;
+            if (!dragName || dragName === before) return;
+            const names = visibleNames().filter((name) => name !== dragName);
+            const at = names.indexOf(before);
+            names.splice(at < 0 ? names.length : at, 0, dragName);
+            commitOrder(names, null);
+          });
         });
       }
 
@@ -1304,7 +1385,7 @@
               <label class="field"><span>Кеш</span><input id="f-cached" value="${m.price_cached ?? ""}" inputmode="decimal" placeholder="как вход" /></label>
               <label class="field"><span>Выход</span><input id="f-out" value="${m.price_out ?? ""}" inputmode="decimal" placeholder="0.60" /></label>
               <label class="field"><span>Контекст, токенов</span><input id="f-ctx" value="${m.context_tokens ?? ""}" inputmode="numeric" placeholder="128000" /></label>
-              <label class="field"><span>Порядок</span><input id="f-pos" value="${m.position ?? 0}" inputmode="numeric" /></label>
+              <label class="field"><span>Порядок</span><input id="f-pos" value="${m.position ?? 0}" inputmode="numeric" /><small>Меньше — выше в списке. Карточки можно двигать и без этого числа.</small></label>
               <label class="field" id="f-req-row"><span>Цена за клип, $</span><input id="f-req" value="${m.price_request || ""}" inputmode="decimal" placeholder="0.002" /></label>
             </div>
             <p class="hint">Для OpenRouter списывается фактическая стоимость ответа; эти цены — запасные и для обзора.</p>

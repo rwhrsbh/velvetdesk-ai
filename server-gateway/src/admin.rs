@@ -42,6 +42,7 @@ pub fn router() -> Router<AppState> {
         .route("/admin/upstreams/{id}/grok/logout", post(grok_logout))
         .route("/admin/upstreams/{id}/grok", get(grok_status_one))
         .route("/admin/models", get(list_models).post(save_model))
+        .route("/admin/models/order", post(reorder_models))
         .route("/admin/models/{name}", delete(delete_model))
         .route("/admin/models/{name}/providers", get(model_providers))
         .route("/admin/tiers", get(list_tiers).post(save_tier))
@@ -103,6 +104,11 @@ struct KeyBody {
 #[derive(Debug, Deserialize)]
 struct PollBody {
     device_code: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct OrderBody {
+    names: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -430,6 +436,22 @@ async fn save_model(
     state.db.save_model(&body)?;
     state.reload()?;
     Ok(Json(json!({ "saved": body.name })))
+}
+
+/// The list is the priority: the first name is the top card.
+async fn reorder_models(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<OrderBody>,
+) -> Result<Json<Value>, ApiError> {
+    admin(&state, &headers)?;
+    if !state.db.reorder_models(&body.names)? {
+        return Err(ApiError::BadRequest(
+            "the order must list every model once".into(),
+        ));
+    }
+    state.reload()?;
+    Ok(Json(json!({ "saved": body.names.len() })))
 }
 
 async fn delete_model(

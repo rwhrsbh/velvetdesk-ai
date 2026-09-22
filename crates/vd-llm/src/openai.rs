@@ -256,6 +256,18 @@ fn assemble_tool_calls(partial: Vec<(String, String, String)>) -> Vec<ToolCall> 
         .collect()
 }
 
+/// Grok's chat proxy prices the request itself. Ticks are the unit it
+/// reports: ten billion of them are one dollar. Zero and anything negative
+/// are "not reported".
+fn grok_cost_dollars(meta: Option<&Value>) -> Option<f64> {
+    let ticks = meta?.get("cost_in_usd_ticks")?;
+    let ticks = ticks
+        .as_i64()
+        .or_else(|| ticks.as_u64().and_then(|n| i64::try_from(n).ok()))
+        .or_else(|| ticks.as_f64().map(|n| n as i64))?;
+    (ticks > 0).then_some(ticks as f64 / 10_000_000_000.0)
+}
+
 fn read_usage(meta: Option<&Value>) -> Usage {
     let field = |name: &str| {
         meta.and_then(|m| m.get(name))
@@ -270,12 +282,15 @@ fn read_usage(meta: Option<&Value>) -> Usage {
         .and_then(|v| v.as_u64())
         .unwrap_or(0) as u32;
     // What the answer really cost, when the endpoint says so. OpenRouter
-    // reports it on every response; nobody else does, and then this is None
-    // and the gateway falls back to its own prices.
+    // puts dollars in `cost`. The Grok subscription proxy puts the same
+    // bill in `cost_in_usd_ticks` (1 USD = 1e10). A zero there means the
+    // request was not priced, not that it was free, so it stays unset and
+    // the gateway falls back to the prices on the model card.
     let cost = meta
         .and_then(|m| m.get("cost"))
         .and_then(|v| v.as_f64())
-        .filter(|dollars| *dollars >= 0.0);
+        .filter(|dollars| *dollars >= 0.0)
+        .or_else(|| grok_cost_dollars(meta));
     Usage {
         prompt_tokens: field("prompt_tokens"),
         completion_tokens: field("completion_tokens"),
@@ -632,6 +647,39 @@ mod tests {
             body["messages"][0]["content"], "rules",
             "a direct endpoint is not OpenRouter"
         );
+    }
+
+    /// The Grok proxy does not speak OpenRouter's `cost`. It sends the bill
+    /// it already computed, in ticks, and the cache hit beside the prompt.
+    /// Zero ticks is "not priced", so the table on the model card still applies.
+    #[test]
+    fn a_grok_answer_is_billed_from_the_ticks_it_reports() {
+        let payload = serde_json::json!({
+            "choices": [{ "message": { "content": "ok" }, "finish_reason": "stop" }],
+            "usage": {
+                "prompt_tokens": 1000,
+                "completion_tokens": 40,
+                "total_tokens": 1040,
+                "prompt_tokens_details": { "cached_tokens": 800 },
+                "cost_in_usd_ticks": 5_000_000_000i64
+            }
+        });
+        let response = parse_response(&payload).unwrap();
+        assert_eq!(response.usage.cached_tokens, 800);
+        assert_eq!(response.usage.prompt_tokens, 1000);
+        assert_eq!(response.usage.upstream_cost, Some(0.5));
+
+        let unpriced = serde_json::json!({
+            "choices": [{ "message": { "content": "ok" }, "finish_reason": "stop" }],
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 1,
+                "total_tokens": 11,
+                "cost_in_usd_ticks": 0
+            }
+        });
+        let response = parse_response(&unpriced).unwrap();
+        assert_eq!(response.usage.upstream_cost, None);
     }
 
     /// A gateway that filters the request answers with an empty message. It

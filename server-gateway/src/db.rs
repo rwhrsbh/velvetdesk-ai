@@ -1083,6 +1083,26 @@ impl Db {
         Ok(())
     }
 
+    /// `names` is the whole list, top first. That order is the fallback order:
+    /// a card moved up is tried sooner. Anything other than each model once
+    /// is refused and the table is left as it was.
+    pub fn reorder_models(&self, names: &[String]) -> rusqlite::Result<bool> {
+        let known: Vec<String> = self.list_models()?.into_iter().map(|model| model.name).collect();
+        if !model_order_is_complete(&known, names) {
+            return Ok(false);
+        }
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction()?;
+        for (index, name) in names.iter().enumerate() {
+            tx.execute(
+                "UPDATE model SET position = ?1 WHERE name = ?2",
+                rusqlite::params![index as i64, name],
+            )?;
+        }
+        tx.commit()?;
+        Ok(true)
+    }
+
     // ---------------------------------------------------------------- tiers
 
     pub fn list_tiers(&self) -> rusqlite::Result<HashMap<String, Tier>> {
@@ -1230,6 +1250,18 @@ impl Db {
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     }
+}
+
+/// The names are the same set, each once. Order itself is not compared.
+pub fn model_order_is_complete(known: &[String], names: &[String]) -> bool {
+    if known.len() != names.len() {
+        return false;
+    }
+    let mut known = known.to_vec();
+    let mut names = names.to_vec();
+    known.sort();
+    names.sort();
+    known == names
 }
 
 #[cfg(test)]
