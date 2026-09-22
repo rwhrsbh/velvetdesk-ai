@@ -684,9 +684,7 @@ mod tests {
             &["alpha".into(), "beta".into(), "gamma".into()],
             &["gamma".into(), "beta".into()],
         ));
-        assert!(!db
-            .reorder_models(&["gamma".into(), "beta".into()])
-            .unwrap());
+        assert!(!db.reorder_models(&["gamma".into(), "beta".into()]).unwrap());
         assert!(db
             .reorder_models(&["gamma".into(), "alpha".into(), "beta".into()])
             .unwrap());
@@ -696,7 +694,10 @@ mod tests {
             .into_iter()
             .map(|(_, row)| row.name.clone())
             .collect();
-        assert_eq!(names, vec!["gamma".to_string(), "alpha".into(), "beta".into()]);
+        assert_eq!(
+            names,
+            vec!["gamma".to_string(), "alpha".into(), "beta".into()]
+        );
     }
 
     /// Describers and dictation models are tools, not chat models: neither

@@ -150,7 +150,8 @@ impl OaiRequest {
                 }
             }
         }
-        if effort.trim().is_empty() && self.enable_thinking.as_ref().and_then(Value::as_bool) == Some(false)
+        if effort.trim().is_empty()
+            && self.enable_thinking.as_ref().and_then(Value::as_bool) == Some(false)
         {
             effort = "none".into();
         }
@@ -186,7 +187,11 @@ fn message_reasoning(message: &Value) -> String {
             summary.push_str(piece);
         }
     }
-    if text.is_empty() { summary } else { text }
+    if text.is_empty() {
+        summary
+    } else {
+        text
+    }
 }
 
 /// The text of a message, whether it arrived as a string or as parts.
@@ -732,7 +737,10 @@ mod tests {
         response.tool_calls.clear();
         response.thoughts = "because".into();
         let body = oai_completion("id", 1, "grok-4.7", &response);
-        assert_eq!(body["choices"][0]["message"]["reasoning_content"], "because");
+        assert_eq!(
+            body["choices"][0]["message"]["reasoning_content"],
+            "because"
+        );
         assert_eq!(body["choices"][0]["message"]["content"], "hi");
     }
 
@@ -828,7 +836,9 @@ mod tests {
         response.tool_calls.clear();
         response.thoughts = "because".into();
         let body = gemini_response("gemini-2.5-flash", &response);
-        let parts = body["candidates"][0]["content"]["parts"].as_array().unwrap();
+        let parts = body["candidates"][0]["content"]["parts"]
+            .as_array()
+            .unwrap();
         assert_eq!(parts[0]["text"], "because");
         assert_eq!(parts[0]["thought"], true);
         assert_eq!(parts[1]["text"], "hi");

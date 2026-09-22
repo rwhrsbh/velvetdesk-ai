@@ -257,8 +257,7 @@ async fn add_key(
     admin(&state, &headers)?;
     if state.db.upstream_is_grok(&id)? {
         return Err(ApiError::BadRequest(
-            "a Grok subscription signs in through the browser; a pasted key is not accepted"
-                .into(),
+            "a Grok subscription signs in through the browser; a pasted key is not accepted".into(),
         ));
     }
     // One paste, many keys: a pool is usually assembled somewhere else and
@@ -345,12 +344,12 @@ async fn grok_login_poll(
         .await
         .map_err(ApiError::Upstream)?
     {
-        crate::grok_auth::PollOutcome::Pending => {
-            Ok(Json(json!({"status": "pending", "message": "", "expires_at": 0})))
-        }
-        crate::grok_auth::PollOutcome::Error(message) => {
-            Ok(Json(json!({"status": "error", "message": message, "expires_at": 0})))
-        }
+        crate::grok_auth::PollOutcome::Pending => Ok(Json(
+            json!({"status": "pending", "message": "", "expires_at": 0}),
+        )),
+        crate::grok_auth::PollOutcome::Error(message) => Ok(Json(
+            json!({"status": "error", "message": message, "expires_at": 0}),
+        )),
         crate::grok_auth::PollOutcome::Approved(tokens) => {
             state.db.insert_grok_session(
                 &id,

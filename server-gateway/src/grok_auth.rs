@@ -229,9 +229,7 @@ fn tokens_from(value: &Value, previous_refresh: Option<&str>) -> Result<SessionT
         refresh_token = previous_refresh.unwrap_or("").to_string();
     }
     if refresh_token.is_empty() {
-        return Err(
-            "вход Grok не вернул refresh token — сессия не переживёт перезапуск".into(),
-        );
+        return Err("вход Grok не вернул refresh token — сессия не переживёт перезапуск".into());
     }
     let expires_in = value
         .get("expires_in")
@@ -535,7 +533,10 @@ mod tests {
         let approved = poll_device(&http, &urls, "approved-code").await.unwrap();
         match approved {
             PollOutcome::Approved(tokens) => {
-                assert_eq!(tokens.access_token, "approved-access-token-0123456789abcdef");
+                assert_eq!(
+                    tokens.access_token,
+                    "approved-access-token-0123456789abcdef"
+                );
                 assert_eq!(
                     tokens.refresh_token,
                     "approved-refresh-token-0123456789abcdef"
@@ -684,7 +685,11 @@ mod tests {
         drop(state);
         let reloaded = Db::open(path.to_str().unwrap()).unwrap();
         let survived = reloaded.grok_sessions().unwrap();
-        assert_eq!(survived.len(), 1, "a reloaded database still has the session");
+        assert_eq!(
+            survived.len(),
+            1,
+            "a reloaded database still has the session"
+        );
         assert_eq!(survived[0].access_token, access);
         assert_eq!(survived[0].refresh_token, refresh);
         let registry = crate::registry::Registry::load(&reloaded, None).unwrap();

@@ -493,7 +493,11 @@ fn details_text(value: Option<&Value>) -> String {
             summary.push_str(piece);
         }
     }
-    if text.is_empty() { summary } else { text }
+    if text.is_empty() {
+        summary
+    } else {
+        text
+    }
 }
 
 /// Answer text, and any reasoning a gateway folded into the content parts.
@@ -861,9 +865,8 @@ mod tests {
     #[test]
     fn assistant_reasoning_goes_out_as_reasoning_content() {
         let mut req = ChatRequest::new("");
-        req.messages.push(
-            LlmMessage::assistant("the answer", vec![]).with_thoughts("because two and two"),
-        );
+        req.messages
+            .push(LlmMessage::assistant("the answer", vec![]).with_thoughts("because two and two"));
         let body = build_body(&provider(), &req);
         let message = &body["messages"][0];
         assert_eq!(message["content"], "the answer");

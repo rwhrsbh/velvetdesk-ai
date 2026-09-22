@@ -931,7 +931,9 @@ impl Db {
     pub fn upstream_is_grok(&self, id: &str) -> rusqlite::Result<bool> {
         let conn = self.conn.lock();
         let kind: Option<String> = conn
-            .query_row("SELECT kind FROM upstream WHERE id = ?1", [id], |row| row.get(0))
+            .query_row("SELECT kind FROM upstream WHERE id = ?1", [id], |row| {
+                row.get(0)
+            })
             .optional()?;
         Ok(kind.as_deref() == Some("grok"))
     }
@@ -1087,7 +1089,11 @@ impl Db {
     /// a card moved up is tried sooner. Anything other than each model once
     /// is refused and the table is left as it was.
     pub fn reorder_models(&self, names: &[String]) -> rusqlite::Result<bool> {
-        let known: Vec<String> = self.list_models()?.into_iter().map(|model| model.name).collect();
+        let known: Vec<String> = self
+            .list_models()?
+            .into_iter()
+            .map(|model| model.name)
+            .collect();
         if !model_order_is_complete(&known, names) {
             return Ok(false);
         }

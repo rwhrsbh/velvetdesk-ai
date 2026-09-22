@@ -107,8 +107,13 @@ impl AppState {
     /// alone, cooldowns included, because the reload below keeps a pool whose
     /// keys did not change.
     pub(crate) async fn prepare_grok(&self) -> Result<(), String> {
-        if crate::grok_auth::refresh_due(&self.db, &self.llm.http, &self.grok_auth, crate::registry::now())
-            .await?
+        if crate::grok_auth::refresh_due(
+            &self.db,
+            &self.llm.http,
+            &self.grok_auth,
+            crate::registry::now(),
+        )
+        .await?
         {
             self.reload().map_err(|err| err.to_string())?;
         }
