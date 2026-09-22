@@ -33,6 +33,15 @@ pub struct OaiRequest {
     pub response_format: Option<Value>,
     #[serde(default)]
     pub reasoning_effort: Option<String>,
+    /// OpenRouter's object: `effort`, `max_tokens`, `enabled`.
+    #[serde(default)]
+    pub reasoning: Option<Value>,
+    /// Qwen's switch.
+    #[serde(default)]
+    pub enable_thinking: Option<Value>,
+    /// Qwen's token budget.
+    #[serde(default)]
+    pub thinking_budget: Option<i64>,
 }
 
 impl OaiRequest {
@@ -59,7 +68,8 @@ impl OaiRequest {
                 "assistant" => LlmMessage::assistant(
                     content_text(message.get("content")),
                     read_tool_calls(message.get("tool_calls")),
-                ),
+                )
+                .with_thoughts(message_reasoning(message)),
                 "tool" => LlmMessage {
                     role: Role::Tool,
                     content: content_text(message.get("content")),
@@ -73,6 +83,7 @@ impl OaiRequest {
                         .get("name")
                         .and_then(Value::as_str)
                         .map(str::to_string),
+                    thoughts: String::new(),
                 },
                 _ => LlmMessage::user_with_images(
                     content_text(message.get("content")),
@@ -111,13 +122,71 @@ impl OaiRequest {
             .and_then(|format| format.get("type"))
             .and_then(Value::as_str)
             .is_some_and(|kind| kind.starts_with("json"));
-        request.thinking = Thinking {
-            effort: self.reasoning_effort.clone().unwrap_or_default(),
-            budget_tokens: None,
-        };
+        request.thinking = self.thinking();
         request.stream = self.stream;
         request
     }
+}
+
+impl OaiRequest {
+    /// The thinking knob, in whichever spelling the client used.
+    ///
+    /// `reasoning_effort` is OpenAI, Groq and Grok. OpenRouter sends a
+    /// `reasoning` object. Qwen sends `enable_thinking` and `thinking_budget`.
+    fn thinking(&self) -> Thinking {
+        let mut effort = self.reasoning_effort.clone().unwrap_or_default();
+        let mut budget = self.thinking_budget.map(|n| n as i32);
+        if let Some(reasoning) = &self.reasoning {
+            if effort.trim().is_empty() {
+                if let Some(level) = reasoning.get("effort").and_then(Value::as_str) {
+                    effort = level.to_string();
+                } else if reasoning.get("enabled").and_then(Value::as_bool) == Some(false) {
+                    effort = "none".into();
+                }
+            }
+            if budget.is_none() {
+                if let Some(max) = reasoning.get("max_tokens").and_then(Value::as_i64) {
+                    budget = Some(max as i32);
+                }
+            }
+        }
+        if effort.trim().is_empty() && self.enable_thinking.as_ref().and_then(Value::as_bool) == Some(false)
+        {
+            effort = "none".into();
+        }
+        Thinking {
+            effort,
+            budget_tokens: budget,
+        }
+    }
+}
+
+/// Reasoning the client sent with an assistant turn.
+///
+/// A plain string in `reasoning_content` (Grok, DeepSeek, Qwen) or `reasoning`
+/// (OpenRouter, Groq). OpenRouter's `reasoning_details` is used only when
+/// those are empty, and an encrypted part is skipped.
+fn message_reasoning(message: &Value) -> String {
+    for field in ["reasoning_content", "reasoning"] {
+        if let Some(text) = message.get(field).and_then(Value::as_str) {
+            if !text.is_empty() {
+                return text.to_string();
+            }
+        }
+    }
+    let Some(Value::Array(parts)) = message.get("reasoning_details") else {
+        return String::new();
+    };
+    let mut text = String::new();
+    let mut summary = String::new();
+    for part in parts {
+        if let Some(piece) = part.get("text").and_then(Value::as_str) {
+            text.push_str(piece);
+        } else if let Some(piece) = part.get("summary").and_then(Value::as_str) {
+            summary.push_str(piece);
+        }
+    }
+    if text.is_empty() { summary } else { text }
 }
 
 /// The text of a message, whether it arrived as a string or as parts.
@@ -225,6 +294,13 @@ pub fn oai_completion(id: &str, created: i64, model: &str, response: &ChatRespon
     let mut message = Map::new();
     message.insert("role".into(), json!("assistant"));
     message.insert("content".into(), json!(response.text));
+    // Always present, null when the model showed none: Grok CLI's chunk and
+    // message types require the key, and a string is what it streams back.
+    if response.thoughts.is_empty() {
+        message.insert("reasoning_content".into(), Value::Null);
+    } else {
+        message.insert("reasoning_content".into(), json!(response.thoughts));
+    }
     if !response.tool_calls.is_empty() {
         message.insert("tool_calls".into(), oai_tool_calls(response));
     }
@@ -243,12 +319,39 @@ pub fn oai_completion(id: &str, created: i64, model: &str, response: &ChatRespon
 }
 
 pub fn oai_chunk(id: &str, created: i64, model: &str, delta: &str) -> Value {
+    oai_delta_chunk(id, created, model, Some(delta), None)
+}
+
+/// One piece of the model's reasoning, in the field Grok CLI reads while the
+/// answer is still being written: `delta.reasoning_content`.
+pub fn oai_reasoning_chunk(id: &str, created: i64, model: &str, delta: &str) -> Value {
+    oai_delta_chunk(id, created, model, None, Some(delta))
+}
+
+/// Both keys are always on the delta. Grok CLI deserializes `content` and
+/// `reasoning_content` as required fields, so a missing one is a parse error
+/// rather than "this piece had no text".
+fn oai_delta_chunk(
+    id: &str,
+    created: i64,
+    model: &str,
+    content: Option<&str>,
+    reasoning: Option<&str>,
+) -> Value {
     json!({
         "id": id,
         "object": "chat.completion.chunk",
         "created": created,
         "model": model,
-        "choices": [{ "index": 0, "delta": { "content": delta }, "finish_reason": Value::Null }],
+        "choices": [{
+            "index": 0,
+            "delta": {
+                "role": "assistant",
+                "content": content,
+                "reasoning_content": reasoning,
+            },
+            "finish_reason": Value::Null,
+        }],
     })
 }
 
@@ -256,6 +359,9 @@ pub fn oai_chunk(id: &str, created: i64, model: &str, delta: &str) -> Value {
 /// any, and the usage the bill was written from.
 pub fn oai_final_chunk(id: &str, created: i64, model: &str, response: &ChatResponse) -> Value {
     let mut delta = Map::new();
+    delta.insert("role".into(), json!("assistant"));
+    delta.insert("content".into(), Value::Null);
+    delta.insert("reasoning_content".into(), Value::Null);
     if !response.tool_calls.is_empty() {
         delta.insert("tool_calls".into(), oai_tool_calls(response));
     }
@@ -289,6 +395,7 @@ pub fn gemini_to_chat_request(body: &Value, stream: bool) -> ChatRequest {
             let images = content_parts_images(content);
             request.messages.push(if role == "model" {
                 LlmMessage::assistant(text, gemini_tool_calls(content))
+                    .with_thoughts(content_thoughts(content))
             } else {
                 LlmMessage::user_with_images(text, images)
             });
@@ -339,6 +446,11 @@ pub fn gemini_to_chat_request(body: &Value, stream: bool) -> ChatRequest {
         {
             request.thinking.budget_tokens = Some(budget as i32);
         }
+        if request.thinking.effort.trim().is_empty() {
+            if let Some(level) = config.get("thinkingLevel").and_then(Value::as_str) {
+                request.thinking.effort = level.to_string();
+            }
+        }
     }
 
     request.stream = stream;
@@ -351,6 +463,20 @@ fn content_parts_text(content: Option<&Value>) -> String {
     };
     parts
         .iter()
+        .filter(|part| part.get("thought").and_then(Value::as_bool) != Some(true))
+        .filter_map(|part| part.get("text").and_then(Value::as_str))
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+/// Text the model marked as its own reasoning, kept off the answer.
+fn content_thoughts(content: &Value) -> String {
+    let Some(Value::Array(parts)) = content.get("parts") else {
+        return String::new();
+    };
+    parts
+        .iter()
+        .filter(|part| part.get("thought").and_then(Value::as_bool) == Some(true))
         .filter_map(|part| part.get("text").and_then(Value::as_str))
         .collect::<Vec<_>>()
         .join("")
@@ -402,6 +528,9 @@ fn gemini_tool_calls(content: &Value) -> Vec<ToolCall> {
 
 fn gemini_parts(response: &ChatResponse) -> Vec<Value> {
     let mut parts = vec![];
+    if !response.thoughts.is_empty() {
+        parts.push(json!({ "text": response.thoughts, "thought": true }));
+    }
     if !response.text.is_empty() {
         parts.push(json!({ "text": response.text }));
     }
@@ -444,6 +573,16 @@ pub fn gemini_chunk(delta: &str) -> Value {
     json!({
         "candidates": [{
             "content": { "role": "model", "parts": [{ "text": delta }] },
+            "index": 0,
+        }],
+    })
+}
+
+/// One piece of reasoning, marked the way Gemini marks a thought.
+pub fn gemini_thought_chunk(delta: &str) -> Value {
+    json!({
+        "candidates": [{
+            "content": { "role": "model", "parts": [{ "text": delta, "thought": true }] },
             "index": 0,
         }],
     })
@@ -520,6 +659,100 @@ mod tests {
         assert_eq!(request.tools[0].name, "add_fact");
     }
 
+    /// Grok CLI sends the previous turn's trace on the assistant message.
+    /// Dropping it here is what made the next call to the proxy forget it.
+    #[test]
+    fn assistant_reasoning_is_kept_for_the_upstream() {
+        let body: OaiRequest = serde_json::from_value(json!({
+            "messages": [{
+                "role": "assistant",
+                "content": "four",
+                "reasoning_content": "two and two"
+            }]
+        }))
+        .unwrap();
+        let request = body.to_chat_request();
+        assert_eq!(request.messages[0].content, "four");
+        assert_eq!(request.messages[0].thoughts, "two and two");
+    }
+
+    #[test]
+    fn openrouter_and_qwen_knobs_become_one_thinking_setting() {
+        let router: OaiRequest = serde_json::from_value(json!({
+            "messages": [],
+            "reasoning": { "effort": "high", "max_tokens": 2048 }
+        }))
+        .unwrap();
+        let thinking = router.to_chat_request().thinking;
+        assert_eq!(thinking.effort, "high");
+        assert_eq!(thinking.budget_tokens, Some(2048));
+
+        let qwen: OaiRequest = serde_json::from_value(json!({
+            "messages": [],
+            "enable_thinking": false,
+            "thinking_budget": 0
+        }))
+        .unwrap();
+        let thinking = qwen.to_chat_request().thinking;
+        assert_eq!(thinking.effort, "none");
+        assert_eq!(thinking.budget_tokens, Some(0));
+    }
+
+    #[test]
+    fn openrouter_details_are_kept_when_there_is_no_plain_trace() {
+        let body: OaiRequest = serde_json::from_value(json!({
+            "messages": [{
+                "role": "assistant",
+                "content": "four",
+                "reasoning_details": [
+                    { "type": "reasoning.summary", "summary": "two and two" },
+                    { "type": "reasoning.encrypted", "data": "secret" }
+                ]
+            }]
+        }))
+        .unwrap();
+        assert_eq!(body.to_chat_request().messages[0].thoughts, "two and two");
+    }
+
+    #[test]
+    fn a_gemini_level_is_kept() {
+        let request = gemini_to_chat_request(
+            &json!({
+                "contents": [],
+                "generationConfig": { "thinkingLevel": "high" }
+            }),
+            false,
+        );
+        assert_eq!(request.thinking.effort, "high");
+    }
+
+    #[test]
+    fn the_openai_answer_includes_the_trace() {
+        let mut response = answer();
+        response.tool_calls.clear();
+        response.thoughts = "because".into();
+        let body = oai_completion("id", 1, "grok-4.7", &response);
+        assert_eq!(body["choices"][0]["message"]["reasoning_content"], "because");
+        assert_eq!(body["choices"][0]["message"]["content"], "hi");
+    }
+
+    #[test]
+    fn a_reasoning_chunk_uses_the_field_grok_cli_reads() {
+        let chunk = oai_reasoning_chunk("id", 1, "grok-4.7", "two");
+        let delta = &chunk["choices"][0]["delta"];
+        assert_eq!(delta["reasoning_content"], "two");
+        assert!(delta["content"].is_null());
+        assert!(delta.get("role").is_some());
+    }
+
+    #[test]
+    fn a_text_chunk_keeps_the_reasoning_key() {
+        let chunk = oai_chunk("id", 1, "grok-4.7", "hi");
+        let delta = &chunk["choices"][0]["delta"];
+        assert_eq!(delta["content"], "hi");
+        assert!(delta["reasoning_content"].is_null());
+    }
+
     #[test]
     fn json_mode_and_limits_carry_over() {
         let body: OaiRequest = serde_json::from_value(json!({
@@ -587,6 +820,33 @@ mod tests {
         assert_eq!(parts[0]["text"], "hi");
         assert_eq!(parts[1]["functionCall"]["name"], "add_fact");
         assert_eq!(body["usageMetadata"]["cachedContentTokenCount"], 6);
+    }
+
+    #[test]
+    fn the_gemini_answer_marks_the_trace_as_a_thought() {
+        let mut response = answer();
+        response.tool_calls.clear();
+        response.thoughts = "because".into();
+        let body = gemini_response("gemini-2.5-flash", &response);
+        let parts = body["candidates"][0]["content"]["parts"].as_array().unwrap();
+        assert_eq!(parts[0]["text"], "because");
+        assert_eq!(parts[0]["thought"], true);
+        assert_eq!(parts[1]["text"], "hi");
+    }
+
+    #[test]
+    fn a_gemini_thought_is_not_read_as_the_answer() {
+        let request = gemini_to_chat_request(
+            &json!({
+                "contents": [{ "role": "model", "parts": [
+                    { "text": "because", "thought": true },
+                    { "text": "four" }
+                ]}]
+            }),
+            false,
+        );
+        assert_eq!(request.messages[0].content, "four");
+        assert_eq!(request.messages[0].thoughts, "because");
     }
 
     #[test]

@@ -1114,9 +1114,16 @@ fn push_operator_history(scope: &Scope, man_id: Option<&str>, request: &mut Chat
     for entry in log.entries.iter().rev().take(OPERATOR_HISTORY).rev() {
         match entry.sender.as_str() {
             "user" => request.messages.push(LlmMessage::user(entry.text.clone())),
-            "assistant" => request
-                .messages
-                .push(LlmMessage::assistant(entry.text.clone(), vec![])),
+            "assistant" => {
+                let thoughts = entry
+                    .meta
+                    .get("thoughts")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("");
+                request.messages.push(
+                    LlmMessage::assistant(entry.text.clone(), vec![]).with_thoughts(thoughts),
+                );
+            }
             // System notes are the interface talking to itself.
             _ => {}
         }
@@ -1181,9 +1188,18 @@ async fn run_auto(
         if turn + 1 == max_turns {
             request.tools.clear();
         }
+        // Thought pieces already went to the bubble as they arrived. The flag
+        // says so, so the whole trace is not appended a second time at the end.
+        let streamed_thought = AtomicBool::new(false);
+        let on_event = |event: Value| {
+            if event.get("kind").and_then(Value::as_str) == Some("thought") {
+                streamed_thought.store(true, Ordering::Relaxed);
+            }
+            (deps.emit)(event);
+        };
         let response = match deps
             .llm
-            .chat(deps.provider, deps.pool.clone(), &request, deps.emit)
+            .chat(deps.provider, deps.pool.clone(), &request, &on_event)
             .await
         {
             Ok(response) => response,
@@ -1213,7 +1229,9 @@ async fn run_auto(
             thoughts.push_str(&response.thoughts);
             // A model that answers in one go reports its thinking only here,
             // so the UI is told about it even when nothing was streamed.
-            (deps.emit)(json!({ "kind": "thought", "text": response.thoughts }));
+            if !streamed_thought.load(Ordering::Relaxed) {
+                (deps.emit)(json!({ "kind": "thought", "text": response.thoughts }));
+            }
         }
 
         if response.tool_calls.is_empty() {
@@ -1253,10 +1271,10 @@ async fn run_auto(
             break;
         }
 
-        request.messages.push(LlmMessage::assistant(
-            response.text.clone(),
-            response.tool_calls.clone(),
-        ));
+        request.messages.push(
+            LlmMessage::assistant(response.text.clone(), response.tool_calls.clone())
+                .with_thoughts(response.thoughts.clone()),
+        );
         // Kept only as a fallback: if every later turn fails, half a sentence
         // still beats an empty bubble — but it never ends the run on its own.
         if !response.text.trim().is_empty() {

@@ -59,6 +59,12 @@ pub struct LlmMessage {
     pub tool_call_id: Option<String>,
     #[serde(default)]
     pub tool_name: Option<String>,
+    /// The model's reasoning for this turn, when the endpoint reports one.
+    ///
+    /// Grok CLI folds it onto the assistant message as `reasoning_content` and
+    /// sends that back on the next request. Empty means the turn had none.
+    #[serde(default)]
+    pub thoughts: String,
 }
 
 /// An attached picture: its type, and its bytes base64-encoded without the
@@ -79,6 +85,7 @@ impl LlmMessage {
             tool_calls: vec![],
             tool_call_id: None,
             tool_name: None,
+            thoughts: String::new(),
         }
     }
 
@@ -90,7 +97,14 @@ impl LlmMessage {
             tool_calls,
             tool_call_id: None,
             tool_name: None,
+            thoughts: String::new(),
         }
+    }
+
+    /// The same turn, carrying the reasoning the model showed for it.
+    pub fn with_thoughts(mut self, thoughts: impl Into<String>) -> Self {
+        self.thoughts = thoughts.into();
+        self
     }
 
     /// The operator's turn with attachments: the same message, plus what they
@@ -110,6 +124,7 @@ impl LlmMessage {
             tool_calls: vec![],
             tool_call_id: Some(call.id.clone()),
             tool_name: Some(call.name.clone()),
+            thoughts: String::new(),
         }
     }
 }

@@ -335,9 +335,16 @@ pub fn next_request(deps: &AgentDeps<'_>) -> Result<ChatRequest> {
     for entry in log.entries.iter().rev().take(HISTORY_TURNS).rev() {
         match entry.sender.as_str() {
             "user" => request.messages.push(LlmMessage::user(entry.text.clone())),
-            "assistant" => request
-                .messages
-                .push(LlmMessage::assistant(entry.text.clone(), vec![])),
+            "assistant" => {
+                let thoughts = entry
+                    .meta
+                    .get("thoughts")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("");
+                request.messages.push(
+                    LlmMessage::assistant(entry.text.clone(), vec![]).with_thoughts(thoughts),
+                );
+            }
             _ => {}
         }
     }
@@ -388,9 +395,16 @@ pub async fn chat(deps: &AgentDeps<'_>, input: MasterInput) -> Result<MasterOutp
     for entry in log.entries.iter().rev().take(HISTORY_TURNS).rev() {
         match entry.sender.as_str() {
             "user" => request.messages.push(LlmMessage::user(entry.text.clone())),
-            "assistant" => request
-                .messages
-                .push(LlmMessage::assistant(entry.text.clone(), vec![])),
+            "assistant" => {
+                let thoughts = entry
+                    .meta
+                    .get("thoughts")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("");
+                request.messages.push(
+                    LlmMessage::assistant(entry.text.clone(), vec![]).with_thoughts(thoughts),
+                );
+            }
             _ => {}
         }
     }
@@ -440,10 +454,10 @@ pub async fn chat(deps: &AgentDeps<'_>, input: MasterInput) -> Result<MasterOutp
             break;
         }
 
-        request.messages.push(LlmMessage::assistant(
-            response.text.clone(),
-            response.tool_calls.clone(),
-        ));
+        request.messages.push(
+            LlmMessage::assistant(response.text.clone(), response.tool_calls.clone())
+                .with_thoughts(response.thoughts.clone()),
+        );
         if !response.text.trim().is_empty() {
             reply = response.text.clone();
         }

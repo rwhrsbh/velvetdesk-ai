@@ -163,12 +163,10 @@ pub async fn call_streaming(
                 text.push_str(piece);
                 on_event(json!({ "kind": "delta", "text": piece }));
             }
-            // Servers disagree on the name; both mean the same thing.
-            for field in ["reasoning_content", "reasoning"] {
-                if let Some(piece) = delta[field].as_str() {
-                    thoughts.push_str(piece);
-                    on_event(json!({ "kind": "thought", "text": piece }));
-                }
+            let piece = reasoning_text(delta);
+            if !piece.is_empty() {
+                thoughts.push_str(&piece);
+                on_event(json!({ "kind": "thought", "text": piece }));
             }
 
             if let Some(calls) = delta["tool_calls"].as_array() {
@@ -370,6 +368,16 @@ fn build_body(provider: &ProviderConfig, request: &ChatRequest) -> Value {
             Role::User => messages.push(json!({ "role": "user", "content": user_content(msg) })),
             Role::Assistant => {
                 let mut m = json!({ "role": "assistant", "content": msg.content });
+                // Each family wants the previous trace under its own name.
+                // OpenRouter keeps plaintext in `reasoning`. Sending the
+                // `reasoning_details` array back makes Qwen, Gemini and
+                // DeepSeek behind it answer 500, so the array stays here.
+                if !msg.thoughts.trim().is_empty() {
+                    match provider.dialect() {
+                        "openrouter" => m["reasoning"] = json!(msg.thoughts),
+                        _ => m["reasoning_content"] = json!(msg.thoughts),
+                    }
+                }
                 if !msg.tool_calls.is_empty() {
                     m["tool_calls"] = Value::Array(
                         msg.tool_calls
@@ -440,6 +448,80 @@ fn build_body(provider: &ProviderConfig, request: &ChatRequest) -> Value {
     }
 
     body
+}
+
+/// The reasoning in one payload, from whichever spelling this server used.
+///
+/// `reasoning_content` is Grok, DeepSeek, Qwen and vLLM. `reasoning` is a
+/// string on Groq and OpenRouter. OpenRouter also sends `reasoning_details`,
+/// and when both are present they repeat the same words, so the first
+/// non-empty source wins.
+fn reasoning_text(value: &Value) -> String {
+    for field in ["reasoning_content", "reasoning"] {
+        if let Some(text) = plain_reasoning(value.get(field)) {
+            if !text.is_empty() {
+                return text;
+            }
+        }
+    }
+    details_text(value.get("reasoning_details"))
+}
+
+fn plain_reasoning(value: Option<&Value>) -> Option<String> {
+    match value? {
+        Value::String(text) => Some(text.clone()),
+        Value::Object(map) => map
+            .get("content")
+            .or_else(|| map.get("text"))
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        _ => None,
+    }
+}
+
+/// Text and summary parts only. An encrypted blob is not something to show.
+fn details_text(value: Option<&Value>) -> String {
+    let Some(Value::Array(parts)) = value else {
+        return String::new();
+    };
+    let mut text = String::new();
+    let mut summary = String::new();
+    for part in parts {
+        if let Some(piece) = part.get("text").and_then(Value::as_str) {
+            text.push_str(piece);
+        } else if let Some(piece) = part.get("summary").and_then(Value::as_str) {
+            summary.push_str(piece);
+        }
+    }
+    if text.is_empty() { summary } else { text }
+}
+
+/// Answer text, and any reasoning a gateway folded into the content parts.
+fn split_content(content: Option<&Value>) -> (String, String) {
+    let Some(content) = content else {
+        return (String::new(), String::new());
+    };
+    match content {
+        Value::String(text) => (text.clone(), String::new()),
+        Value::Array(parts) => {
+            let mut text = String::new();
+            let mut thoughts = String::new();
+            for part in parts {
+                let kind = part.get("type").and_then(Value::as_str).unwrap_or("");
+                let piece = part.get("text").and_then(Value::as_str).unwrap_or("");
+                let thought = kind == "reasoning"
+                    || kind == "reasoning_text"
+                    || part.get("thought").and_then(Value::as_bool) == Some(true);
+                if thought {
+                    thoughts.push_str(piece);
+                } else if !piece.is_empty() {
+                    text.push_str(piece);
+                }
+            }
+            (text, thoughts)
+        }
+        _ => (String::new(), String::new()),
+    }
 }
 
 /// OpenAI-compatible endpoints spell reasoning control three different ways,
@@ -514,21 +596,7 @@ fn parse_response(value: &Value) -> Result<ChatResponse, CallError> {
         .get("message")
         .ok_or_else(|| CallError::Parse("choice without message".into()))?;
 
-    let text = message
-        .get("content")
-        .and_then(|c| match c {
-            Value::String(s) => Some(s.clone()),
-            // Some gateways return content as an array of parts.
-            Value::Array(parts) => Some(
-                parts
-                    .iter()
-                    .filter_map(|p| p.get("text").and_then(|t| t.as_str()))
-                    .collect::<Vec<_>>()
-                    .join(""),
-            ),
-            _ => None,
-        })
-        .unwrap_or_default();
+    let (text, content_thoughts) = split_content(message.get("content"));
 
     let mut tool_calls = vec![];
     if let Some(calls) = message.get("tool_calls").and_then(|c| c.as_array()) {
@@ -571,14 +639,12 @@ fn parse_response(value: &Value) -> Result<ChatResponse, CallError> {
         });
     }
 
-    // Servers that expose the model's reasoning put it beside the content.
-    let thoughts = message
-        .get("reasoning_content")
-        .or_else(|| message.get("reasoning"))
-        .and_then(|v| v.as_str())
-        .unwrap_or_default()
-        .trim()
-        .to_string();
+    // Beside the content, or — when a gateway inlines it — inside the parts.
+    let mut thoughts = reasoning_text(message);
+    if thoughts.is_empty() {
+        thoughts = content_thoughts;
+    }
+    let thoughts = thoughts.trim().to_string();
 
     Ok(ChatResponse {
         text: text.trim().to_string(),
@@ -789,6 +855,72 @@ mod tests {
         assert_eq!(router["reasoning"]["max_tokens"], 4096);
         let openai = build_body(&provider_at("https://api.openai.com/v1"), &req);
         assert!(openai.get("reasoning_effort").is_none());
+    }
+
+    /// Grok CLI sends the previous turn's trace back on the assistant message.
+    #[test]
+    fn assistant_reasoning_goes_out_as_reasoning_content() {
+        let mut req = ChatRequest::new("");
+        req.messages.push(
+            LlmMessage::assistant("the answer", vec![]).with_thoughts("because two and two"),
+        );
+        let body = build_body(&provider(), &req);
+        let message = &body["messages"][0];
+        assert_eq!(message["content"], "the answer");
+        assert_eq!(message["reasoning_content"], "because two and two");
+    }
+
+    /// OpenRouter preserves the trace as plaintext `reasoning`. The details
+    /// array is what makes Qwen and Gemini behind it fail the next turn.
+    #[test]
+    fn openrouter_gets_plaintext_reasoning_back() {
+        let mut req = ChatRequest::new("");
+        req.messages
+            .push(LlmMessage::assistant("four", vec![]).with_thoughts("two and two"));
+        let body = build_body(&provider_at("https://openrouter.ai/api/v1"), &req);
+        let message = &body["messages"][0];
+        assert_eq!(message["reasoning"], "two and two");
+        assert!(message.get("reasoning_content").is_none());
+        assert!(message.get("reasoning_details").is_none());
+    }
+
+    #[test]
+    fn one_chunk_is_not_counted_twice() {
+        let both = json!({
+            "reasoning": "hello",
+            "reasoning_details": [{ "type": "reasoning.text", "text": "hello" }]
+        });
+        assert_eq!(reasoning_text(&both), "hello");
+
+        let details = json!({
+            "reasoning_details": [
+                { "type": "reasoning.text", "text": "ab" },
+                { "type": "reasoning.summary", "summary": "cd" },
+                { "type": "reasoning.encrypted", "data": "secret" }
+            ]
+        });
+        assert_eq!(reasoning_text(&details), "ab");
+
+        let summary = json!({
+            "reasoning_details": [{ "type": "reasoning.summary", "summary": "short" }]
+        });
+        assert_eq!(reasoning_text(&summary), "short");
+    }
+
+    #[test]
+    fn a_reasoning_part_stays_out_of_the_answer() {
+        let message = json!({
+            "content": [
+                { "type": "reasoning_text", "text": "thinking" },
+                { "type": "text", "text": "answer" }
+            ]
+        });
+        let parsed = parse_response(&json!({
+            "choices": [{ "message": message, "finish_reason": "stop" }]
+        }))
+        .unwrap();
+        assert_eq!(parsed.text, "answer");
+        assert_eq!(parsed.thoughts, "thinking");
     }
 
     /// Nothing chosen must not add a single field.

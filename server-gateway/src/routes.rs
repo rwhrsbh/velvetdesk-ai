@@ -561,13 +561,21 @@ async fn chat_completions(
         // reads the answer while it is still being written, which is the
         // whole reason the stream exists.
         let on_event = move |event: Value| {
-            if event.get("kind").and_then(Value::as_str) != Some("delta") {
-                return;
-            }
             let Some(text) = event.get("text").and_then(Value::as_str) else {
                 return;
             };
-            let chunk = translate::oai_chunk(&chunk_id, created, &chunk_model, text);
+            if text.is_empty() {
+                return;
+            }
+            let chunk = match event.get("kind").and_then(Value::as_str) {
+                Some("delta") => translate::oai_chunk(&chunk_id, created, &chunk_model, text),
+                // Grok CLI reads this field as the reasoning channel, one piece
+                // at a time, while the answer is still being written.
+                Some("thought") => {
+                    translate::oai_reasoning_chunk(&chunk_id, created, &chunk_model, text)
+                }
+                _ => return,
+            };
             let _ = sender.send(Event::default().data(chunk.to_string()));
         };
 
@@ -721,13 +729,18 @@ async fn gemini_generate(
     tokio::spawn(async move {
         let sender = tx.clone();
         let on_event = move |event: Value| {
-            if event.get("kind").and_then(Value::as_str) != Some("delta") {
-                return;
-            }
             let Some(text) = event.get("text").and_then(Value::as_str) else {
                 return;
             };
-            let _ = sender.send(Event::default().data(translate::gemini_chunk(text).to_string()));
+            if text.is_empty() {
+                return;
+            }
+            let chunk = match event.get("kind").and_then(Value::as_str) {
+                Some("delta") => translate::gemini_chunk(text),
+                Some("thought") => translate::gemini_thought_chunk(text),
+                _ => return,
+            };
+            let _ = sender.send(Event::default().data(chunk.to_string()));
         };
 
         match task.call(&wanted, &chat, &on_event).await {

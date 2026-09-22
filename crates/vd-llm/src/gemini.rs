@@ -300,6 +300,7 @@ pub async fn call_streaming(
                     if let Some(piece) = part.get("text").and_then(|t| t.as_str()) {
                         if part.get("thought").and_then(|t| t.as_bool()) == Some(true) {
                             thoughts.push_str(piece);
+                            on_event(json!({ "kind": "thought", "text": piece }));
                         } else {
                             text.push_str(piece);
                             on_event(json!({ "kind": "delta", "text": piece }));
@@ -418,6 +419,9 @@ pub fn build_body(provider: &ProviderConfig, request: &ChatRequest) -> Value {
             }
             Role::Assistant => {
                 let mut parts: Vec<Value> = vec![];
+                if !msg.thoughts.trim().is_empty() {
+                    parts.push(json!({ "text": msg.thoughts, "thought": true }));
+                }
                 if !msg.content.trim().is_empty() {
                     parts.push(json!({ "text": msg.content }));
                 }
@@ -952,6 +956,7 @@ mod tests {
             tool_calls: parsed.tool_calls.clone(),
             tool_name: None,
             tool_call_id: None,
+            thoughts: String::new(),
         });
         let part = &build_body(&provider(), &req)["contents"][0]["parts"][0];
         assert_eq!(part["functionCall"]["name"], "list_men");
@@ -1024,9 +1029,24 @@ mod tests {
             }],
             tool_name: None,
             tool_call_id: None,
+            thoughts: String::new(),
         });
         let part = &build_body(&provider(), &req)["contents"][0]["parts"][0];
         assert!(part.get("thoughtSignature").is_none());
+    }
+
+    /// A thought the model already showed has to come back marked as one,
+    /// ahead of the answer, or the next turn treats it as the answer itself.
+    #[test]
+    fn prior_thoughts_go_back_as_a_thought_part() {
+        let mut req = ChatRequest::new("");
+        req.messages
+            .push(LlmMessage::assistant("four", vec![]).with_thoughts("two and two"));
+        let parts = &build_body(&provider(), &req)["contents"][0]["parts"];
+        assert_eq!(parts[0]["text"], "two and two");
+        assert_eq!(parts[0]["thought"], true);
+        assert_eq!(parts[1]["text"], "four");
+        assert!(parts[1].get("thought").is_none());
     }
 
     fn model(name: &str) -> ProviderConfig {
