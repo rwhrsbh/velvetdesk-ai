@@ -1447,6 +1447,78 @@ pub fn plan_state(state: State<'_, AppState>) -> Result<entitlement::PlanState> 
     Ok(entitlement::plan_state(&state.paths, &token, profiles))
 }
 
+/// Ask each provider how big its model's context window is, and remember it.
+///
+/// The gauge and automatic compaction run off that number. Without it the app
+/// guessed from the model's name — and a name it does not recognise (every
+/// model served through the subscription, for one) fell back to 128k, so a
+/// million-token model was compacted at a tenth of its window. Providers
+/// publish the figure in their catalogue; the subscription gateway publishes
+/// it too, from what its own upstream says.
+///
+/// Only an empty setting is filled: a number the operator typed stays theirs.
+#[tauri::command]
+pub async fn sync_context_windows(state: State<'_, AppState>) -> Result<usize> {
+    let providers = state.settings.read().providers.clone();
+    let mut found: Vec<(String, u32)> = vec![];
+    for provider in providers {
+        if provider.context_tokens.is_some_and(|tokens| tokens > 0) || provider.model.is_empty() {
+            continue;
+        }
+        let key = state
+            .secrets
+            .read()
+            .for_provider(&provider.id)
+            .first()
+            .cloned()
+            .unwrap_or_default();
+        // A provider with no key cannot be asked; the cloud one carries the
+        // licence in that slot, which is exactly what it wants.
+        if key.trim().is_empty() {
+            continue;
+        }
+        let mut asking = provider.clone();
+        if provider.id == CLOUD_PROVIDER {
+            asking.base_url = entitlement::cloud_base_url();
+        }
+        match vd_llm::catalog::list_models(&state.llm.http, &asking, &key).await {
+            Ok(catalog) => {
+                let window = catalog
+                    .models
+                    .iter()
+                    .find(|entry| entry.id == provider.model)
+                    .and_then(|entry| entry.context_tokens)
+                    .filter(|tokens| *tokens > 0);
+                if let Some(window) = window {
+                    found.push((provider.id.clone(), window));
+                }
+            }
+            Err(err) => log::warn!(
+                "{}: no catalogue for the window: {}",
+                provider.id,
+                err.message()
+            ),
+        }
+    }
+    if found.is_empty() {
+        return Ok(0);
+    }
+    let mut settings = state.settings.read().clone();
+    let mut filled = 0;
+    for (id, window) in found {
+        if let Some(provider) = settings.providers.iter_mut().find(|p| p.id == id) {
+            if !provider.context_tokens.is_some_and(|tokens| tokens > 0) {
+                provider.context_tokens = Some(window);
+                filled += 1;
+            }
+        }
+    }
+    if filled > 0 {
+        state.save_settings(settings)?;
+    }
+    Ok(filled)
+}
+
 #[tauri::command]
 pub async fn cloud_status(state: State<'_, AppState>) -> Result<CloudStatus> {
     let settings = state.settings.read().clone();

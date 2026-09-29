@@ -249,6 +249,7 @@ mod tests {
             price_cached: Some(0.028),
             price_out: 0.42,
             context_tokens: None,
+            context_upstream: None,
             enabled: true,
             position: 0,
             voice: false,

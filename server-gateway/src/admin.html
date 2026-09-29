@@ -1215,7 +1215,11 @@
               ["кеш", m.price_cached == null ? "как вход" : price(m.price_cached)],
               ["выход", price(m.price_out)],
               ...(m.price_request ? [["клип", usd(m.price_request, 4)]] : []),
-              ...(m.context_tokens ? [["контекст", Math.round(m.context_tokens / 1000) + "k"]] : []),
+              // The provider's own figure wins over the typed one; the label says
+              // which is being used, since only one of them ends up in requests.
+              ...(m.context_upstream || m.context_tokens
+                ? [[m.context_upstream ? "контекст · от провайдера" : "контекст · вручную", Math.round((m.context_upstream || m.context_tokens) / 1000) + "k"]]
+                : []),
               ["приоритет", String(rank + 1)],
             ];
             return `<div class="card item ${m.enabled ? "" : "off"}" data-m-name="${esc(m.name)}" style="--i:${Math.min(i, 12)}">
@@ -1384,7 +1388,7 @@
               <label class="field"><span>Вход</span><input id="f-in" value="${m.price_in ?? ""}" inputmode="decimal" placeholder="0.15" /></label>
               <label class="field"><span>Кеш</span><input id="f-cached" value="${m.price_cached ?? ""}" inputmode="decimal" placeholder="как вход" /></label>
               <label class="field"><span>Выход</span><input id="f-out" value="${m.price_out ?? ""}" inputmode="decimal" placeholder="0.60" /></label>
-              <label class="field"><span>Контекст, токенов</span><input id="f-ctx" value="${m.context_tokens ?? ""}" inputmode="numeric" placeholder="128000" /></label>
+              <label class="field"><span>Контекст, токенов</span><input id="f-ctx" value="${m.context_tokens ?? ""}" inputmode="numeric" placeholder="${m.context_upstream ? "от провайдера: " + m.context_upstream : "128000"}" /><small>${m.context_upstream ? "Провайдер говорит " + m.context_upstream.toLocaleString("ru-RU") + " — это и уходит клиентам; здешнее число берётся, только если провайдер молчит" : "Берётся, пока провайдер не сообщит своё"}</small></label>
               <label class="field"><span>Порядок</span><input id="f-pos" value="${m.position ?? 0}" inputmode="numeric" /><small>Меньше — выше в списке. Карточки можно двигать и без этого числа.</small></label>
               <label class="field" id="f-req-row"><span>Цена за клип, $</span><input id="f-req" value="${m.price_request || ""}" inputmode="decimal" placeholder="0.002" /></label>
             </div>

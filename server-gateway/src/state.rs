@@ -14,7 +14,7 @@ use vd_llm::{ChatRequest, ChatResponse, LlmClient, LlmError, ProviderConfig};
 
 use crate::config::GatewayConfig;
 use crate::db::Db;
-use crate::registry::{provider_for, Registry};
+use crate::registry::{provider_for, ModelRow, Registry, UpstreamRow};
 use vd_license::public_key_from_base64;
 
 /// One room's loudspeaker: whatever any member says, the others hear, tagged
@@ -156,9 +156,81 @@ impl AppState {
         }
     }
 
-    /// Every model the gateway will answer with, in configured order.
-    pub fn model_names(&self) -> Vec<String> {
-        self.registry.read().model_names()
+    /// Ask every upstream how big its models' context windows really are.
+    ///
+    /// A window typed into the admin page goes stale the day the provider
+    /// changes it, and most rows never had one — so the client was told
+    /// nothing and guessed. The provider's own figure is stored beside the
+    /// typed one and wins over it; a provider that publishes none leaves the
+    /// typed one in charge.
+    pub async fn refresh_contexts(&self) {
+        let upstreams: Vec<UpstreamRow> = self.registry.read().upstreams.clone();
+        let mut changed = false;
+        for upstream in upstreams {
+            if !upstream.enabled {
+                continue;
+            }
+            let (sample, mine) = {
+                let registry = self.registry.read();
+                let mine: Vec<ModelRow> = registry
+                    .models
+                    .iter()
+                    .filter(|model| model.upstream_id == upstream.id)
+                    .cloned()
+                    .collect();
+                (mine.first().cloned(), mine)
+            };
+            let Some(sample) = sample else { continue };
+            let Some(pool) = self.registry.read().pool(&upstream.id) else {
+                continue;
+            };
+            let Some(lease) = pool.acquire() else {
+                continue;
+            };
+            let provider = provider_for(&upstream, &sample);
+            let catalog =
+                match vd_llm::catalog::list_models(&self.llm.http, &provider, &lease.key).await {
+                    Ok(catalog) => {
+                        pool.report_success(lease.index);
+                        catalog
+                    }
+                    Err(err) => {
+                        pool.report_failure(lease.index, err.verdict());
+                        log::warn!(
+                            "{}: no catalogue for context windows: {}",
+                            upstream.id,
+                            err.message()
+                        );
+                        continue;
+                    }
+                };
+            for model in mine {
+                let published = catalog
+                    .models
+                    .iter()
+                    .find(|entry| entry.id == model.upstream_name())
+                    .and_then(|entry| entry.context_tokens)
+                    .filter(|tokens| *tokens > 0);
+                if published != model.context_upstream {
+                    if let Err(err) = self.db.set_model_context_upstream(&model.name, published) {
+                        log::warn!("could not store the window for {}: {err}", model.name);
+                        continue;
+                    }
+                    log::info!(
+                        "{}: context window {:?} (was {:?})",
+                        model.name,
+                        published,
+                        model.context_upstream
+                    );
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            if let Err(err) = self.reload() {
+                log::warn!("could not reload after refreshing context windows: {err}");
+            }
+        }
     }
 
     /// The request with every picture replaced by a description of it.

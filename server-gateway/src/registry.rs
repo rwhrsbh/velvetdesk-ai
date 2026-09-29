@@ -59,6 +59,12 @@ pub struct ModelRow {
     pub price_out: f64,
     #[serde(default)]
     pub context_tokens: Option<u32>,
+    /// What the upstream publishes for this model, refreshed in the
+    /// background. The provider knows its own window better than a number
+    /// typed into the admin page, so this wins when it is there; the typed
+    /// one stays as the fallback for an endpoint that publishes nothing.
+    #[serde(default)]
+    pub context_upstream: Option<u32>,
     #[serde(default = "yes")]
     pub enabled: bool,
     #[serde(default)]
@@ -178,6 +184,14 @@ fn yes() -> bool {
 }
 
 impl ModelRow {
+    /// The context window to use: the upstream's own figure, else what the
+    /// admin page says, else nothing and the caller guesses.
+    pub fn context(&self) -> Option<u32> {
+        self.context_upstream
+            .filter(|n| *n > 0)
+            .or(self.context_tokens.filter(|n| *n > 0))
+    }
+
     pub fn cached_price(&self) -> f64 {
         self.price_cached.unwrap_or(self.price_in)
     }
@@ -265,6 +279,7 @@ impl Registry {
                     price_cached: model.price_cached,
                     price_out: model.price_out,
                     context_tokens: model.context_tokens,
+                    context_upstream: None,
                     enabled: true,
                     position: place as i64,
                     voice: model.voice,
@@ -358,14 +373,6 @@ impl Registry {
                     .find(|up| up.id == model.upstream_id && up.enabled)
                     .map(|upstream| (upstream, model))
             })
-            .collect()
-    }
-
-    /// Every model a client may ask for.
-    pub fn model_names(&self) -> Vec<String> {
-        self.chain_from("")
-            .into_iter()
-            .map(|(_, model)| model.name.clone())
             .collect()
     }
 }
@@ -463,7 +470,7 @@ pub fn provider_for(upstream: &UpstreamRow, model: &ModelRow) -> ProviderConfig 
         chain_rounds: 1,
         extra_body: serde_json::Value::Null,
         reasoning_dialect: upstream.reasoning_dialect.clone(),
-        context_tokens: model.context_tokens,
+        context_tokens: model.context(),
         key_count: upstream.key_count,
     };
     // The subscription proxy is one host. A stored copy of the headers this
@@ -515,6 +522,7 @@ mod tests {
             price_cached: None,
             price_out: 2.0,
             context_tokens: None,
+            context_upstream: None,
             enabled,
             position: 0,
             voice: false,

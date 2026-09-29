@@ -465,11 +465,27 @@ async fn models(
     Query(query): Query<HashMap<String, String>>,
 ) -> Result<Json<Value>, ApiError> {
     authenticate(&state, &headers, &query)?;
-    let data: Vec<Value> = state
-        .model_names()
-        .into_iter()
-        .map(|name| json!({ "id": name, "object": "model", "owned_by": "velvetdesk" }))
-        .collect();
+    // The window travels with the model: a client that only knows the name
+    // has to guess how much it may send, and guessed 128k for everything.
+    let data: Vec<Value> = {
+        let registry = state.registry.read();
+        registry
+            .chain_from("")
+            .into_iter()
+            .map(|(_, model)| {
+                let mut row = json!({
+                    "id": model.name,
+                    "object": "model",
+                    "owned_by": "velvetdesk",
+                });
+                if let Some(window) = model.context() {
+                    row["context_length"] = json!(window);
+                    row["top_provider"] = json!({ "context_length": window });
+                }
+                row
+            })
+            .collect()
+    };
     Ok(Json(json!({ "object": "list", "data": data })))
 }
 

@@ -104,6 +104,20 @@ async fn serve() -> std::io::Result<()> {
     }
 
     let state = AppState::new(cfg, db).map_err(std::io::Error::other)?;
+
+    // What the providers say their models' context windows are, asked for
+    // now and then again every few hours. Clients read the figure from
+    // /v1/models; without it they guess, and they guessed low.
+    {
+        let state = state.clone();
+        tokio::spawn(async move {
+            loop {
+                state.refresh_contexts().await;
+                tokio::time::sleep(std::time::Duration::from_secs(6 * 3600)).await;
+            }
+        });
+    }
+
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     log::info!("listening on {bind}");
     axum::serve(listener, routes::router(state)).await

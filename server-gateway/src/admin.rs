@@ -534,6 +534,7 @@ async fn catalog(
                 price_cached: None,
                 price_out: 0.0,
                 context_tokens: None,
+                context_upstream: None,
                 enabled: true,
                 position: 0,
                 voice: false,

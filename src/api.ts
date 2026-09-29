@@ -153,6 +153,8 @@ export const api = {
 
   /** Licence and credits for the cloud provider, checked locally then asked of the gateway. */
   cloudStatus: () => invoke<CloudStatus>("cloud_status"),
+  /** Fill in any context window the settings do not know yet, from the provider. */
+  syncContextWindows: () => invoke<number>("sync_context_windows"),
 
   /** Make a folder in the profile rail; pass renameTo to rename, "" to remove. */
   saveProfileFolder: (name: string, renameTo?: string | null) =>

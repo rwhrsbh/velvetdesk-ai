@@ -244,6 +244,7 @@ impl Db {
         Db::add_column(conn, "model", "images", "INTEGER NOT NULL DEFAULT 0");
         Db::add_column(conn, "model", "vision", "INTEGER NOT NULL DEFAULT 0");
         Db::add_column(conn, "tier", "max_inflight", "INTEGER NOT NULL DEFAULT 32");
+        Db::add_column(conn, "model", "context_upstream", "INTEGER");
         // A Grok subscription is a refreshable session sitting on the same
         // key row the pool already reads. Older databases have neither
         // column; an empty refresh token means "this is a pasted key".
@@ -1009,7 +1010,7 @@ impl Db {
         let mut statement = conn.prepare(
             "SELECT name, upstream_id, upstream_name, price_in, price_cached, price_out,
                     context_tokens, enabled, position, voice, price_request, routing,
-                    images, vision
+                    images, vision, context_upstream
              FROM model ORDER BY position, name",
         )?;
         let rows = statement
@@ -1027,6 +1028,7 @@ impl Db {
                     voice: row.get::<_, i64>(9)? != 0,
                     images: row.get::<_, i64>(12)? != 0,
                     vision: row.get::<_, i64>(13)? != 0,
+                    context_upstream: row.get::<_, Option<i64>>(14)?.map(|n| n as u32),
                     price_request: row.get(10)?,
                     routing: serde_json::from_str(&row.get::<_, String>(11)?).unwrap_or_default(),
                 })
@@ -1075,6 +1077,21 @@ impl Db {
                 model.images as i64,
                 model.vision as i64,
             ],
+        )?;
+        Ok(())
+    }
+
+    /// Remember what the upstream says this model's window is. Kept apart
+    /// from the typed-in number so a refresh never overwrites what an
+    /// operator set by hand.
+    pub fn set_model_context_upstream(
+        &self,
+        name: &str,
+        tokens: Option<u32>,
+    ) -> rusqlite::Result<()> {
+        self.conn.lock().execute(
+            "UPDATE model SET context_upstream = ?2 WHERE name = ?1",
+            rusqlite::params![name, tokens.map(|n| n as i64)],
         )?;
         Ok(())
     }

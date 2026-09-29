@@ -3543,6 +3543,19 @@ async function boot() {
     renderAll();
     await refreshPlanChip();
 
+    // How big the model's context really is comes from the provider, not from
+    // a guess at its name. Asked once on the way in, and only for a provider
+    // whose window is not set; the gauge redraws if anything was learnt.
+    void api
+      .syncContextWindows()
+      .then(async (filled) => {
+        if (!filled) return;
+        const settings = await api.getSettings();
+        store.settings = settings;
+        void refreshContextGauge();
+      })
+      .catch(() => {});
+
     // The free-version notice comes up with the window rather than a few
     // seconds into it: arriving late means arriving over somebody who has
     // already started working, which is the one moment it is in the way.

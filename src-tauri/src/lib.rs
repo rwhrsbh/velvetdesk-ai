@@ -261,6 +261,7 @@ pub fn run() {
             commands::get_settings,
             commands::save_settings,
             commands::cloud_status,
+            commands::sync_context_windows,
             commands::plan_state,
             commands::activate_license,
             commands::deactivate_license,
