@@ -243,6 +243,7 @@ impl Db {
         Db::add_column(conn, "model", "routing", "TEXT NOT NULL DEFAULT ''");
         Db::add_column(conn, "model", "images", "INTEGER NOT NULL DEFAULT 0");
         Db::add_column(conn, "model", "vision", "INTEGER NOT NULL DEFAULT 0");
+        Db::add_column(conn, "tier", "max_inflight", "INTEGER NOT NULL DEFAULT 32");
         // A Grok subscription is a refreshable session sitting on the same
         // key row the pool already reads. Older databases have neither
         // column; an empty refresh token means "this is a pasted key".
@@ -1113,8 +1114,8 @@ impl Db {
 
     pub fn list_tiers(&self) -> rusqlite::Result<HashMap<String, Tier>> {
         let conn = self.conn.lock();
-        let mut statement =
-            conn.prepare("SELECT name, credits_5h, credits_week, max_peers FROM tier")?;
+        let mut statement = conn
+            .prepare("SELECT name, credits_5h, credits_week, max_peers, max_inflight FROM tier")?;
         let rows = statement
             .query_map([], |row| {
                 Ok((
@@ -1123,6 +1124,7 @@ impl Db {
                         credits_5h: row.get(1)?,
                         credits_week: row.get(2)?,
                         max_peers: row.get::<_, i64>(3)? as u32,
+                        max_inflight: row.get::<_, i64>(4)? as u32,
                     },
                 ))
             })?
@@ -1132,13 +1134,20 @@ impl Db {
 
     pub fn save_tier(&self, name: &str, tier: &Tier) -> rusqlite::Result<()> {
         self.conn.lock().execute(
-            "INSERT INTO tier (name, credits_5h, credits_week, max_peers)
-             VALUES (?1, ?2, ?3, ?4)
+            "INSERT INTO tier (name, credits_5h, credits_week, max_peers, max_inflight)
+             VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT(name) DO UPDATE SET
                  credits_5h = excluded.credits_5h,
                  credits_week = excluded.credits_week,
-                 max_peers = excluded.max_peers",
-            rusqlite::params![name, tier.credits_5h, tier.credits_week, tier.max_peers],
+                 max_peers = excluded.max_peers,
+                 max_inflight = excluded.max_inflight",
+            rusqlite::params![
+                name,
+                tier.credits_5h,
+                tier.credits_week,
+                tier.max_peers,
+                tier.max_inflight
+            ],
         )?;
         Ok(())
     }

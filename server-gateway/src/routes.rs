@@ -256,10 +256,14 @@ fn authenticate(
 /// Every call that costs an upstream request passes through here, so a burst
 /// of operators becomes a queue instead of a wall of refusals from the
 /// provider behind it.
-async fn admit(state: &AppState, license_id: &str) -> Result<crate::queue::Slot, ApiError> {
+async fn admit(
+    state: &AppState,
+    license_id: &str,
+    tier: Tier,
+) -> Result<crate::queue::Slot, ApiError> {
     state
         .queue
-        .admit(license_id)
+        .admit(license_id, tier.max_inflight)
         .await
         .map_err(|rejected| ApiError::Busy {
             message: rejected.message().to_string(),
@@ -524,7 +528,7 @@ async fn chat_completions(
     }
 
     seat(&state, &caller, &headers)?;
-    let slot = admit(&state, &caller.license.license_id).await?;
+    let slot = admit(&state, &caller.license.license_id, caller.tier).await?;
 
     let request: translate::OaiRequest = serde_json::from_value(body)
         .map_err(|err| ApiError::BadRequest(format!("cannot read the request: {err}")))?;
@@ -667,7 +671,7 @@ async fn transcriptions(
         )));
     }
 
-    let _slot = admit(&state, &caller.license.license_id).await?;
+    let _slot = admit(&state, &caller.license.license_id, caller.tier).await?;
 
     use base64::Engine;
     let encoded = base64::engine::general_purpose::STANDARD.encode(&clip);
@@ -700,7 +704,7 @@ async fn gemini_generate(
     }
 
     seat(&state, &caller, &headers)?;
-    let slot = admit(&state, &caller.license.license_id).await?;
+    let slot = admit(&state, &caller.license.license_id, caller.tier).await?;
 
     // `gemini-2.5-flash:streamGenerateContent` — the model, then the verb.
     let (wanted, action) = tail

@@ -306,6 +306,7 @@ mod tests {
             credits_5h: 100.0,
             credits_week: 1_000.0,
             max_peers: 2,
+            max_inflight: 15,
         }
     }
 

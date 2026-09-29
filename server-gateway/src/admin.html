@@ -1649,6 +1649,7 @@
                 <div class="k-sub">≈ ${usd(t.credits_5h * o.credit_usd)} за окно</div>
                 <div class="k-val" style="font-size:19px;margin-top:6px">${fmt(t.credits_week)}<small> / неделя</small></div>
                 <div class="k-sub">≈ ${usd(t.credits_week * o.credit_usd)} в неделю · до ${t.max_peers} устройств</div>
+                <div class="k-sub">${t.max_inflight ?? 32} запросов одновременно</div>
               </div>`;
             })
             .join("")}</div>` : `<div class="empty">${icon("tiers", 30)}<div>Тарифов нет</div></div>`}`);
@@ -1664,13 +1665,14 @@
 
       function tierForm(name, t) {
         const edit = !!name;
-        t = t || { credits_5h: "", credits_week: "", max_peers: 2 };
+        t = t || { credits_5h: "", credits_week: "", max_peers: 2, max_inflight: 32 };
         openDrawer({ title: edit ? `Тариф «${name}»` : "Новый тариф", sub: "Лимиты в кредитах" });
         drawerBody(`<div class="d-sec"><div class="form-grid">
             <label class="field full"><span>Название</span><input id="f-tn" value="${esc(name || "")}" placeholder="business" ${edit ? "disabled" : ""} /></label>
             <label class="field"><span>Кредитов за 5 часов</span><input id="f-t5" value="${t.credits_5h}" inputmode="decimal" /><small id="f-t5s"></small></label>
             <label class="field"><span>Кредитов за неделю</span><input id="f-tw" value="${t.credits_week}" inputmode="decimal" /><small id="f-tws"></small></label>
             <label class="field"><span>Устройств</span><input id="f-tp" value="${t.max_peers}" inputmode="numeric" /></label>
+            <label class="field"><span>Запросов одновременно</span><input id="f-ti" value="${t.max_inflight ?? 32}" inputmode="numeric" /><small>Сколько вызовов к моделям лицензия держит разом; сверх этого — очередь</small></label>
           </div></div>`);
         const hint = () => {
           $("f-t5s").textContent = "≈ " + usd(num($("f-t5").value) * creditUsd) + " себестоимости";
@@ -1684,7 +1686,13 @@
           act($("f-save"), () =>
             call("/admin/tiers", {
               method: "POST",
-              body: JSON.stringify({ name: $("f-tn").value.trim(), credits_5h: num($("f-t5").value), credits_week: num($("f-tw").value), max_peers: num($("f-tp").value) || 2 }),
+              body: JSON.stringify({
+                name: $("f-tn").value.trim(),
+                credits_5h: num($("f-t5").value),
+                credits_week: num($("f-tw").value),
+                max_peers: num($("f-tp").value) || 2,
+                max_inflight: num($("f-ti").value) || 32,
+              }),
             }),
           ).then((r) => {
             if (r === undefined) return;

@@ -34,10 +34,25 @@ use parking_lot::Mutex;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 /// Defaults sized for one VPS talking to hosted providers.
-pub const DEFAULT_INFLIGHT: usize = 8;
-pub const DEFAULT_PER_LICENSE: usize = 2;
-pub const DEFAULT_QUEUED: usize = 128;
-pub const DEFAULT_WAIT_SECONDS: u64 = 45;
+///
+/// A call costs the gateway almost nothing while it runs - one outbound
+/// stream, a task, and a row written when it ends - so the old ceiling of
+/// eight was far below what the box can carry, and the cap of two per
+/// licence meant an operator sending from a dozen profiles had ten of them
+/// queueing behind two. Paid models on OpenRouter have no platform-level
+/// request cap of their own; what is left to protect is the box, and these
+/// numbers leave it plenty of room.
+pub const DEFAULT_INFLIGHT: usize = 128;
+pub const DEFAULT_PER_LICENSE: usize = 32;
+pub const DEFAULT_QUEUED: usize = 1024;
+/// How long a caller may wait for a slot.
+///
+/// Long, on purpose. A queue that gives up after a minute is not a queue: the
+/// operator gets an error for a request the gateway would have served a few
+/// seconds later. The wait ends by itself the moment the caller hangs up -
+/// the whole handler is dropped - so this ceiling only catches a client that
+/// is still holding the line after ten minutes, which no answer is worth.
+pub const DEFAULT_WAIT_SECONDS: u64 = 600;
 
 /// Why a request was not admitted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,8 +103,8 @@ impl Default for Limits {
 pub struct Queue {
     limits: Limits,
     global: Arc<Semaphore>,
-    /// One semaphore per licence, made on first sight.
-    per_license: Mutex<HashMap<String, Arc<Semaphore>>>,
+    /// One semaphore per licence, with the size it was made at.
+    per_license: Mutex<HashMap<String, (usize, Arc<Semaphore>)>>,
     /// How many requests are waiting for a slot right now.
     waiting: Arc<Semaphore>,
 }
@@ -104,12 +119,20 @@ impl Queue {
         }
     }
 
-    fn license_gate(&self, license_id: &str) -> Arc<Semaphore> {
+    /// The licence's own gate, sized by what its tier allows - and resized
+    /// when that changes, so an upgrade takes effect on the next call rather
+    /// than on the next restart.
+    fn license_gate(&self, license_id: &str, allowed: usize) -> Arc<Semaphore> {
+        let allowed = allowed.clamp(1, self.limits.inflight.max(1));
         let mut gates = self.per_license.lock();
-        gates
-            .entry(license_id.to_string())
-            .or_insert_with(|| Arc::new(Semaphore::new(self.limits.per_license.max(1))))
-            .clone()
+        match gates.get(license_id) {
+            Some((size, gate)) if *size == allowed => gate.clone(),
+            _ => {
+                let gate = Arc::new(Semaphore::new(allowed));
+                gates.insert(license_id.to_string(), (allowed, gate.clone()));
+                gate
+            }
+        }
     }
 
     /// Wait for a slot, or say why there will not be one.
@@ -117,12 +140,19 @@ impl Queue {
     /// The per-licence slot is taken first: a licence that is already running
     /// its share should wait without occupying one of the global slots, or it
     /// would block callers the gateway has room for.
-    pub async fn admit(&self, license_id: &str) -> Result<Slot, Rejected> {
+    /// `allowed` is what this licence's tier may run at once; zero means the
+    /// gateway's own per-licence default.
+    pub async fn admit(&self, license_id: &str, allowed: u32) -> Result<Slot, Rejected> {
         let Ok(_queued) = self.waiting.clone().try_acquire_owned() else {
             return Err(Rejected::Full);
         };
 
-        let gate = self.license_gate(license_id);
+        let allowed = if allowed == 0 {
+            self.limits.per_license
+        } else {
+            allowed as usize
+        };
+        let gate = self.license_gate(license_id, allowed);
         let per_license = match tokio::time::timeout(self.limits.wait, gate.acquire_owned()).await {
             Ok(Ok(permit)) => permit,
             Ok(Err(_)) => return Err(Rejected::Full),
@@ -178,12 +208,12 @@ mod tests {
             queued: 16,
             wait: Duration::from_millis(50),
         });
-        let _first = queue.admit("busy").await.unwrap();
-        let _second = queue.admit("busy").await.unwrap();
+        let _first = queue.admit("busy", 0).await.unwrap();
+        let _second = queue.admit("busy", 0).await.unwrap();
         // Its third call waits, and times out rather than hanging.
-        assert_eq!(queue.admit("busy").await.err(), Some(Rejected::TimedOut));
+        assert_eq!(queue.admit("busy", 0).await.err(), Some(Rejected::TimedOut));
         // Meanwhile everyone else is served at once.
-        assert!(queue.admit("someone-else").await.is_ok());
+        assert!(queue.admit("someone-else", 0).await.is_ok());
     }
 
     #[tokio::test]
@@ -194,11 +224,11 @@ mod tests {
             queued: 8,
             wait: Duration::from_millis(200),
         });
-        let slot = queue.admit("a").await.unwrap();
+        let slot = queue.admit("a", 0).await.unwrap();
         assert_eq!(queue.inflight(), 1);
         drop(slot);
         assert_eq!(queue.inflight(), 0);
-        assert!(queue.admit("a").await.is_ok());
+        assert!(queue.admit("a", 0).await.is_ok());
     }
 
     /// A waiting room has a size, and the caller who finds it full is told
@@ -211,22 +241,89 @@ mod tests {
             queued: 1,
             wait: Duration::from_secs(30),
         }));
-        let held = queue.admit("a").await.unwrap();
+        let held = queue.admit("a", 0).await.unwrap();
 
         // One caller waits, and takes the only place in the waiting room.
         let waiter = tokio::spawn({
             let queue = queue.clone();
-            async move { queue.admit("b").await.map(|_| ()) }
+            async move { queue.admit("b", 0).await.map(|_| ()) }
         });
         while queue.queued() == 0 {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
 
         let started = std::time::Instant::now();
-        assert_eq!(queue.admit("c").await.err(), Some(Rejected::Full));
+        assert_eq!(queue.admit("c", 0).await.err(), Some(Rejected::Full));
         assert!(started.elapsed() < Duration::from_secs(1));
 
         drop(held);
         assert!(waiter.await.unwrap().is_ok());
+    }
+
+    /// The point of a queue: a caller waits and is served when a slot frees,
+    /// instead of being told to come back.
+    #[tokio::test]
+    async fn a_waiting_caller_is_served_rather_than_refused() {
+        let queue = Arc::new(Queue::new(Limits {
+            inflight: 1,
+            per_license: 1,
+            queued: 8,
+            wait: Duration::from_secs(10),
+        }));
+        let held = queue.admit("a", 0).await.unwrap();
+        let waiter = tokio::spawn({
+            let queue = queue.clone();
+            async move { queue.admit("a", 0).await.map(|_| ()) }
+        });
+        while queue.queued() == 0 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        drop(held);
+        assert!(
+            waiter.await.unwrap().is_ok(),
+            "the slot went to the one waiting for it"
+        );
+    }
+
+    /// A licence runs what its tier allows, and a changed tier is felt on the
+    /// next call.
+    #[tokio::test]
+    async fn a_tier_decides_how_much_one_licence_runs_at_once() {
+        let queue = Queue::new(Limits {
+            inflight: 16,
+            per_license: 2,
+            queued: 16,
+            wait: Duration::from_millis(50),
+        });
+        let _a = queue.admit("team", 3).await.unwrap();
+        let _b = queue.admit("team", 3).await.unwrap();
+        let _c = queue.admit("team", 3).await.unwrap();
+        assert_eq!(queue.admit("team", 3).await.err(), Some(Rejected::TimedOut));
+        // Same licence on a smaller tier: two at a time, and the gate is
+        // rebuilt at the new size.
+        let queue = Queue::new(Limits {
+            inflight: 16,
+            per_license: 32,
+            queued: 16,
+            wait: Duration::from_millis(50),
+        });
+        let _first = queue.admit("solo", 1).await.unwrap();
+        assert_eq!(queue.admit("solo", 1).await.err(), Some(Rejected::TimedOut));
+        assert!(
+            queue.admit("solo", 5).await.is_ok(),
+            "an upgrade is felt at once"
+        );
+    }
+
+    /// The shipped numbers, so raising them is a deliberate edit and not a
+    /// typo: the gateway carries a crowd, and one licence carries a batch.
+    #[test]
+    fn the_defaults_fit_a_room_full_of_operators() {
+        let limits = Limits::default();
+        assert_eq!(limits.inflight, 128);
+        assert_eq!(limits.per_license, 32);
+        assert_eq!(limits.queued, 1024);
+        assert_eq!(limits.wait, Duration::from_secs(600));
     }
 }

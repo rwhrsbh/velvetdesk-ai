@@ -150,6 +150,14 @@ pub struct Tier {
     pub credits_week: f64,
     #[serde(default = "default_peers")]
     pub max_peers: u32,
+    /// Calls this licence may have running at once.
+    ///
+    /// A solo operator sends from a handful of profiles; a team sends from a
+    /// room full of them, and should not queue behind itself. The gateway's
+    /// own ceiling still applies on top: this is a share of it, not a promise
+    /// above it.
+    #[serde(default = "default_tier_inflight")]
+    pub max_inflight: u32,
 }
 
 impl Default for Tier {
@@ -158,6 +166,7 @@ impl Default for Tier {
             credits_5h: 1_000.0,
             credits_week: 20_000.0,
             max_peers: 2,
+            max_inflight: default_tier_inflight(),
         }
     }
 }
@@ -215,6 +224,12 @@ fn default_queue_wait() -> u64 {
 
 fn default_peers() -> u32 {
     2
+}
+
+/// What a tier allows at once when nobody has said: the per-licence ceiling
+/// the gateway would have applied anyway.
+fn default_tier_inflight() -> u32 {
+    crate::queue::DEFAULT_PER_LICENSE as u32
 }
 
 impl Upstream {
@@ -291,6 +306,7 @@ impl GatewayConfig {
                         credits_5h: 400.0,
                         credits_week: 1_500.0,
                         max_peers: 2,
+                        max_inflight: 15,
                     },
                 ),
                 (
@@ -299,6 +315,7 @@ impl GatewayConfig {
                         credits_5h: 5_000.0,
                         credits_week: 20_000.0,
                         max_peers: 10,
+                        max_inflight: 128,
                     },
                 ),
             ]),
@@ -337,6 +354,26 @@ impl GatewayConfig {
             if !key.trim().is_empty() {
                 self.nowpayments_key = key.trim().to_string();
             }
+        }
+        // Admission control, tunable without rebuilding a config file: a
+        // gateway that is queueing badly is tuned at two in the morning.
+        let number = |name: &str| {
+            std::env::var(name)
+                .ok()
+                .and_then(|value| value.trim().parse::<usize>().ok())
+                .filter(|value| *value > 0)
+        };
+        if let Some(value) = number("VD_MAX_INFLIGHT") {
+            self.max_inflight = value;
+        }
+        if let Some(value) = number("VD_MAX_PER_LICENSE") {
+            self.max_per_license = value;
+        }
+        if let Some(value) = number("VD_MAX_QUEUED") {
+            self.max_queued = value;
+        }
+        if let Some(value) = number("VD_QUEUE_WAIT_SECONDS") {
+            self.queue_wait_seconds = value as u64;
         }
         if let Ok(url) = std::env::var("VD_PUBLIC_URL") {
             if !url.trim().is_empty() {
